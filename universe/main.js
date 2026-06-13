@@ -8,6 +8,10 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 
+// display font for in-world star/system labels; falls back to mono until the webfont lands
+const LABEL_FONT = `"Space Grotesk", ui-monospace, monospace`;
+if (document.fonts?.load) document.fonts.load('600 44px "Space Grotesk"').catch(() => {});
+
 // ---------- Kenney models (CC0, kenney.nl — Space Kit + Nature Kit) ----------
 const ASSETS = {};
 const ASSET_BOX = {}; // bounding box per model, so we can height-normalize across species
@@ -336,20 +340,30 @@ for (const [key, sys] of Object.entries(SYSTEMS)) {
   if (key !== "misc") makeStar(sys, sys.title);
 }
 
+const _labelTextures = [];
 function label(text, y, color = 0xe4e4e7) {
   const c = document.createElement("canvas");
   c.width = 512; c.height = 96;
   const ctx = c.getContext("2d");
-  ctx.font = "600 44px ui-monospace, monospace";
-  ctx.textAlign = "center";
-  ctx.shadowColor = "rgba(0,0,0,.9)"; ctx.shadowBlur = 12;
-  ctx.fillStyle = `#${new THREE.Color(color).getHexString()}`;
-  ctx.fillText(text, 256, 60);
-  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), transparent: true, depthWrite: false }));
+  const tex = new THREE.CanvasTexture(c);
+  const draw = () => {
+    ctx.clearRect(0, 0, c.width, c.height);
+    ctx.font = `600 44px ${LABEL_FONT}`;
+    ctx.textAlign = "center";
+    ctx.shadowColor = "rgba(0,0,0,.9)"; ctx.shadowBlur = 12;
+    ctx.fillStyle = `#${new THREE.Color(color).getHexString()}`;
+    ctx.fillText(text, 256, 60);
+    tex.needsUpdate = true;
+  };
+  draw();
+  _labelTextures.push(draw);
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false }));
   sprite.scale.set(26, 4.9, 1);
   sprite.position.y = y;
   return sprite;
 }
+// once the display webfont lands, repaint any labels drawn with the mono fallback
+document.fonts?.ready?.then(() => { for (const draw of _labelTextures) draw(); });
 
 // ---------- atmosphere + ocean shaders ----------
 function atmosphere(radius, colorHex) {
@@ -1207,7 +1221,7 @@ let rosterDirty = true, lastRoster = 0;
 const rosterStyle = document.createElement("style");
 rosterStyle.textContent = `
   #roster { position:absolute; top:14px; right:14px; width:196px; background:rgba(16,16,18,.78); border:1px solid #3f3f46; border-radius:10px; padding:8px 10px; pointer-events:auto; font:11px ui-monospace,monospace; }
-  #roster h4 { margin:0 0 6px; color:#71717a; font-size:10px; letter-spacing:.1em; text-transform:uppercase; font-weight:700; }
+  #roster h4 { margin:0 0 6px; color:#71717a; font-family:"Space Grotesk",ui-sans-serif,sans-serif; font-size:10px; letter-spacing:.2em; text-transform:uppercase; font-weight:700; }
   #roster .row { display:flex; align-items:center; gap:7px; padding:3px 0; cursor:pointer; }
   #roster .row:hover .who { color:#fff; }
   #roster .dot { width:9px; height:9px; border-radius:50%; flex:none; box-shadow:0 0 6px currentColor; }
@@ -1270,7 +1284,7 @@ function updateCompass(forward) {
 const navStyle = document.createElement("style");
 navStyle.textContent = `
   #systems { position: absolute; top: 44px; left: 14px; display: flex; flex-direction: column; gap: 6px; pointer-events: auto; }
-  #systems button { text-align: left; font: 600 11px ui-monospace, monospace; background: rgba(16,16,18,.8); border: 1px solid #3f3f46; color: #a1a1aa; border-radius: 8px; padding: 6px 10px; cursor: pointer; }
+  #systems button { text-align: left; font: 600 11px "Space Grotesk", ui-sans-serif, sans-serif; letter-spacing: .04em; background: rgba(16,16,18,.8); border: 1px solid #3f3f46; color: #a1a1aa; border-radius: 8px; padding: 6px 10px; cursor: pointer; }
   #systems button:hover { border-color: currentColor; }
   .navArrow { position: absolute; font: 700 11px ui-monospace, monospace; pointer-events: auto; cursor: pointer; white-space: nowrap; text-shadow: 0 0 8px #000; }
 `;

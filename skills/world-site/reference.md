@@ -164,7 +164,7 @@ sites.subscribe(ev => addPlanet(ev.doc));                   // a fresh deploy po
 
 ### 9. The universe pattern (a 3D site on pure worlds.js)
 
-`examples/universe/` is the flagship dogfood — a Three.js space sim that is **just a Worlds
+`universe/` is the flagship dogfood — a Three.js space sim that is **just a Worlds
 site** (deploy it with `worlds deploy` like any other). It uses only public APIs:
 
 - `worlds.db.site("home").collection("sites").subscribe(...)` → a planet per deployed site, live.

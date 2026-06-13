@@ -14,13 +14,13 @@ COPY sdk ./sdk
 RUN bun run build:sdk
 
 # server + served assets. The universe ships so first boot can seed it as the
-# initial world (server/seed.ts); other examples are not baked in.
+# initial world (server/seed.ts).
 COPY server ./server
 COPY homepage ./homepage
 COPY docs ./docs
 COPY spec ./spec
 COPY tutorial ./tutorial
-COPY examples/universe ./examples/universe
+COPY universe ./universe
 
 ENV WORLDS_PORT=8420 \
     WORLDS_DATA_DIR=/data

@@ -4,8 +4,13 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
 <title>the universe</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" />
 <style>
   * { box-sizing: border-box; }
+  :root { --display: "Space Grotesk", ui-sans-serif, system-ui, sans-serif; }
   body { margin: 0; background: #050507; color: #e4e4e7; font: 13px/1.5 ui-monospace, monospace; overflow: hidden; }
   canvas { display: block; touch-action: none; }
   /* no long-press text selection / callout on controls (iOS) */
@@ -17,11 +22,11 @@
   #joystick #stick { position: absolute; left: 50%; top: 50%; width: 70px; height: 70px; margin: -35px 0 0 -35px; border-radius: 50%; background: rgba(229,160,13,.85); box-shadow: 0 0 22px rgba(229,160,13,.55); transition: transform .05s linear; }
   #joystick::after { content: "DRIVE"; position: absolute; bottom: 8px; left: 0; right: 0; text-align: center; font: 700 10px ui-monospace, monospace; color: rgba(229,160,13,.65); letter-spacing: .12em; }
   #top { position: absolute; top: 12px; left: 14px; display: flex; gap: 14px; align-items: baseline; }
-  #top b { color: #e5a00d; font-size: 15px; letter-spacing: .06em; }
+  #top b { color: #e5a00d; font-family: var(--display); font-weight: 700; font-size: 16px; letter-spacing: .14em; text-transform: lowercase; }
   #top span { color: #71717a; font-size: 11px; }
   #hint { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%); color: #71717a; font-size: 11px; text-align: center; }
   #card { position: absolute; right: 14px; top: 188px; width: 250px; background: rgba(16,16,18,.92); border: 1px solid #3f3f46; border-radius: 12px; padding: 14px; pointer-events: auto; display: none; }
-  #card b { color: #e5a00d; font-size: 13px; display: block; }
+  #card b { color: #e5a00d; font-family: var(--display); font-weight: 700; font-size: 15px; letter-spacing: .02em; display: block; }
   #card p { color: #a1a1aa; margin: 6px 0 10px; font-size: 12px; }
   #card .meta { color: #71717a; font-size: 11px; margin-bottom: 10px; }
   #card a { display: inline-block; background: #e5a00d; color: #101012; font-weight: 700; border-radius: 999px; padding: 6px 14px; text-decoration: none; font-size: 12px; }
@@ -32,7 +37,7 @@
   /* AI navigator */
   #ask { position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%); pointer-events: auto; display: flex; gap: 6px; align-items: center; background: rgba(16,16,18,.82); border: 1px solid #3f3f46; border-radius: 999px; padding: 5px 6px 5px 14px; width: min(440px, 84vw); }
   #ask input { flex: 1; background: none; border: none; outline: none; color: #e4e4e7; font: 12px ui-monospace, monospace; }
-  #ask input::placeholder { color: #71717a; }
+  #ask input::placeholder { color: #71717a; font-family: var(--display); font-weight: 500; letter-spacing: .03em; opacity: 1; }
   #ask button { flex: none; background: #e5a00d; color: #101012; border: none; border-radius: 999px; width: 30px; height: 30px; font-size: 14px; cursor: pointer; }
   #ask #chatToggle { background: #3f3f46; }
   #ask .think { width: 30px; height: 30px; display: grid; place-items: center; color: #e5a00d; }
@@ -66,14 +71,64 @@
   .bubble b { color: #7dd3fc; margin-right: 5px; }
 
   /* cinematic cold open */
-  #intro { position: fixed; inset: 0; background: #050507; display: grid; place-items: center; z-index: 20; transition: opacity 1s ease; }
-  #intro .word { font: 800 clamp(48px, 13vw, 150px) ui-monospace, monospace; letter-spacing: .3em; color: #fff; text-shadow: 0 0 40px #e5a00d, 0 0 80px #e5a00d88; opacity: 0; transform: scale(.8); }
-  #intro .sub { position: absolute; bottom: 22%; color: #a1a1aa; font: 12px ui-monospace, monospace; letter-spacing: .25em; opacity: 0; }
-  #intro.go .word { animation: wordIn 2.2s cubic-bezier(.2,.7,.2,1) forwards; }
-  #intro.go .sub { animation: subIn 1s ease 1.4s forwards; }
-  @keyframes wordIn { 0% { opacity: 0; transform: scale(.8); letter-spacing: .6em; } 40% { opacity: 1; } 100% { opacity: 1; transform: scale(1); letter-spacing: .3em; } }
+  #intro { position: fixed; inset: 0; background:
+      radial-gradient(120% 90% at 50% 42%, rgba(229,160,13,.10), transparent 55%),
+      radial-gradient(140% 120% at 50% 120%, rgba(124,114,255,.10), transparent 60%),
+      #050507;
+    display: grid; place-items: center; z-index: 20; transition: opacity 1.1s ease; overflow: hidden; }
+  /* slow drifting starfield wash so the void feels alive behind the title */
+  #intro::before { content: ""; position: absolute; inset: -20%; opacity: 0; background-repeat: repeat;
+    background-image:
+      radial-gradient(1.4px 1.4px at 20% 30%, #fff8, transparent),
+      radial-gradient(1.2px 1.2px at 75% 60%, #fff6, transparent),
+      radial-gradient(1.6px 1.6px at 45% 80%, #e5a00daa, transparent),
+      radial-gradient(1px 1px at 60% 18%, #fff5, transparent),
+      radial-gradient(1.2px 1.2px at 12% 70%, #cfe8ffaa, transparent);
+    background-size: 340px 340px, 280px 280px, 420px 420px, 220px 220px, 360px 360px; }
+  #intro.go::before { animation: introStars 18s linear forwards, introHaze 1.4s ease .15s forwards; }
+  @keyframes introStars { to { transform: translate3d(-60px, -40px, 0); } }
+  @keyframes introHaze { to { opacity: .5; } }
+
+  #intro .stage { position: relative; display: grid; place-items: center; text-align: center; padding: 0 6vw; }
+  #intro .eyebrow { font-family: var(--display); font-weight: 600; font-size: clamp(10px, 1.5vw, 13px);
+    letter-spacing: .62em; text-transform: uppercase; color: #e5a00d; margin-bottom: clamp(16px, 3vw, 30px);
+    opacity: 0; transform: translateY(6px); text-shadow: 0 0 18px rgba(229,160,13,.55); }
+  #intro .word { font-family: var(--display); font-weight: 700; font-size: clamp(52px, 14vw, 168px); line-height: .94;
+    letter-spacing: .42em; color: #fff; opacity: 0; transform: scale(.9);
+    text-shadow: 0 0 36px rgba(229,160,13,.9), 0 0 90px rgba(229,160,13,.5), 0 0 140px rgba(124,114,255,.35); }
+  /* hairline sweep that wipes across the title as it settles */
+  #intro .word::after { content: ""; position: absolute; left: -10%; right: -10%; top: 50%; height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(229,160,13,.0), rgba(229,160,13,.85), rgba(229,160,13,0), transparent);
+    transform: translateY(-50%) scaleX(0); opacity: 0; }
+  #intro .tagline { font-family: var(--display); font-weight: 500; font-size: clamp(12px, 2vw, 17px);
+    letter-spacing: .22em; color: #d4d4d8; margin-top: clamp(18px, 3vw, 30px); opacity: 0; transform: translateY(8px); }
+  #intro .sub { position: absolute; bottom: clamp(40px, 12vh, 120px); left: 0; right: 0; text-align: center;
+    color: #71717a; font: 11px var(--display); letter-spacing: .42em; text-transform: uppercase; opacity: 0; }
+  #intro .sub .dot { color: #e5a00d; animation: introBlink 1.1s steps(1) infinite; }
+  @keyframes introBlink { 50% { opacity: .25; } }
+
+  #intro.go .eyebrow { animation: introEyebrow 1s cubic-bezier(.2,.7,.2,1) .15s forwards; }
+  #intro.go .word { animation: wordIn 2.4s cubic-bezier(.16,.84,.24,1) .35s forwards; }
+  #intro.go .word::after { animation: introSweep 1.1s cubic-bezier(.4,0,.1,1) 1.15s forwards; }
+  #intro.go .tagline { animation: introTag 1.1s cubic-bezier(.2,.7,.2,1) 1.5s forwards; }
+  #intro.go .sub { animation: subIn 1s ease 2s forwards; }
+  @keyframes introEyebrow { to { opacity: 1; transform: translateY(0); } }
+  @keyframes wordIn {
+    0%   { opacity: 0; transform: scale(.9); letter-spacing: 1.1em; filter: blur(8px); }
+    45%  { opacity: 1; filter: blur(0); }
+    100% { opacity: 1; transform: scale(1); letter-spacing: .42em; filter: blur(0); } }
+  @keyframes introSweep {
+    0%   { opacity: 0; transform: translateY(-50%) scaleX(0); }
+    35%  { opacity: 1; }
+    100% { opacity: 0; transform: translateY(-50%) scaleX(1); } }
+  @keyframes introTag { to { opacity: 1; transform: translateY(0); } }
   @keyframes subIn { to { opacity: 1; } }
   #intro.done { opacity: 0; pointer-events: none; }
+  @media (prefers-reduced-motion: reduce) {
+    #intro.go::before { animation: introHaze 1.4s ease forwards; }
+    #intro.go .eyebrow, #intro.go .word, #intro.go .tagline, #intro.go .sub { animation: subIn .5s ease forwards; }
+    #intro .word { letter-spacing: .42em; transform: none; filter: none; }
+  }
 
   /* ---------- mobile layout ---------- */
   @media (max-width: 680px) {
@@ -132,7 +187,14 @@
   <div id="joystick"><div id="stick"></div></div>
 </div>
 <div id="flash"></div>
-<div id="intro"><div class="word">WORLDS</div><div class="sub">a universe of everything we build · entering…</div></div>
+<div id="intro">
+  <div class="stage">
+    <div class="eyebrow">welcome to the</div>
+    <div class="word">WORLDS</div>
+    <div class="tagline">every world we build · one sky</div>
+  </div>
+  <div class="sub">drift in <span class="dot">·</span> press anything to take the helm</div>
+</div>
 <script src="/worlds.js"></script>
 <script type="module" src="./main.js"></script>
 </body>

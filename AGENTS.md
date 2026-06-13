@@ -36,7 +36,7 @@ inventing method names.
 - **Stack**: Bun + TypeScript, no runtime npm deps. `server/` (one module per concern,
   `BlobStore` abstracts the cloud), `sdk/src/` (modular → `bun run build:sdk` → the single
   served `sdk/worlds.js`; never hand-edit `sdk/worlds.js`), `cli/`, `homepage/`,
-  `examples/universe/` (the flagship 3D dogfood — a Worlds site, not part of the image).
+  `universe/` (the flagship 3D dogfood — a Worlds site, not part of the image).
 - **Before committing**: `bunx tsc --noEmit` (typecheck) + `bun test` (e2e — needs `bun run db:up`).
 - **The contract is frozen.** Anything under `/api/v1` and the `worlds.js` surface is
   additive-only: new optional fields, new endpoints, new error codes for new failure modes —

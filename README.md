@@ -29,7 +29,7 @@ await worlds.notify.slack("#data", "dashboard is red");
 ```
 
 The homepage ships as a **3D universe** — every site is a planet you can fly through.
-It's just a Worlds site built on the public SDK (`examples/universe/`).
+It's just a Worlds site built on the public SDK (`universe/`).
 
 ## Quick start (self-host)
 
@@ -84,7 +84,7 @@ sdk/src/       worlds.js SDK source (modular TS) — `bun run build:sdk` → sdk
 cli/           the `worlds` CLI (login / init / deploy / open / list)
 homepage/      the /list + 3D universe homepage (itself a Worlds site)
 tutorial/      the hello.world tutorial (served at the `hello` host)
-examples/universe/  the flagship 3D "universe" — seeded as the first world
+universe/  the flagship 3D "universe" — seeded as the first world
 docs/          user docs (served at /docs, /llms.txt)
 spec/          world-v1.yaml — the frozen API contract
 skills/        an agent skill so Claude can build + deploy Worlds sites
