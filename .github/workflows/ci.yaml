@@ -36,8 +36,8 @@ jobs:
       - name: build SDK artifact
         run: bun run build:sdk
 
-      - name: verify sdk/world.js is in sync with sdk/src
-        run: git diff --exit-code sdk/world.js
+      - name: verify sdk/worlds.js is in sync with sdk/src
+        run: git diff --exit-code sdk/worlds.js
 
       - name: typecheck
         run: bunx tsc --noEmit

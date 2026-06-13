@@ -1,14 +1,14 @@
-/* world.js v1 — GENERATED from sdk/src/ by 'bun run build:sdk'. Do not edit by hand. */
+/* worlds.js v1 — GENERATED from sdk/src/ by 'bun run build:sdk'. Do not edit by hand. */
 (() => {
 
   // sdk/src/error.ts
-  class WorldError extends Error {
+  class WorldsError extends Error {
     code;
     status;
     retry_after;
     constructor(code, message, status = 0, retryAfter) {
       super(message);
-      this.name = "WorldError";
+      this.name = "WorldsError";
       this.code = code;
       this.status = status;
       this.retry_after = retryAfter;
@@ -16,7 +16,7 @@
   }
 
   // sdk/src/http.ts
-  var HEADERS = { "x-world-csrf": "1" };
+  var HEADERS = { "x-worlds-csrf": "1" };
   async function call(method, path, body, opts = {}) {
     const init = { method, headers: { ...HEADERS, ...opts.headers ?? {} } };
     if (body instanceof FormData) {
@@ -29,18 +29,18 @@
     try {
       res = await fetch(path, init);
     } catch (e) {
-      throw new WorldError("internal", `network error: ${e.message}`, 0);
+      throw new WorldsError("internal", `network error: ${e.message}`, 0);
     }
     if (res.status === 401) {
       location.assign(`/auth/login?rd=${encodeURIComponent(location.href)}`);
-      throw new WorldError("unauthorized", "session expired, redirecting", 401);
+      throw new WorldsError("unauthorized", "session expired, redirecting", 401);
     }
     if (res.status === 204)
       return null;
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       const err = data && data.error || {};
-      throw new WorldError(err.code || "internal", err.message || res.statusText, res.status, err.retry_after);
+      throw new WorldsError(err.code || "internal", err.message || res.statusText, res.status, err.retry_after);
     }
     return data;
   }
@@ -56,7 +56,7 @@
       if (this.ws && (this.ws.readyState === 0 || this.ws.readyState === 1))
         return;
       const proto = location.protocol === "https:" ? "wss:" : "ws:";
-      this.ws = new WebSocket(`${proto}//${location.host}/api/v1/socket`, "world.v1");
+      this.ws = new WebSocket(`${proto}//${location.host}/api/v1/socket`, "worlds.v1");
       this.ws.onopen = () => {
         this.backoff = 1000;
         for (const [id, sub] of this.subs) {
@@ -123,7 +123,7 @@
     const base = `/api/v1/db/${encodeURIComponent(name)}`;
     const siteQ = otherSite ? `site=${encodeURIComponent(otherSite)}` : "";
     const withSite = (path) => siteQ ? `${path}${path.includes("?") ? "&" : "?"}${siteQ}` : path;
-    const readOnly = () => Promise.reject(new WorldError("invalid_request", "cross-world access is read-only", 400));
+    const readOnly = () => Promise.reject(new WorldsError("invalid_request", "cross-world access is read-only", 400));
     return {
       create: (data) => otherSite ? readOnly() : call("POST", base, data),
       get: (id) => call("GET", withSite(`${base}/${encodeURIComponent(id)}`)),
@@ -173,17 +173,17 @@
     const { onToken, ...body } = opts;
     const res = await fetch("/api/v1/ai/complete", {
       method: "POST",
-      headers: { "x-world-csrf": "1", "content-type": "application/json" },
+      headers: { "x-worlds-csrf": "1", "content-type": "application/json" },
       body: JSON.stringify(body)
     });
     if (res.status === 401) {
       location.assign(`/auth/login?rd=${encodeURIComponent(location.href)}`);
-      throw new WorldError("unauthorized", "session expired, redirecting", 401);
+      throw new WorldsError("unauthorized", "session expired, redirecting", 401);
     }
     if (!res.ok || !res.body) {
       const data = await res.json().catch(() => ({}));
       const err = data && data.error || {};
-      throw new WorldError(err.code || "internal", err.message || res.statusText, res.status, err.retry_after);
+      throw new WorldsError(err.code || "internal", err.message || res.statusText, res.status, err.retry_after);
     }
     const reader = res.body.getReader();
     const dec = new TextDecoder;
@@ -248,8 +248,8 @@
   };
 
   // sdk/src/index.ts
-  var world = {
-    WorldError,
+  var worlds = {
+    WorldsError,
     site: { name: null, url: null },
     me: () => call("GET", "/api/v1/me"),
     db: {
@@ -261,15 +261,15 @@
     ws,
     notify
   };
-  world.ready = call("GET", "/api/v1/site").then((s) => {
-    world.site = s;
+  worlds.ready = call("GET", "/api/v1/site").then((s) => {
+    worlds.site = s;
     return s;
-  }).catch(() => world.site);
+  }).catch(() => worlds.site);
   try {
     const site = location.hostname.split(".")[0];
-    if (navigator.sendBeacon && site && site !== "world") {
+    if (navigator.sendBeacon && site && site !== "worlds") {
       navigator.sendBeacon("/api/v1/beacon/visit", new Blob([JSON.stringify({ site })], { type: "application/json" }));
     }
   } catch {}
-  globalThis.world = world;
+  globalThis.worlds = worlds;
 })();

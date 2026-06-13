@@ -1,5 +1,5 @@
 import { config } from "./config";
-import { WorldError } from "./errors";
+import { WorldsError } from "./errors";
 import { sessionFrom } from "./auth";
 
 export interface Identity {
@@ -42,18 +42,18 @@ export function identityFrom(req: Request): Identity {
       const email = req.headers.get(h);
       if (email) return mk(email);
     }
-    throw new WorldError("unauthorized", "no verified identity on request");
+    throw new WorldsError("unauthorized", "no verified identity on request");
   }
 
   // google: our signed session cookie carries the verified Google identity.
   const s = sessionFrom(req);
-  if (!s) throw new WorldError("unauthorized", "sign in required");
+  if (!s) throw new WorldsError("unauthorized", "sign in required");
   return mk(s.email, s.name, s.picture);
 }
 
 export function requireCsrf(req: Request): void {
   // Custom header forces a CORS preflight; same-origin only by design.
-  if (!req.headers.get("x-world-csrf") && !req.headers.get("authorization")) {
-    throw new WorldError("invalid_request", "missing X-World-Csrf header");
+  if (!req.headers.get("x-worlds-csrf") && !req.headers.get("authorization")) {
+    throw new WorldsError("invalid_request", "missing X-Worlds-Csrf header");
   }
 }

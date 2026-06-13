@@ -1,15 +1,15 @@
 {
-  "name": "world",
+  "name": "worlds",
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "WORLD_DEV=1 bun --watch server/index.ts",
+    "dev": "WORLDS_DEV=1 bun --watch server/index.ts",
     "start": "bun server/index.ts",
     "test": "bun test",
     "db:up": "docker compose up -d postgres",
     "db:down": "docker compose down",
-    "build:sdk": "bun build sdk/src/index.ts --outfile sdk/world.js --format iife --banner \"/* world.js v1 — GENERATED from sdk/src/ by 'bun run build:sdk'. Do not edit by hand. */\"",
-    "cli:build": "bun build --compile cli/world.ts --outfile bin/world"
+    "build:sdk": "bun build sdk/src/index.ts --outfile sdk/worlds.js --format iife --banner \"/* worlds.js v1 — GENERATED from sdk/src/ by 'bun run build:sdk'. Do not edit by hand. */\"",
+    "cli:build": "bun build --compile cli/worlds.ts --outfile bin/worlds"
   },
   "devDependencies": {
     "bun-types": "^1.3.14"

@@ -20,7 +20,7 @@ export const sock = {
   open(): void {
     if (this.ws && (this.ws.readyState === 0 || this.ws.readyState === 1)) return;
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
-    this.ws = new WebSocket(`${proto}//${location.host}/api/v1/socket`, "world.v1");
+    this.ws = new WebSocket(`${proto}//${location.host}/api/v1/socket`, "worlds.v1");
     this.ws.onopen = () => {
       this.backoff = 1000;
       for (const [id, sub] of this.subs) {

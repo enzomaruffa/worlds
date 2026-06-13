@@ -4,13 +4,13 @@ export type ErrorCode =
   | "quota_exceeded" | "invalid_request" | "reserved_name" | "conflict"
   | "replay_expired" | "maintenance" | "upstream_error" | "internal";
 
-export class WorldError extends Error {
+export class WorldsError extends Error {
   code: ErrorCode;
   status: number;
   retry_after?: number;
   constructor(code: ErrorCode, message: string, status = 0, retryAfter?: number) {
     super(message);
-    this.name = "WorldError";
+    this.name = "WorldsError";
     this.code = code;
     this.status = status;
     this.retry_after = retryAfter;

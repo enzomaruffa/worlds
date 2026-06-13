@@ -1,8 +1,8 @@
-# World v1 API contract — the single source of truth (docs/PLAN.md, Draft B).
+# Worlds v1 API contract — the single source of truth (docs/PLAN.md, Draft B).
 # Frozen at launch: additive-only evolution, enforced by oasdiff + golden corpus in CI.
 openapi: "3.1.0"
 info:
-  title: World API
+  title: Worlds API
   version: "1"
 paths:
   /api/v1/me: { get: { summary: caller identity } }
@@ -21,7 +21,7 @@ paths:
     put: { summary: replace }
     delete: { summary: delete (idempotent) }
   /api/v1/db/{collection}/{id}/increment: { post: { summary: atomic counter } }
-  /api/v1/socket: { get: { summary: multiplexed WebSocket (db subs + channels), subprotocol world.v1 } }
+  /api/v1/socket: { get: { summary: multiplexed WebSocket (db subs + channels), subprotocol worlds.v1 } }
   /api/v1/ai/complete: { post: { summary: Gemini completion (model aliases only) } }
   /api/v1/ai/embed: { post: { summary: embedding } }
   /api/v1/ai/image: { post: { summary: image -> stored upload } }

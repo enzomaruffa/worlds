@@ -1,6 +1,6 @@
 import { SQL } from "bun";
 import { config } from "./config";
-import { WorldError } from "./errors";
+import { WorldsError } from "./errors";
 
 export const sql = new SQL(config.databaseUrl, { max: 10, idleTimeout: 30 });
 
@@ -11,7 +11,7 @@ export function dbReady(): boolean {
 }
 
 export function requireDb(): void {
-  if (!ready) throw new WorldError("maintenance", "database unavailable — run `bun run db:up`");
+  if (!ready) throw new WorldsError("maintenance", "database unavailable — run `bun run db:up`");
 }
 
 export async function initDb(): Promise<void> {

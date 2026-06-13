@@ -1,7 +1,7 @@
 import { sql, requireDb, dbReady, emitChange } from "./db";
 import type { Identity } from "./identity";
 import { config } from "./config";
-import { WorldError } from "./errors";
+import { WorldsError } from "./errors";
 
 export interface SiteRow {
   name: string;
@@ -102,7 +102,7 @@ export async function getSite(name: string): Promise<SiteRow | null> {
 export async function getSiteOr404(name: string): Promise<SiteRow> {
   requireDb();
   const s = await getSite(name);
-  if (!s) throw new WorldError("not_found", `no site named "${name}"`);
+  if (!s) throw new WorldsError("not_found", `no site named "${name}"`);
   return s;
 }
 

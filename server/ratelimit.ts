@@ -1,5 +1,5 @@
 import { LIMITS } from "./config";
-import { WorldError } from "./errors";
+import { WorldsError } from "./errors";
 
 // In-memory sliding windows. Single-pod for now; these protect cost, not security.
 const windows = new Map<string, number[]>();
@@ -10,7 +10,7 @@ function take(key: string, max: number, windowMs: number): void {
   const hits = (windows.get(key) ?? []).filter((t) => now - t < windowMs);
   if (hits.length >= max) {
     const retry = Math.ceil((windowMs - (now - hits[0]!)) / 1000);
-    throw new WorldError("rate_limited", "rate limit exceeded", retry);
+    throw new WorldsError("rate_limited", "rate limit exceeded", retry);
   }
   hits.push(now);
   windows.set(key, hits);
@@ -31,7 +31,7 @@ export function takeQuota(kind: "ai" | "ai_image" | "slack", user: string): void
   const now = Date.now();
   const key = `${kind}:${user}`;
   const hits = (windows.get(key) ?? []).filter((t) => now - t < DAY);
-  if (hits.length >= max) throw new WorldError("quota_exceeded", `daily ${kind} quota reached`, secondsToMidnightUTC());
+  if (hits.length >= max) throw new WorldsError("quota_exceeded", `daily ${kind} quota reached`, secondsToMidnightUTC());
   hits.push(now);
   windows.set(key, hits);
 }

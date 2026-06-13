@@ -18,8 +18,8 @@ let dataDir: string;
 
 function req(method: string, path: string, opts: { body?: unknown; form?: FormData; site?: string; headers?: Record<string, string> } = {}) {
   const headers: Record<string, string> = {
-    host: `${opts.site ?? S1}.world.localhost`,
-    "x-world-csrf": "1",
+    host: `${opts.site ?? S1}.worlds.localhost`,
+    "x-worlds-csrf": "1",
     ...(opts.headers ?? {}),
   };
   let body: BodyInit | undefined = opts.form;
@@ -51,7 +51,7 @@ beforeAll(async () => {
   dataDir = await mkdtemp(join(tmpdir(), "world-data-"));
   proc = Bun.spawn(["bun", "server/index.ts"], {
     cwd: new URL("..", import.meta.url).pathname,
-    env: { ...process.env, WORLD_PORT: String(PORT), WORLD_DATA_DIR: dataDir, WORLD_DEV: "1", WORLD_DISABLE_WORKERS: "1", WORLD_SEED: "0" },
+    env: { ...process.env, WORLDS_PORT: String(PORT), WORLDS_DATA_DIR: dataDir, WORLDS_DEV: "1", WORLDS_DISABLE_WORKERS: "1", WORLDS_SEED: "0" },
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -127,14 +127,14 @@ describe("identity", () => {
   test("mutations without csrf header are rejected", async () => {
     const res = await fetch(`${BASE}/api/v1/db/posts`, {
       method: "POST",
-      headers: { host: "t1.world.localhost", "content-type": "application/json" },
+      headers: { host: "t1.worlds.localhost", "content-type": "application/json" },
       body: "{}",
     });
     expect((await res.json()).error.code).toBe("invalid_request");
   });
 });
 
-describe("world.db", () => {
+describe("worlds.db", () => {
   test("crud round-trip with envelope shape", async () => {
     const created = await (await req("POST", "/api/v1/db/posts", { body: { title: "hi", votes: 0 } })).json();
     expect(created.id).toStartWith("doc_");
@@ -256,9 +256,9 @@ describe("platform surfaces", () => {
   });
 
   test("loaders are served with the contract cache headers", async () => {
-    const evergreen = await req("GET", "/world.js", { site: "home" });
+    const evergreen = await req("GET", "/worlds.js", { site: "home" });
     expect(evergreen.headers.get("cache-control")).toBe("max-age=300");
-    const pinned = await req("GET", "/v1/world.js", { site: "home" });
+    const pinned = await req("GET", "/v1/worlds.js", { site: "home" });
     expect(pinned.headers.get("cache-control")).toContain("immutable");
   });
 
@@ -270,7 +270,7 @@ describe("platform surfaces", () => {
 
 describe("realtime", () => {
   test("db subscription receives create events over the socket", async () => {
-    const ws = new WebSocket(`ws://localhost:${PORT}/api/v1/socket`, "world.v1");
+    const ws = new WebSocket(`ws://localhost:${PORT}/api/v1/socket`, "worlds.v1");
     const got: Record<string, unknown>[] = [];
     await new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error("no event within 3s")), 3000);
@@ -296,8 +296,8 @@ describe("realtime", () => {
   });
 
   test("channel pub/sub with presence and sender stamp", async () => {
-    const a = new WebSocket(`ws://localhost:${PORT}/api/v1/socket`, "world.v1");
-    const b = new WebSocket(`ws://localhost:${PORT}/api/v1/socket`, "world.v1");
+    const a = new WebSocket(`ws://localhost:${PORT}/api/v1/socket`, "worlds.v1");
+    const b = new WebSocket(`ws://localhost:${PORT}/api/v1/socket`, "worlds.v1");
     const open = (w: WebSocket) => new Promise<void>((r) => (w.onopen = () => r()));
     await Promise.all([open(a), open(b)]);
     const msg = await new Promise<Record<string, unknown>>((resolve, reject) => {
@@ -322,7 +322,7 @@ describe("realtime", () => {
   });
 
   test("a socket cannot exceed the subscription cap", async () => {
-    const ws = new WebSocket(`ws://localhost:${PORT}/api/v1/socket`, "world.v1");
+    const ws = new WebSocket(`ws://localhost:${PORT}/api/v1/socket`, "worlds.v1");
     const err = await new Promise<Record<string, unknown>>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error("no cap error within 3s")), 3000);
       ws.onmessage = (m) => {
@@ -348,7 +348,7 @@ describe("mcp", () => {
 
   test("initialize + tools/list expose the tool set", async () => {
     const init = await (await rpc("initialize", { protocolVersion: "2025-06-18" })).json();
-    expect(init.result.serverInfo.name).toBe("world");
+    expect(init.result.serverInfo.name).toBe("worlds");
     expect(init.result.capabilities.tools).toBeDefined();
 
     const list = await (await rpc("tools/list", {})).json();
@@ -434,7 +434,7 @@ describe("auth (google mode)", () => {
     gdir = await mkdtemp(join(tmpdir(), "world-gauth-"));
     gproc = Bun.spawn(["bun", "server/index.ts"], {
       cwd: new URL("..", import.meta.url).pathname,
-      env: { ...process.env, WORLD_PORT: String(GPORT), WORLD_DATA_DIR: gdir, WORLD_DEV: "0", WORLD_AUTH: "google", WORLD_SESSION_SECRET: SECRET, GOOGLE_CLIENT_ID: "test-client.apps.googleusercontent.com", WORLD_PUBLIC_ORIGIN: GBASE, WORLD_DISABLE_WORKERS: "1", WORLD_SEED: "0" },
+      env: { ...process.env, WORLDS_PORT: String(GPORT), WORLDS_DATA_DIR: gdir, WORLDS_DEV: "0", WORLDS_AUTH: "google", WORLDS_SESSION_SECRET: SECRET, GOOGLE_CLIENT_ID: "test-client.apps.googleusercontent.com", WORLDS_PUBLIC_ORIGIN: GBASE, WORLDS_DISABLE_WORKERS: "1", WORLDS_SEED: "0" },
       stdout: "ignore",
       stderr: "ignore",
     });

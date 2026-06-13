@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { config } from "./config";
-import { WorldError, asWorldError, json, jsonError } from "./errors";
+import { WorldsError, asWorldsError, json, jsonError } from "./errors";
 import { identityFrom, requireCsrf } from "./identity";
 import { store } from "./blobstore";
 import { initDb, sql, requireDb } from "./db";
@@ -33,7 +33,7 @@ function serveBundled(dir: string, pathname: string): Promise<Response | null> {
   return f.exists().then((ok) => (ok ? new Response(f, { headers: { "cache-control": "no-cache" } }) : null));
 }
 
-// Host → site. "world.localhost" itself is the homepage (pseudo-site "home").
+// Host → site. "worlds.localhost" itself is the homepage (pseudo-site "home").
 function siteFromHost(host: string): string {
   const bare = host.split(":")[0]!;
   if (bare === config.baseDomain.split(":")[0]) return "home";
@@ -62,7 +62,7 @@ async function llmsTxt(full: boolean): Promise<Response> {
   for await (const f of glob.scan(DOCS_DIR)) pages.push(f);
   pages.sort();
   if (!full) {
-    const lines = ["# World", "", "> Deploy a folder, get a website. Internal hosting for Plex.", "", "## Docs", ""];
+    const lines = ["# Worlds", "", "> Deploy a folder, get a website. Internal hosting for Plex.", "", "## Docs", ""];
     for (const p of pages) lines.push(`- [${p.replace(".md", "")}](/docs/${p})`);
     return new Response(lines.join("\n"), { headers: { "content-type": "text/plain; charset=utf-8" } });
   }
@@ -173,7 +173,7 @@ async function api(req: Request, url: URL, site: string): Promise<Response> {
   }
   if (p[0] === "meta" && method === "GET") return json({ api_version: 1, build: "dev" });
 
-  throw new WorldError("not_found", `no such endpoint: ${method} ${pathname}`);
+  throw new WorldsError("not_found", `no such endpoint: ${method} ${pathname}`);
 }
 
 const server = Bun.serve<SocketData, never>({
@@ -195,7 +195,7 @@ const server = Bun.serve<SocketData, never>({
             const base = config.publicOrigin ?? `${url.protocol}//${config.baseDomain}`;
             return Response.redirect(`${base}/auth/login?rd=${encodeURIComponent(url.href)}`, 302);
           }
-          return jsonError(new WorldError("unauthorized", "sign in required"));
+          return jsonError(new WorldsError("unauthorized", "sign in required"));
         }
       }
 
@@ -203,14 +203,14 @@ const server = Bun.serve<SocketData, never>({
       if (url.pathname === "/api/v1/socket") {
         const who = identityFrom(req);
         if (srv.upgrade(req, { data: { who, site, subs: new Map() } })) return undefined as never;
-        throw new WorldError("invalid_request", "expected websocket upgrade");
+        throw new WorldsError("invalid_request", "expected websocket upgrade");
       }
       if (url.pathname === "/mcp") return await handleMcp(req);
       if (url.pathname.startsWith("/api/")) return await api(req, url, site);
 
       if (url.pathname === "/healthz" || url.pathname === "/readyz") return new Response("ok");
-      if (url.pathname === "/world.js") return (await loader("world.js", false)) ?? siteNotFound(site);
-      if (url.pathname === "/v1/world.js") return (await loader("world.js", true)) ?? siteNotFound(site);
+      if (url.pathname === "/worlds.js") return (await loader("worlds.js", false)) ?? siteNotFound(site);
+      if (url.pathname === "/v1/worlds.js") return (await loader("worlds.js", true)) ?? siteNotFound(site);
       if (url.pathname === "/llms.txt") return llmsTxt(false);
       if (url.pathname === "/llms-full.txt") return llmsTxt(true);
 
@@ -244,11 +244,11 @@ const server = Bun.serve<SocketData, never>({
       const res = await serveSite(req, site, url.pathname);
       return res ?? siteNotFound(site);
     } catch (e) {
-      return jsonError(asWorldError(e));
+      return jsonError(asWorldsError(e));
     }
   },
   websocket,
 });
 
-console.log(`world: listening on :${server.port} (base domain ${config.baseDomain}, dev=${config.dev})`);
-console.log(`world: homepage http://${config.baseDomain}:${server.port} · deploy POST /api/v1/deploy`);
+console.log(`worlds: listening on :${server.port} (base domain ${config.baseDomain}, dev=${config.dev})`);
+console.log(`worlds: homepage http://${config.baseDomain}:${server.port} · deploy POST /api/v1/deploy`);

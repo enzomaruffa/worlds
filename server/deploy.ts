@@ -1,7 +1,7 @@
 import { mkdir, rm, readdir, stat } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { LIMITS, RESERVED_SITES } from "./config";
-import { WorldError, json } from "./errors";
+import { WorldsError, json } from "./errors";
 import { store } from "./blobstore";
 import { identityFrom, requireCsrf, type Identity } from "./identity";
 import { sql, dbReady } from "./db";
@@ -22,9 +22,9 @@ export interface DeployResult {
 
 function validateSiteName(site: string): void {
   if (!SITE_NAME.test(site)) {
-    throw new WorldError("invalid_request", "site name must match ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ (max 63 chars)");
+    throw new WorldsError("invalid_request", "site name must match ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ (max 63 chars)");
   }
-  if (RESERVED_SITES.has(site)) throw new WorldError("reserved_name", `"${site}" is reserved`);
+  if (RESERVED_SITES.has(site)) throw new WorldsError("reserved_name", `"${site}" is reserved`);
 }
 
 async function walk(dir: string, base = ""): Promise<{ path: string; size: number }[]> {
@@ -41,7 +41,7 @@ async function walk(dir: string, base = ""): Promise<{ path: string; size: numbe
 async function finalizeDeploy(site: string, root: string, who: Identity): Promise<DeployResult> {
   const indexFile = Bun.file(join(root, "index.html"));
   if (!(await indexFile.exists())) {
-    throw new WorldError("invalid_request", "bundle must contain index.html at its root");
+    throw new WorldsError("invalid_request", "bundle must contain index.html at its root");
   }
 
   let manifest: { description?: string; spa_fallback?: boolean; category?: string } = {};
@@ -74,15 +74,15 @@ export async function handleDeploy(req: Request): Promise<Response> {
   const who = identityFrom(req);
 
   const form = await req.formData().catch(() => {
-    throw new WorldError("invalid_request", "expected multipart form data");
+    throw new WorldsError("invalid_request", "expected multipart form data");
   });
   const site = String(form.get("site") ?? "");
   const bundle = form.get("bundle");
 
   validateSiteName(site);
-  if (!(bundle instanceof Blob)) throw new WorldError("invalid_request", "missing bundle (tar.gz)");
+  if (!(bundle instanceof Blob)) throw new WorldsError("invalid_request", "missing bundle (tar.gz)");
   if (bundle.size > LIMITS.deployBytes) {
-    throw new WorldError("payload_too_large", `bundle exceeds ${LIMITS.deployBytes / 1024 / 1024}MB`);
+    throw new WorldsError("payload_too_large", `bundle exceeds ${LIMITS.deployBytes / 1024 / 1024}MB`);
   }
   allowDeploy(site);
 
@@ -95,20 +95,20 @@ export async function handleDeploy(req: Request): Promise<Response> {
     await Bun.write(tarPath, bundle);
 
     const list = Bun.spawnSync(["tar", "-tzf", tarPath]);
-    if (list.exitCode !== 0) throw new WorldError("invalid_request", "bundle is not a valid tar.gz");
+    if (list.exitCode !== 0) throw new WorldsError("invalid_request", "bundle is not a valid tar.gz");
     const entries = list.stdout.toString().split("\n").filter(Boolean);
     for (const e of entries) {
       if (e.startsWith("/") || e.split("/").includes("..")) {
-        throw new WorldError("invalid_request", `unsafe path in bundle: ${e}`);
+        throw new WorldsError("invalid_request", `unsafe path in bundle: ${e}`);
       }
     }
     if (entries.filter((e) => !e.endsWith("/")).length > LIMITS.deployFiles) {
-      throw new WorldError("payload_too_large", `bundle exceeds ${LIMITS.deployFiles} files`);
+      throw new WorldsError("payload_too_large", `bundle exceeds ${LIMITS.deployFiles} files`);
     }
 
     const extract = Bun.spawnSync(["tar", "-xzf", tarPath, "-C", staged]);
     await rm(tarPath, { force: true });
-    if (extract.exitCode !== 0) throw new WorldError("invalid_request", "failed to extract bundle");
+    if (extract.exitCode !== 0) throw new WorldsError("invalid_request", "failed to extract bundle");
 
     // Tolerate single-directory tarballs (tar -czf site.tgz my-site/).
     let root = staged;
@@ -129,16 +129,16 @@ export async function handleDeploy(req: Request): Promise<Response> {
 export async function deployFileMap(site: string, files: Record<string, string>, who: Identity): Promise<DeployResult> {
   validateSiteName(site);
   const names = Object.keys(files);
-  if (!names.length) throw new WorldError("invalid_request", "no files to deploy");
+  if (!names.length) throw new WorldsError("invalid_request", "no files to deploy");
   if (names.length > LIMITS.deployFiles) {
-    throw new WorldError("payload_too_large", `more than ${LIMITS.deployFiles} files`);
+    throw new WorldsError("payload_too_large", `more than ${LIMITS.deployFiles} files`);
   }
   let total = 0;
   for (const [p, content] of Object.entries(files)) {
-    if (p.startsWith("/") || p.split("/").includes("..")) throw new WorldError("invalid_request", `unsafe path: ${p}`);
+    if (p.startsWith("/") || p.split("/").includes("..")) throw new WorldsError("invalid_request", `unsafe path: ${p}`);
     total += content.length;
   }
-  if (total > LIMITS.deployBytes) throw new WorldError("payload_too_large", "files exceed the deploy size limit");
+  if (total > LIMITS.deployBytes) throw new WorldsError("payload_too_large", "files exceed the deploy size limit");
   allowDeploy(site);
 
   const staged = store.stagingDir();
@@ -146,7 +146,7 @@ export async function deployFileMap(site: string, files: Record<string, string>,
   try {
     for (const [p, content] of Object.entries(files)) {
       const dest = join(staged, p);
-      if (!dest.startsWith(staged)) throw new WorldError("invalid_request", `unsafe path: ${p}`);
+      if (!dest.startsWith(staged)) throw new WorldsError("invalid_request", `unsafe path: ${p}`);
       await mkdir(dirname(dest), { recursive: true });
       await Bun.write(dest, content);
     }

@@ -1,10 +1,10 @@
 import { timingSafeEqual } from "node:crypto";
 import { config } from "./config";
-import { WorldError } from "./errors";
+import { WorldsError } from "./errors";
 
 // Built-in Google sign-in (OAuth 2.0 authorization-code flow) + a signed session
 // cookie shared across *.<baseDomain>, so one sign-in covers every world. Active
-// when WORLD_AUTH=google (the self-host default). With WORLD_AUTH=gateway an
+// when WORLDS_AUTH=google (the self-host default). With WORLDS_AUTH=gateway an
 // upstream proxy injects the verified email instead and these routes are unused.
 
 const COOKIE = "world_session";
@@ -91,7 +91,7 @@ function safeReturn(rd: string | undefined): string {
 
 export function loginUrl(req: Request, rd: string): string {
   if (!config.googleClientId) {
-    throw new WorldError("internal", "sign-in is not configured (GOOGLE_CLIENT_ID unset)");
+    throw new WorldsError("internal", "sign-in is not configured (GOOGLE_CLIENT_ID unset)");
   }
   const state = seal({ rd: safeReturn(rd), exp: Date.now() + 10 * 60 * 1000 });
   const q = new URLSearchParams({

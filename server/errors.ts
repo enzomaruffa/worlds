@@ -28,7 +28,7 @@ const STATUS: Record<ErrorCode, number> = {
   internal: 500,
 };
 
-export class WorldError extends Error {
+export class WorldsError extends Error {
   constructor(
     public code: ErrorCode,
     message: string,
@@ -39,9 +39,9 @@ export class WorldError extends Error {
   }
 }
 
-const BASE_HEADERS = { "content-type": "application/json", "x-world-api-version": "1" };
+const BASE_HEADERS = { "content-type": "application/json", "x-worlds-api-version": "1" };
 
-export function jsonError(err: WorldError): Response {
+export function jsonError(err: WorldsError): Response {
   const body: Record<string, unknown> = { code: err.code, message: err.message, ...err.extra };
   if (err.retryAfter !== undefined) body.retry_after = err.retryAfter;
   return new Response(JSON.stringify({ error: body }), {
@@ -59,8 +59,8 @@ export function json(data: unknown, init: ResponseInit = {}): Response {
   });
 }
 
-export function asWorldError(e: unknown): WorldError {
-  if (e instanceof WorldError) return e;
+export function asWorldsError(e: unknown): WorldsError {
+  if (e instanceof WorldsError) return e;
   console.error(e);
-  return new WorldError("internal", "internal error");
+  return new WorldsError("internal", "internal error");
 }

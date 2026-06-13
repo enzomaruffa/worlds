@@ -1,6 +1,6 @@
 import { sql, requireDb, emitChange } from "./db";
 import { LIMITS } from "./config";
-import { WorldError, json } from "./errors";
+import { WorldsError, json } from "./errors";
 import type { Identity } from "./identity";
 
 const COLLECTION = /^[a-z0-9_-]{1,64}$/;
@@ -24,15 +24,15 @@ function envelope(r: DocRow) {
 }
 
 function checkCollection(c: string): void {
-  if (!COLLECTION.test(c)) throw new WorldError("invalid_request", "bad collection name");
+  if (!COLLECTION.test(c)) throw new WorldsError("invalid_request", "bad collection name");
 }
 
 function checkDoc(data: unknown): void {
   if (typeof data !== "object" || data === null || Array.isArray(data)) {
-    throw new WorldError("invalid_request", "document must be a JSON object");
+    throw new WorldsError("invalid_request", "document must be a JSON object");
   }
   if (JSON.stringify(data).length > LIMITS.docBytes) {
-    throw new WorldError("payload_too_large", `document exceeds ${LIMITS.docBytes / 1024}KB`);
+    throw new WorldsError("payload_too_large", `document exceeds ${LIMITS.docBytes / 1024}KB`);
   }
 }
 
@@ -42,10 +42,10 @@ async function checkQuotas(site: string, collection: string): Promise<void> {
            count(*) FILTER (WHERE collection = ${collection})::int AS docs
     FROM documents WHERE site = ${site}`;
   if (Number(c.docs) >= LIMITS.docsPerCollection) {
-    throw new WorldError("quota_exceeded", `collection has ${LIMITS.docsPerCollection} docs`);
+    throw new WorldsError("quota_exceeded", `collection has ${LIMITS.docsPerCollection} docs`);
   }
   if (Number(c.collections) >= LIMITS.collectionsPerSite && Number(c.docs) === 0) {
-    throw new WorldError("quota_exceeded", `site has ${LIMITS.collectionsPerSite} collections`);
+    throw new WorldsError("quota_exceeded", `site has ${LIMITS.collectionsPerSite} collections`);
   }
 }
 
@@ -70,7 +70,7 @@ export async function getDoc(site: string, collection: string, id: string) {
   const [row] = await sql`
     SELECT id, data, created_by, created_at, updated_at FROM documents
     WHERE site = ${site} AND collection = ${collection} AND id = ${id}`;
-  if (!row) throw new WorldError("not_found", "no such document");
+  if (!row) throw new WorldsError("not_found", "no such document");
   return json(envelope(row as DocRow));
 }
 
@@ -89,9 +89,9 @@ export async function patchDoc(
     const [cur] = await sql`
       SELECT id, data, created_by, created_at, updated_at FROM documents
       WHERE site = ${site} AND collection = ${collection} AND id = ${id}`;
-    if (!cur) throw new WorldError("not_found", "no such document");
+    if (!cur) throw new WorldsError("not_found", "no such document");
     if (new Date(cur.updated_at).toISOString() !== precondition) {
-      throw new WorldError("conflict", "document changed since read", undefined, {
+      throw new WorldsError("conflict", "document changed since read", undefined, {
         doc: envelope(cur as DocRow),
       });
     }
@@ -105,7 +105,7 @@ export async function patchDoc(
         UPDATE documents SET data = ${body as never}, updated_at = now()
         WHERE site = ${site} AND collection = ${collection} AND id = ${id}
         RETURNING id, data, created_by, created_at, updated_at`;
-  if (!row) throw new WorldError("not_found", "no such document");
+  if (!row) throw new WorldsError("not_found", "no such document");
   const doc = envelope(row as DocRow);
   await emitChange(site, collection, "update", doc);
   return json(doc);
@@ -116,7 +116,7 @@ export async function incrementDoc(site: string, collection: string, id: string,
   checkCollection(collection);
   const { field, by = 1 } = (body ?? {}) as { field?: string; by?: number };
   if (!field || typeof field !== "string" || !/^[\w.-]{1,128}$/.test(field) || typeof by !== "number") {
-    throw new WorldError("invalid_request", "expected {field, by?}");
+    throw new WorldsError("invalid_request", "expected {field, by?}");
   }
   // dot paths drill into nested keys, consistent with list/filter (e.g. "score.total")
   const pgPath = `{${field.split(".").join(",")}}`;
@@ -127,7 +127,7 @@ export async function incrementDoc(site: string, collection: string, id: string,
         updated_at = now()
     WHERE site = ${site} AND collection = ${collection} AND id = ${id}
     RETURNING id, data, created_by, created_at, updated_at`;
-  if (!row) throw new WorldError("not_found", "no such document");
+  if (!row) throw new WorldsError("not_found", "no such document");
   const doc = envelope(row as DocRow);
   await emitChange(site, collection, "update", doc);
   return json(doc);
@@ -160,7 +160,7 @@ export async function listDocs(site: string, collection: string, params: URLSear
     try {
       filter = JSON.parse(params.get("filter")!);
     } catch {
-      throw new WorldError("invalid_request", "filter must be JSON");
+      throw new WorldsError("invalid_request", "filter must be JSON");
     }
   }
 
@@ -171,7 +171,7 @@ export async function listDocs(site: string, collection: string, params: URLSear
   const pathArg = (field: string) => `${arg(`{${field.split(".").join(",")}}`)}::text[]`;
 
   for (const [field, spec] of Object.entries(filter)) {
-    if (!/^[\w.-]{1,128}$/.test(field)) throw new WorldError("invalid_request", `bad filter field "${field}"`);
+    if (!/^[\w.-]{1,128}$/.test(field)) throw new WorldsError("invalid_request", `bad filter field "${field}"`);
     // Lazy so an empty `in` (which compiles to a constant `false`) never allocates
     // a dangling path param the SQL won't reference.
     let accessSql: string | null = null;
@@ -185,7 +185,7 @@ export async function listDocs(site: string, collection: string, params: URLSear
               ? `(${access()})::numeric ${OPS[op]} ${arg(v)}`
               : `${access()} ${OPS[op]} ${arg(String(v))}`,
           );
-        } else throw new WorldError("invalid_request", `unknown filter op "${op}"`);
+        } else throw new WorldsError("invalid_request", `unknown filter op "${op}"`);
       }
     } else {
       conds.push(`${access()} = ${arg(String(spec))}`);
@@ -198,13 +198,13 @@ export async function listDocs(site: string, collection: string, params: URLSear
   if (sort) {
     const desc = sort.startsWith("-");
     const key = desc ? sort.slice(1) : sort;
-    if (!/^[\w.-]{1,128}$/.test(key)) throw new WorldError("invalid_request", "bad sort key");
+    if (!/^[\w.-]{1,128}$/.test(key)) throw new WorldsError("invalid_request", "bad sort key");
     order = `data #>> ${pathArg(key)} ${desc ? "DESC" : "ASC"}, n ASC`;
   }
   if (cursor) {
     // Sorted lists also page by the insertion-order tiebreak (documented v1 behavior).
     const n = Number(Buffer.from(cursor, "base64").toString());
-    if (!Number.isFinite(n)) throw new WorldError("invalid_request", "bad cursor");
+    if (!Number.isFinite(n)) throw new WorldsError("invalid_request", "bad cursor");
     conds.push(`n > ${arg(n)}`);
   }
 

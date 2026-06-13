@@ -11,7 +11,7 @@ import { getSite, setEmbedPos, setScreenshot, publishSiteDoc, siteUrl } from "./
 // universe: an embedding-derived position (so similar sites cluster) and a
 // screenshot thumbnail. Neither blocks the deploy, and both degrade silently.
 export async function postDeploy(site: string): Promise<void> {
-  if (!dbReady() || process.env.WORLD_DISABLE_WORKERS) return;
+  if (!dbReady() || process.env.WORLDS_DISABLE_WORKERS) return;
   await Promise.allSettled([computeEmbedPos(site), captureScreenshot(site)]);
 }
 
@@ -62,10 +62,10 @@ async function computeEmbedPos(site: string): Promise<void> {
 // --- screenshot thumbnail -----------------------------------------------------
 
 // Best-effort headless capture. Works wherever a Chrome/Chromium binary exists
-// (set WORLD_CHROME to point at one); silently skips otherwise. In prod the
+// (set WORLDS_CHROME to point at one); silently skips otherwise. In prod the
 // gateway must let the capture reach the site internally — see deploy/README.
 const CHROME = [
-  process.env.WORLD_CHROME,
+  process.env.WORLDS_CHROME,
   "google-chrome",
   "chromium",
   "chromium-browser",

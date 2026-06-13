@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>world</title>
+<title>worlds</title>
 <style>
   :root { --bg:#101012; --elev:#18181b; --ink:#e4e4e7; --soft:#a1a1aa; --mute:#71717a; --gold:#e5a00d; --rule:#27272a; }
   * { box-sizing: border-box; }
@@ -51,7 +51,7 @@
 </head>
 <body>
 <header>
-  <h1><b>world</b> · the universe</h1>
+  <h1><b>worlds</b> · the universe</h1>
   <span class="tag" id="count"></span>
   <nav>
     <button id="bUniverse" class="on">universe</button>
@@ -73,13 +73,13 @@
     <thead><tr><th>world</th><th>creator</th><th>description</th><th>updated</th><th>visits</th></tr></thead>
     <tbody id="rows"></tbody>
   </table>
-  <div class="empty" id="empty" hidden>nothing here yet — <code>world deploy</code> the first one</div>
+  <div class="empty" id="empty" hidden>nothing here yet — <code>worlds deploy</code> the first one</div>
 </div>
 
 <div id="scrim">
   <div id="settings">
     <h2>your profile</h2>
-    <div class="sub">visible across World — on your worlds and the universe.</div>
+    <div class="sub">visible across Worlds — on your worlds and the universe.</div>
     <label>handle</label>
     <input type="text" id="sHandle" placeholder="your-handle" autocomplete="off" />
     <div class="hint">your URL: <code>/@<span id="sHandlePreview">handle</span></code> · a–z, 0–9, dashes. Your email handle keeps redirecting here.</div>
@@ -101,17 +101,17 @@
   </div>
 </div>
 
-<script src="/world.js"></script>
+<script src="/worlds.js"></script>
 <script>
 (async () => {
-  // The 3D universe is itself a World site — the flagship dogfood.
+  // The 3D universe is itself a Worlds site — the flagship dogfood.
   document.getElementById("b3d").href = `${location.protocol}//universe.${location.host}`;
-  // The homepage is itself a World site: public APIs only.
+  // The homepage is itself a Worlds site: public APIs only.
   let sites = [];
   const seen = new Map();
 
   async function load() {
-    const res = await fetch("/api/v1/universe", { headers: { "x-world-csrf": "1" } });
+    const res = await fetch("/api/v1/universe", { headers: { "x-worlds-csrf": "1" } });
     if (res.ok) {
       sites = (await res.json()).items;
       for (const s of sites) seen.set(s.name, s);
@@ -120,7 +120,7 @@
   }
 
   // Realtime pop-in: the deploy pipeline writes to the home "sites" collection.
-  world.db.collection("sites").subscribe((ev) => {
+  worlds.db.collection("sites").subscribe((ev) => {
     if (!ev.doc || !ev.doc.name) return;
     const existing = seen.get(ev.doc.name);
     if (existing) Object.assign(existing, ev.doc);
@@ -284,7 +284,7 @@
   });
   async function openSettings() {
     sErr.textContent = ""; pickedAvatar = "";
-    const me = await world.me();
+    const me = await worlds.me();
     sHandle.value = me.handle;
     document.getElementById("sHandlePreview").textContent = me.handle;
     sName.value = me.name;
@@ -299,7 +299,7 @@
     if (!f) return;
     sErr.textContent = "uploading…";
     try {
-      const up = await world.uploads.put(f, { name: `avatar-${Date.now()}.${f.name.split(".").pop() || "png"}` });
+      const up = await worlds.uploads.put(f, { name: `avatar-${Date.now()}.${f.name.split(".").pop() || "png"}` });
       pickedAvatar = up.url; sAvatar.src = up.url; sErr.textContent = "";
     } catch (err) { sErr.textContent = err.message; }
   };
@@ -309,7 +309,7 @@
     if (pickedAvatar) body.avatar_url = pickedAvatar;
     const res = await fetch("/api/v1/me", {
       method: "PUT",
-      headers: { "x-world-csrf": "1", "content-type": "application/json" },
+      headers: { "x-worlds-csrf": "1", "content-type": "application/json" },
       body: JSON.stringify(body),
     });
     const data = await res.json().catch(() => ({}));

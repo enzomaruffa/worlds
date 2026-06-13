@@ -19,7 +19,7 @@ Quotas are floors — they can go up, never down for existing behavior.
 ## The forever-compat contract
 
 `/api/v1` is frozen: endpoints, fields and error codes are never removed, renamed or retyped.
-New stuff is always additive. `/world.js` is an evergreen alias; `/v1/world.js` never changes.
+New stuff is always additive. `/worlds.js` is an evergreen alias; `/v1/worlds.js` never changes.
 Errors are always `{error: {code, message, retry_after?}}` from a fixed registry.
 Your site will work in five years without a rebuild. That's the whole deal.
 

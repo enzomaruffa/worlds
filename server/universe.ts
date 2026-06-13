@@ -1,5 +1,5 @@
 import { sql, requireDb } from "./db";
-import { json, WorldError } from "./errors";
+import { json, WorldsError } from "./errors";
 import { listSites, publicSite, type SiteRow } from "./sites";
 import { resolveHandle, resolveProfile, overlayCreators } from "./profile";
 
@@ -46,7 +46,7 @@ export async function universe(): Promise<Response> {
 export async function creator(handle: string): Promise<Response> {
   requireDb();
   const res = await resolveHandle(handle);
-  if (!res) throw new WorldError("not_found", `no creator "${handle}"`);
+  if (!res) throw new WorldsError("not_found", `no creator "${handle}"`);
   const sites = (await sql`
     SELECT * FROM sites
     WHERE creator = ${res.canonical} OR contributors ? ${res.canonical}

@@ -53,22 +53,22 @@
   </div>
 
   <p class="lede">
-    World turns a folder of static files into <span class="pill">&lt;name&gt;.<span data-base-host>your-world</span></span> —
+    Worlds turns a folder of static files into <span class="pill">&lt;name&gt;.<span data-base-host>your-worlds</span></span> —
     employee-only, instant, with a built-in database, AI, uploads, realtime and identity.
-    One script tag, no keys. This page is itself a World site using only the public SDK.
+    One script tag, no keys. This page is itself a Worlds site using only the public SDK.
   </p>
 
   <h2>1 · Make a site</h2>
   <p class="lede">A folder with an <code>index.html</code>. Add the SDK with one tag:</p>
-  <pre>&lt;script src="/world.js"&gt;&lt;/script&gt;</pre>
+  <pre>&lt;script src="/worlds.js"&gt;&lt;/script&gt;</pre>
 
-  <h2>2 · Know who's visiting — <code>world.me()</code></h2>
-  <pre>const me = await world.me();   // { email, name, handle, avatar_url }</pre>
+  <h2>2 · Know who's visiting — <code>worlds.me()</code></h2>
+  <pre>const me = await worlds.me();   // { email, name, handle, avatar_url }</pre>
   <div class="demo">→ <span class="out" id="meOut">…</span></div>
 
-  <h2>3 · Store &amp; sync data — <code>world.db</code></h2>
+  <h2>3 · Store &amp; sync data — <code>worlds.db</code></h2>
   <p class="lede">Named collections of JSON docs, scoped to your site, realtime across tabs. Sign the guestbook:</p>
-  <pre>const book = world.db.collection("guestbook");
+  <pre>const book = worlds.db.collection("guestbook");
 await book.create({ text, by: me.name });
 book.subscribe(ev =&gt; render(ev.doc));   // live</pre>
   <div class="demo">
@@ -79,8 +79,8 @@ book.subscribe(ev =&gt; render(ev.doc));   // live</pre>
     <ul id="gbList"></ul>
   </div>
 
-  <h2>4 · Ask the model — <code>world.ai</code> (streaming)</h2>
-  <pre>await world.ai.complete({ prompt, stream: true, onToken: t =&gt; append(t) });</pre>
+  <h2>4 · Ask the model — <code>worlds.ai</code> (streaming)</h2>
+  <pre>await worlds.ai.complete({ prompt, stream: true, onToken: t =&gt; append(t) });</pre>
   <div class="demo">
     <div class="row">
       <input id="aiInput" placeholder="ask anything…" value="In one sentence, what's a good use for an internal tool?" />
@@ -91,23 +91,23 @@ book.subscribe(ev =&gt; render(ev.doc));   // live</pre>
 
   <h2>5 · Ship it</h2>
   <p class="lede">Three equivalent ways — pick one:</p>
-  <pre>world deploy                         # the CLI, from your folder</pre>
-  <pre># or drag the folder onto your World homepage in the browser
+  <pre>worlds deploy                         # the CLI, from your folder</pre>
+  <pre># or drag the folder onto your Worlds homepage in the browser
 # or give Claude the MCP server and just ask:</pre>
-  <pre>Add the MCP server <span data-base-host>your-world</span>/mcp to Claude, then say:
-"Deploy this folder to World as 'my-demo'."</pre>
+  <pre>Add the MCP server <span data-base-host>your-worlds</span>/mcp to Claude, then say:
+"Deploy this folder to Worlds as 'my-demo'."</pre>
 
   <h2>More</h2>
   <p class="lede">
     Full SDK: <a id="lnkDocs" href="/docs">/docs</a> ·
     machine-readable: <a id="lnkLlms" href="/llms.txt">/llms.txt</a> ·
     see every site in <a id="lnkUniverse" href="/">the universe</a>.
-    Also: <code>world.uploads</code> (files), <code>world.ws</code> (multiplayer channels),
-    <code>world.notify.slack</code> (ping a channel). No backends, no secrets, no cron — that's the deal.
+    Also: <code>worlds.uploads</code> (files), <code>worlds.ws</code> (multiplayer channels),
+    <code>worlds.notify.slack</code> (ping a channel). No backends, no secrets, no cron — that's the deal.
   </p>
 </main>
 
-<script src="/world.js"></script>
+<script src="/worlds.js"></script>
 <script>
   // copy buttons on every snippet
   for (const pre of document.querySelectorAll("pre")) {
@@ -127,14 +127,14 @@ book.subscribe(ev =&gt; render(ev.doc));   // live</pre>
 
   let me;
   (async () => {
-    me = await world.me();
+    me = await worlds.me();
     document.getElementById("greeting").innerHTML = `welcome, <span class="who">${me.name}</span> — you're signed in via the employee gate`;
     if (me.avatar_url) document.getElementById("avatar").src = me.avatar_url;
     document.getElementById("meOut").textContent = JSON.stringify(me);
   })();
 
   // guestbook (db + realtime)
-  const book = world.db.collection("guestbook");
+  const book = worlds.db.collection("guestbook");
   const gbList = document.getElementById("gbList");
   const gbInput = document.getElementById("gbInput");
   function renderNote(doc) {
@@ -164,7 +164,7 @@ book.subscribe(ev =&gt; render(ev.doc));   // live</pre>
     if (!prompt) return;
     aiOut.textContent = "";
     try {
-      await world.ai.complete({ prompt, model: "fast", max_tokens: 200, stream: true, onToken: (t) => (aiOut.textContent += t) });
+      await worlds.ai.complete({ prompt, model: "fast", max_tokens: 200, stream: true, onToken: (t) => (aiOut.textContent += t) });
     } catch (e) {
       aiOut.textContent = e.code === "quota_exceeded" ? "(out of AI for today)" : `(${e.message})`;
     }

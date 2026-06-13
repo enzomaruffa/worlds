@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { WorldError, asWorldError } from "./errors";
+import { WorldsError, asWorldsError } from "./errors";
 import { identityFrom, type Identity } from "./identity";
 import { deployFileMap } from "./deploy";
 import { listSites, getSiteOr404, publicSite } from "./sites";
@@ -33,7 +33,7 @@ async function docPages(): Promise<string[]> {
 
 const TOOLS: Record<string, Tool> = {
   deploy_site: {
-    description: "Deploy a World site from a map of file paths to text contents (index.html required at root). Returns the live URL.",
+    description: "Deploy a Worlds site from a map of file paths to text contents (index.html required at root). Returns the live URL.",
     inputSchema: obj(
       {
         name: { type: "string", description: "site name → its own subdomain (a-z, 0-9, dashes)" },
@@ -44,7 +44,7 @@ const TOOLS: Record<string, Tool> = {
     async run(args, who) {
       const files = args.files;
       if (typeof files !== "object" || files === null || Array.isArray(files)) {
-        throw new WorldError("invalid_request", "files must be an object of path → contents");
+        throw new WorldsError("invalid_request", "files must be an object of path → contents");
       }
       const map: Record<string, string> = {};
       for (const [k, v] of Object.entries(files as Record<string, unknown>)) map[k] = String(v);
@@ -52,7 +52,7 @@ const TOOLS: Record<string, Tool> = {
     },
   },
   list_sites: {
-    description: "List World sites (newest first). Optional creator handle, search query, limit.",
+    description: "List Worlds sites (newest first). Optional creator handle, search query, limit.",
     inputSchema: obj({
       creator: { type: "string" },
       q: { type: "string" },
@@ -83,7 +83,7 @@ const TOOLS: Record<string, Tool> = {
     },
   },
   db_query: {
-    description: "Read documents from a site's world.db collection. site defaults to 'home' (the platform site registry). Supports the v1 filter/sort grammar.",
+    description: "Read documents from a site's worlds.db collection. site defaults to 'home' (the platform site registry). Supports the v1 filter/sort grammar.",
     inputSchema: obj(
       {
         collection: { type: "string" },
@@ -105,22 +105,22 @@ const TOOLS: Record<string, Tool> = {
     },
   },
   read_docs: {
-    description: "Read World's docs. With no page, lists available pages; with a page name (e.g. 'sdk'), returns its markdown.",
+    description: "Read Worlds' docs. With no page, lists available pages; with a page name (e.g. 'sdk'), returns its markdown.",
     inputSchema: obj({ page: { type: "string", description: "doc page name without .md (e.g. 'sdk', 'quickstart', 'limits')" } }),
     async run(args) {
       const pages = await docPages();
       if (!args.page) return { pages: pages.map((p) => p.replace(".md", "")) };
       const file = `${String(args.page).replace(/\.md$/, "")}.md`;
-      if (!pages.includes(file)) throw new WorldError("not_found", `no doc page "${args.page}" (have: ${pages.map((p) => p.replace(".md", "")).join(", ")})`);
+      if (!pages.includes(file)) throw new WorldsError("not_found", `no doc page "${args.page}" (have: ${pages.map((p) => p.replace(".md", "")).join(", ")})`);
       return Bun.file(join(DOCS_DIR, file)).text();
     },
   },
   search_docs: {
-    description: "Search World's docs for a query string; returns matching pages with snippets.",
+    description: "Search Worlds' docs for a query string; returns matching pages with snippets.",
     inputSchema: obj({ query: { type: "string" } }, ["query"]),
     async run(args) {
       const q = String(args.query ?? "").toLowerCase();
-      if (!q) throw new WorldError("invalid_request", "expected {query}");
+      if (!q) throw new WorldsError("invalid_request", "expected {query}");
       const hits: { page: string; snippet: string }[] = [];
       for (const page of await docPages()) {
         const text = await Bun.file(join(DOCS_DIR, page)).text();
@@ -153,7 +153,7 @@ async function dispatch(msg: RpcReq, who: Identity): Promise<object | null> {
         return ok({
           protocolVersion: (msg.params?.protocolVersion as string) ?? PROTOCOL_VERSION,
           capabilities: { tools: {} },
-          serverInfo: { name: "world", version: "1" },
+          serverInfo: { name: "worlds", version: "1" },
         });
       case "ping":
         return ok({});
@@ -170,7 +170,7 @@ async function dispatch(msg: RpcReq, who: Identity): Promise<object | null> {
           return ok(asText(result));
         } catch (e) {
           // MCP convention: tool failures are results with isError, not protocol errors.
-          const we = asWorldError(e);
+          const we = asWorldsError(e);
           return ok({ ...asText(`${we.code}: ${we.message}`), isError: true });
         }
       }

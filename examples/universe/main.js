@@ -1,4 +1,4 @@
-// the universe — a World site, built only on the public API (world.js + /api/v1/universe).
+// the universe — a Worlds site, built only on the public API (worlds.js + /api/v1/universe).
 // Custom shaders: sun surface, planet atmospheres, animated oceans, twinkling stars, nebula sky.
 import * as THREE from "three";
 import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
@@ -896,12 +896,12 @@ function pick(cx, cy) {
   warpSound();
 }
 
-// AI-generated "civilization lore" per world (world.ai, with a local fallback).
-// Generated once, then persisted in our own world.db so every later visit — and
+// AI-generated "civilization lore" per world (worlds.ai, with a local fallback).
+// Generated once, then persisted in our own worlds.db so every later visit — and
 // every other pilot — reads it back instead of re-billing Gemini. Regenerates only
 // if the underlying site's description changes.
 const loreCache = new Map();
-const loreStore = world.db.collection("lore");
+const loreStore = worlds.db.collection("lore");
 function localLore(site) {
   const by = {
     games: "A restless world of arcade-cantinas where the locals never stop playing.",
@@ -927,7 +927,7 @@ async function loadLore(site) {
 
   let lore = "";
   try {
-    const res = await world.ai.complete({
+    const res = await worlds.ai.complete({
       prompt: `In one vivid sci-fi sentence (max 18 words), describe the fictional civilization on a planet representing this internal tool. Name: ${site.name}. Category: ${site.category}. About: ${desc || "unknown"}. Playful, no preamble.`,
       model: "fast", max_tokens: 60,
     });
@@ -969,7 +969,7 @@ function toast(html, ms = 4200) {
   setTimeout(() => { el.style.opacity = "0"; setTimeout(() => el.remove(), 400); }, ms);
 }
 
-// ---------- live deploy supernova (dogfoods world.db realtime) ----------
+// ---------- live deploy supernova (dogfoods worlds.db realtime) ----------
 const novas = [];
 function spawnNova(pos, colorHex) {
   const mat = new THREE.MeshBasicMaterial({ color: colorHex, transparent: true, opacity: 1, blending: THREE.AdditiveBlending, depthWrite: false });
@@ -1013,7 +1013,7 @@ addEventListener("keydown", (e) => { if (e.code === "Enter" && nearPlanet && !di
 
 // ---------- data: the public API, nothing else ----------
 async function load() {
-  const res = await fetch("/api/v1/universe", { headers: { "x-world-csrf": "1" } });
+  const res = await fetch("/api/v1/universe", { headers: { "x-worlds-csrf": "1" } });
   if (!res.ok) return;
   for (const site of (await res.json()).items) upsertPlanet(site);
 }
@@ -1021,7 +1021,7 @@ async function load() {
 // any world may READ it cross-site — that's the whole public contract we need.
 let liveReady = false;
 setTimeout(() => { liveReady = true; }, 4000); // ignore any initial backlog; only celebrate fresh deploys
-world.db.site("home").collection("sites").subscribe((ev) => {
+worlds.db.site("home").collection("sites").subscribe((ev) => {
   if (!ev.doc?.name || !Object.keys(ASSETS).length) return;
   upsertPlanet({ universe: null, ...ev.doc });
   if (!liveReady) return;
@@ -1036,10 +1036,10 @@ world.db.site("home").collection("sites").subscribe((ev) => {
   toast(`✦ <b style="color:#e5a00d">@${ev.doc.creator?.handle ?? "someone"}</b> just launched <b style="color:#e5a00d">${ev.doc.name}.world</b>`);
 });
 
-// ---------- other pilots, live over world.ws ----------
+// ---------- other pilots, live over worlds.ws ----------
 const pilotId = Math.random().toString(36).slice(2, 8); // distinguishes tabs sharing one identity
 const pilots = new Map(); // pilotKey -> {group, label, target:{p,q}, seen}
-const shipsChannel = world.ws.channel("ships");
+const shipsChannel = worlds.ws.channel("ships");
 
 function pilotShip(handle, key) {
   const g = new THREE.Group();
@@ -1103,8 +1103,8 @@ function broadcastShip(now) {
   shipsChannel.publish({ id: pilotId, p: ship.position.toArray(), q: ship.quaternion.toArray() });
 }
 
-// ---------- comms: chat, emotes, pings, follow (all over world.ws) ----------
-const commsChannel = world.ws.channel("comms");
+// ---------- comms: chat, emotes, pings, follow (all over worlds.ws) ----------
+const commsChannel = worlds.ws.channel("comms");
 const hud = document.getElementById("hud");
 const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
 let following = null;
@@ -1331,7 +1331,7 @@ function updateNav() {
   }
 }
 
-// ---------- AI navigator: "ask the universe" (dogfoods world.ai) ----------
+// ---------- AI navigator: "ask the universe" (dogfoods worlds.ai) ----------
 function localMatch(query, catalog) {
   const terms = query.toLowerCase().split(/\W+/).filter((w) => w.length > 2);
   let best = null, bestScore = -1;
@@ -1359,7 +1359,7 @@ askForm.addEventListener("submit", async (e) => {
   let target = null, why = "";
   try {
     const prompt = `You navigate an internal website universe. Available worlds:\n${catalog.map((s) => `- ${s.name} [${s.category}]: ${s.description}`).join("\n")}\n\nThe pilot asks: "${q}"\nReply with ONLY JSON {"site":"<exact world name from the list>","why":"<reason, max 8 words>"}.`;
-    const res = await world.ai.complete({ prompt, model: "fast", max_tokens: 90 });
+    const res = await worlds.ai.complete({ prompt, model: "fast", max_tokens: 90 });
     const m = res.text.match(/\{[\s\S]*\}/);
     if (m) { const j = JSON.parse(m[0]); target = catalog.find((s) => s.name === j.site); why = (j.why || "").slice(0, 60); }
   } catch { /* AI not configured or failed — fall back to local search */ }

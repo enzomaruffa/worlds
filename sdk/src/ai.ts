@@ -1,5 +1,5 @@
 import { call } from "./http";
-import { WorldError } from "./error";
+import { WorldsError } from "./error";
 
 interface CompleteOpts {
   prompt?: string;
@@ -27,17 +27,17 @@ async function streamComplete(opts: CompleteOpts): Promise<{ text: string; model
   const { onToken, ...body } = opts;
   const res = await fetch("/api/v1/ai/complete", {
     method: "POST",
-    headers: { "x-world-csrf": "1", "content-type": "application/json" },
+    headers: { "x-worlds-csrf": "1", "content-type": "application/json" },
     body: JSON.stringify(body),
   });
   if (res.status === 401) {
     location.assign(`/auth/login?rd=${encodeURIComponent(location.href)}`);
-    throw new WorldError("unauthorized", "session expired, redirecting", 401);
+    throw new WorldsError("unauthorized", "session expired, redirecting", 401);
   }
   if (!res.ok || !res.body) {
     const data = await res.json().catch(() => ({}));
     const err = (data && data.error) || {};
-    throw new WorldError(err.code || "internal", err.message || res.statusText, res.status, err.retry_after);
+    throw new WorldsError(err.code || "internal", err.message || res.statusText, res.status, err.retry_after);
   }
 
   const reader = res.body.getReader();

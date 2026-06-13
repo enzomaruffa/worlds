@@ -1,7 +1,7 @@
 import { sql, dbReady } from "./db";
 import { avatarFor, deriveName } from "./identity";
 import { RESERVED_SITES } from "./config";
-import { WorldError } from "./errors";
+import { WorldsError } from "./errors";
 
 // canonical = email local-part (immutable identity key, used for all attribution).
 // handle = mutable, unique display/URL alias; defaults to canonical. "Custom
@@ -41,17 +41,17 @@ export async function updateProfile(
   email: string,
   patch: { handle?: unknown; name?: unknown; avatar_url?: unknown },
 ): Promise<ResolvedProfile> {
-  if (!dbReady()) throw new WorldError("maintenance", "database unavailable");
+  if (!dbReady()) throw new WorldsError("maintenance", "database unavailable");
   const [existing] = await sql`SELECT canonical, handle, name, avatar FROM profiles WHERE canonical = ${canonical}`;
   const cur = existing as ProfileRow | undefined;
 
   let handle = cur?.handle ?? canonical;
   if (patch.handle !== undefined) {
     const h = String(patch.handle).toLowerCase().trim();
-    if (!HANDLE_RE.test(h)) throw new WorldError("invalid_request", "handle must be 2–39 chars: a–z, 0–9, dashes (no leading dash)");
-    if (RESERVED_SITES.has(h)) throw new WorldError("invalid_request", `"${h}" is reserved`);
+    if (!HANDLE_RE.test(h)) throw new WorldsError("invalid_request", "handle must be 2–39 chars: a–z, 0–9, dashes (no leading dash)");
+    if (RESERVED_SITES.has(h)) throw new WorldsError("invalid_request", `"${h}" is reserved`);
     const [taken] = await sql`SELECT canonical FROM profiles WHERE handle = ${h} AND canonical <> ${canonical}`;
-    if (taken) throw new WorldError("conflict", `@${h} is already taken`);
+    if (taken) throw new WorldsError("conflict", `@${h} is already taken`);
     handle = h;
   }
 
@@ -62,7 +62,7 @@ export async function updateProfile(
   if (patch.avatar_url !== undefined) {
     const a = String(patch.avatar_url).trim();
     if (a && !/^(https:\/\/|\/u\/)/.test(a)) {
-      throw new WorldError("invalid_request", "avatar_url must be an https URL or a /u/ upload path");
+      throw new WorldsError("invalid_request", "avatar_url must be an https URL or a /u/ upload path");
     }
     avatar = a || null;
   }

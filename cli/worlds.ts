@@ -1,17 +1,17 @@
 #!/usr/bin/env bun
-// world — deploy a folder, get a website.
+// worlds — deploy a folder, get a website.
 // Auth: in prod the gateway handles it (Cloudflare Access service token via
-// `world login`); in dev there is no auth. The adapter lives behind authHeaders().
+// `worlds login`); in dev there is no auth. The adapter lives behind authHeaders().
 
 import { readdir, stat } from "node:fs/promises";
 import { join, basename, resolve } from "node:path";
 import { homedir, tmpdir } from "node:os";
 
-const API = process.env.WORLD_URL ?? "http://world.localhost:8420";
-const CREDS = join(homedir(), ".world", "credentials.json");
+const API = process.env.WORLDS_URL ?? "http://worlds.localhost:8420";
+const CREDS = join(homedir(), ".worlds", "credentials.json");
 
 async function authHeaders(): Promise<Record<string, string>> {
-  const headers: Record<string, string> = { "x-world-csrf": "1" };
+  const headers: Record<string, string> = { "x-worlds-csrf": "1" };
   try {
     const creds = await Bun.file(CREDS).json();
     if (creds.mode === "cloudflared") {
@@ -63,20 +63,20 @@ async function cmdInit(name?: string): Promise<void> {
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${site}</title></head>
 <body style="font-family: system-ui; max-width: 60ch; margin: 4rem auto">
   <h1>${site}</h1>
-  <p>It's alive. Edit <code>index.html</code> and run <code>world deploy</code> again.</p>
-  <script src="/world.js"></script>
-  <script>world.me().then(me => document.body.insertAdjacentHTML("beforeend", "<p>hi, " + me.name + "</p>"))</script>
+  <p>It's alive. Edit <code>index.html</code> and run <code>worlds deploy</code> again.</p>
+  <script src="/worlds.js"></script>
+  <script>worlds.me().then(me => document.body.insertAdjacentHTML("beforeend", "<p>hi, " + me.name + "</p>"))</script>
 </body>
 </html>
 `,
   );
   await Bun.write(join(dir, ".world.json"), JSON.stringify({ description: "", category: "misc" }, null, 2) + "\n");
-  console.log(`✓ scaffolded ${site} — run \`world deploy\`${name ? ` from ${name}/` : ""}`);
+  console.log(`✓ scaffolded ${site} — run \`worlds deploy\`${name ? ` from ${name}/` : ""}`);
 }
 
 async function cmdDeploy(siteArg?: string): Promise<void> {
   const dir = process.cwd();
-  if (!(await Bun.file(join(dir, "index.html")).exists())) fail("no index.html here — run `world init` first");
+  if (!(await Bun.file(join(dir, "index.html")).exists())) fail("no index.html here — run `worlds init` first");
   const site = siteArg ?? siteNameFromCwd(dir);
 
   // build the bundle in tmp, not the project dir, so a crash never leaves an artifact behind
@@ -97,7 +97,7 @@ async function cmdDeploy(siteArg?: string): Promise<void> {
 async function cmdList(): Promise<void> {
   const out = await api("GET", "/api/v1/sites");
   const items = out.items as { name: string; url: string; creator: { handle: string }; updated_at: string }[];
-  if (!items.length) return console.log("no worlds yet — `world deploy` the first one");
+  if (!items.length) return console.log("no worlds yet — `worlds deploy` the first one");
   for (const s of items) {
     console.log(`${s.name.padEnd(24)} ${s.creator.handle.padEnd(16)} ${s.updated_at.slice(0, 10)}  ${s.url}`);
   }
@@ -125,13 +125,13 @@ async function cmdLogin(): Promise<void> {
       fail("signed in, but couldn't mint an Access token — check the app URL");
     }
     await Bun.write(CREDS, `${JSON.stringify({ mode: "cloudflared", app: API }, null, 2)}\n`);
-    console.log(`✓ logged in — cloudflared holds the token; \`world deploy\` will use it automatically`);
+    console.log(`✓ logged in — cloudflared holds the token; \`worlds deploy\` will use it automatically`);
     return;
   }
-  console.log(`cloudflared isn't installed. Install it (\`brew install cloudflared\`) and re-run \`world login\`,
+  console.log(`cloudflared isn't installed. Install it (\`brew install cloudflared\`) and re-run \`worlds login\`,
 or create an Access service token and save it:
 
-  mkdir -p ~/.world && cat > ~/.world/credentials.json <<'EOF'
+  mkdir -p ~/.worlds && cat > ~/.worlds/credentials.json <<'EOF'
   {"cf_access_client_id": "…", "cf_access_client_secret": "…"}
   EOF`);
 }
@@ -144,13 +144,13 @@ switch (cmd) {
   case "open": await cmdOpen(arg); break;
   case "login": await cmdLogin(); break;
   default:
-    console.log(`world — deploy a folder, get a website
+    console.log(`worlds — deploy a folder, get a website
 
-  world init [name]     scaffold an index.html (+ .world.json)
-  world deploy [site]   tar the folder, ship it (defaults to folder name)
-  world open [site]     open the site in a browser
-  world list            all worlds
-  world login           CLI auth setup
+  worlds init [name]     scaffold an index.html (+ .world.json)
+  worlds deploy [site]   tar the folder, ship it (defaults to folder name)
+  worlds open [site]     open the site in a browser
+  worlds list            all worlds
+  worlds login           CLI auth setup
 
-server: ${API} (override with WORLD_URL)`);
+server: ${API} (override with WORLDS_URL)`);
 }

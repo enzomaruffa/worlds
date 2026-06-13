@@ -1,12 +1,12 @@
-# World site reference — recipes, resources, gotchas
+# Worlds site reference — recipes, resources, gotchas
 
-Copy-paste building blocks for World sites. Every snippet runs as-is behind a single
-`<script src="/world.js"></script>` tag — no keys, no build step. Full SDK signatures live
+Copy-paste building blocks for Worlds sites. Every snippet runs as-is behind a single
+`<script src="/worlds.js"></script>` tag — no keys, no build step. Full SDK signatures live
 in `SKILL.md`; the live contract is at `/llms.txt` and `/docs`.
 
 The golden rule: **the page is the program.** Do the work in the browser. The server gives
-you data (`world.db`), AI (`world.ai`), files (`world.uploads`), realtime (`world.ws`),
-identity (`world.me`), and Slack (`world.notify`) — everything else is your HTML/JS/CSS.
+you data (`worlds.db`), AI (`worlds.ai`), files (`worlds.uploads`), realtime (`worlds.ws`),
+identity (`worlds.me`), and Slack (`worlds.notify`) — everything else is your HTML/JS/CSS.
 
 ---
 
@@ -14,15 +14,15 @@ identity (`world.me`), and Slack (`world.notify`) — everything else is your HT
 
 ### 1. Guestbook (db + identity + realtime)
 
-The hello-world of World. Persists, shows who wrote what, updates live across tabs.
+The hello-world of Worlds. Persists, shows who wrote what, updates live across tabs.
 
 ```html
-<script src="/world.js"></script>
+<script src="/worlds.js"></script>
 <input id="msg" placeholder="say something" />
 <button onclick="post()">sign</button>
 <ul id="list"></ul>
 <script>
-  const book = world.db.collection("guestbook");
+  const book = worlds.db.collection("guestbook");
   const list = document.getElementById("list");
 
   function add(doc) {
@@ -37,7 +37,7 @@ The hello-world of World. Persists, shows who wrote what, updates live across ta
   book.subscribe(ev => { if (ev.type === "create") add(ev.doc); });
 
   window.post = async () => {
-    const me = await world.me();
+    const me = await worlds.me();
     const input = document.getElementById("msg");
     if (!input.value.trim()) return;
     await book.create({ text: input.value, by: me.name });
@@ -51,7 +51,7 @@ The hello-world of World. Persists, shows who wrote what, updates live across ta
 Never do read-modify-write on a counter — concurrent voters race. Use `increment`.
 
 ```js
-const polls = world.db.collection("polls");
+const polls = worlds.db.collection("polls");
 // one doc holds all the tallies
 let poll = (await polls.list({ limit: 1 })).items[0]
   ?? await polls.create({ question: "lunch?", tacos: 0, sushi: 0 });
@@ -66,13 +66,13 @@ polls.subscribe(ev => { if (ev.doc.id === poll.id) render(ev.doc.data); });
 
 ### 3. Multiplayer cursors / presence (ws channel)
 
-Ephemeral, high-frequency state goes over `world.ws`, **not** `world.db` (channels aren't
+Ephemeral, high-frequency state goes over `worlds.ws`, **not** `worlds.db` (channels aren't
 persisted and don't count against doc quotas). This is the pattern for shared whiteboards,
 co-watching, and the universe's live ships.
 
 ```js
-const me = await world.me();
-const room = world.ws.channel("cursors");
+const me = await worlds.me();
+const room = worlds.ws.channel("cursors");
 
 addEventListener("pointermove", e => {
   room.publish({ x: e.clientX / innerWidth, y: e.clientY / innerHeight });
@@ -92,7 +92,7 @@ Throttle publishes to ~10–15/s for cursors; payloads are capped at 16KB.
 
 ```js
 async function ask(q) {
-  const { text } = await world.ai.complete({
+  const { text } = await worlds.ai.complete({
     system: "You are a terse, witty assistant. One sentence.",
     messages: [{ role: "user", content: q }],
     model: "fast",            // "fast" (default) or "smart"; never a raw provider id
@@ -101,7 +101,7 @@ async function ask(q) {
   return text;
 }
 // one-shot string form for quick prompts:
-const haiku = (await world.ai.complete("haiku about postgres")).text;
+const haiku = (await worlds.ai.complete("haiku about postgres")).text;
 ```
 
 Keep a local fallback for demos so the UI never hard-stalls if you hit the daily cap:
@@ -119,13 +119,13 @@ async function askSafe(q) {
 const fileInput = document.querySelector("input[type=file]");
 fileInput.onchange = async () => {
   for (const f of fileInput.files) {
-    const { url, name } = await world.uploads.put(f, { name: f.name });   // ≤25MB each
+    const { url, name } = await worlds.uploads.put(f, { name: f.name });   // ≤25MB each
     addThumb(url, name);
   }
 };
 // existing files
-(await world.uploads.list()).items.forEach(u => addThumb(u.url, u.name));
-async function remove(name) { await world.uploads.delete(name); }
+(await worlds.uploads.list()).items.forEach(u => addThumb(u.url, u.name));
+async function remove(name) { await worlds.uploads.delete(name); }
 ```
 
 Uploaded files are served at a stable, world-readable URL (`/u/<site>/<name>`) — paste it
@@ -134,7 +134,7 @@ anywhere. Same-name re-uploads overwrite.
 ### 6. AI image generator (image → upload)
 
 ```js
-const { url } = await world.ai.image("a low-poly desert planet at dusk", { size: "1024" });
+const { url } = await worlds.ai.image("a low-poly desert planet at dusk", { size: "1024" });
 document.querySelector("img").src = url;   // already stored as an upload, counts toward quota
 ```
 
@@ -143,12 +143,12 @@ document.querySelector("img").src = url;   // already stored as an upload, count
 ```js
 // a dashboard that nags a channel when a metric goes red
 if (errorRate > 0.05) {
-  await world.notify.slack("#data-alerts", `error rate is ${(errorRate*100).toFixed(1)}% 🔴`);
+  await worlds.notify.slack("#data-alerts", `error rate is ${(errorRate*100).toFixed(1)}% 🔴`);
 }
 ```
 
 Capped per user/day and stamped server-side with the site + sender — you can't spoof
-identity, and you can't spam. This is how World replaces "I need a cron + a Slack bot":
+identity, and you can't spam. This is how Worlds replaces "I need a cron + a Slack bot":
 **refresh-on-view + notify-on-bad** instead of a scheduled job.
 
 ### 8. Reading other worlds (cross-site reads)
@@ -157,20 +157,20 @@ Any world's data is readable (you could see it by visiting the site anyway); wri
 stay with the owning site. This is exactly how the homepage universe is built.
 
 ```js
-const sites = world.db.site("home").collection("sites");   // the platform site registry
+const sites = worlds.db.site("home").collection("sites");   // the platform site registry
 (await sites.list({ sort: "-visits_30d", limit: 10 })).items.forEach(addPlanet);
 sites.subscribe(ev => addPlanet(ev.doc));                   // a fresh deploy pops in live
 ```
 
-### 9. The universe pattern (a 3D site on pure world.js)
+### 9. The universe pattern (a 3D site on pure worlds.js)
 
-`examples/universe/` is the flagship dogfood — a Three.js space sim that is **just a World
-site** (deploy it with `world deploy` like any other). It uses only public APIs:
+`examples/universe/` is the flagship dogfood — a Three.js space sim that is **just a Worlds
+site** (deploy it with `worlds deploy` like any other). It uses only public APIs:
 
-- `world.db.site("home").collection("sites").subscribe(...)` → a planet per deployed site, live.
-- `world.ws.channel("ships")` → other signed-in users' ships in realtime (pose broadcast + presence).
-- `world.ai.complete(...)` → the "ask the universe" navigator and per-planet lore.
-- Three.js itself comes from a CDN importmap (below) — World ships no 3D engine.
+- `worlds.db.site("home").collection("sites").subscribe(...)` → a planet per deployed site, live.
+- `worlds.ws.channel("ships")` → other signed-in users' ships in realtime (pose broadcast + presence).
+- `worlds.ai.complete(...)` → the "ask the universe" navigator and per-planet lore.
+- Three.js itself comes from a CDN importmap (below) — Worlds ships no 3D engine.
 
 Read its `main.js` when you want a worked example of channels + db subscribe + ai together
 at scale. Don't bake heavy engines into the server; load them from a CDN in your site.
@@ -224,8 +224,8 @@ Styling: write plain CSS, or pull a classless sheet (**Pico.css** `cdn.jsdelivr.
 
 | Kind | Source | Notes |
 |---|---|---|
-| 3D models, sprites, UI kits, audio | **Kenney** — kenney.nl/assets | CC0. The universe uses these (ships, trees, asteroids, SFX). Drop into `public/` and upload with the bundle, or host on `world.uploads`. |
-| SFX | **Kenney audio packs**, **freesound.org** (filter CC0) | bundle small clips; large media → `world.uploads` (≤25MB). |
+| 3D models, sprites, UI kits, audio | **Kenney** — kenney.nl/assets | CC0. The universe uses these (ships, trees, asteroids, SFX). Drop into `public/` and upload with the bundle, or host on `worlds.uploads`. |
+| SFX | **Kenney audio packs**, **freesound.org** (filter CC0) | bundle small clips; large media → `worlds.uploads` (≤25MB). |
 | Textures / HDRIs | **Poly Haven** — polyhaven.com | CC0, hotlinkable. |
 | Photos | **Unsplash** | free, hotlinkable via `images.unsplash.com`. |
 | Emoji / open icons | **lucide**, **Twemoji** | MIT / CC-BY. |
@@ -237,14 +237,14 @@ for the next builder.
 
 ## Gotchas
 
-- **Use relative URLs everywhere** (`/world.js`, `./style.css`, `/u/<site>/<file>`). Never
-  hardcode `https://<site>.<your-world-host>` — sites are same-origin and must stay portable.
+- **Use relative URLs everywhere** (`/worlds.js`, `./style.css`, `/u/<site>/<file>`). Never
+  hardcode `https://<site>.<your-worlds-host>` — sites are same-origin and must stay portable.
 - **`index.html` must be at the folder root.** That's what makes a folder a site. SPA routing?
   add `"spa_fallback": true` to `.world.json`.
-- **`world.*` methods are async and ready immediately** — `world.me()`, `world.db.collection(...)`
+- **`worlds.*` methods are async and ready immediately** — `worlds.me()`, `worlds.db.collection(...)`
   etc. work the moment the script tag runs (the SDK queues internally). For the site's own
-  name/url, `await world.ready` first (`world.site` is `{name, url}`).
-- **Every rejection is a `WorldError`** with `{code, message, status, retry_after?}`. Codes:
+  name/url, `await worlds.ready` first (`worlds.site` is `{name, url}`).
+- **Every rejection is a `WorldsError`** with `{code, message, status, retry_after?}`. Codes:
   `unauthorized · not_found · rate_limited · payload_too_large · quota_exceeded ·
   invalid_request · reserved_name · conflict · replay_expired · maintenance · upstream_error ·
   internal`. Branch on `e.code`, not on message text.
@@ -252,7 +252,7 @@ for the next builder.
   dot paths (`"author.handle"`). No OR, no aggregation in v1 — do those client-side after `list`.
 - **Counters**: use `c.increment(id, field, by)`, never `get`→`+1`→`update` (it races).
 - **Ephemeral vs durable**: high-frequency/transient state (cursors, presence, "is typing") →
-  `world.ws` (not persisted, no quota). State you want back on reload → `world.db`.
+  `worlds.ws` (not persisted, no quota). State you want back on reload → `worlds.db`.
 - **Subscriptions survive reconnects** via cursor replay; after a long offline gap the SDK
   re-lists for you (you may see `type:"update"` for docs you already had — make renders idempotent
   by keying on `doc.id`).

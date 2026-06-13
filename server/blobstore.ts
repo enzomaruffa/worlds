@@ -1,7 +1,7 @@
 import { mkdir, rename, rm, readdir, stat } from "node:fs/promises";
 import { join, normalize } from "node:path";
 import { config } from "./config";
-import { WorldError } from "./errors";
+import { WorldsError } from "./errors";
 
 // The cloud only ever appears behind this seam (local fs now, S3 in prod).
 export interface BlobStore {
@@ -17,7 +17,7 @@ export interface BlobStore {
 
 function safeJoin(root: string, ...parts: string[]): string {
   const p = normalize(join(root, ...parts));
-  if (!p.startsWith(normalize(root))) throw new WorldError("invalid_request", "bad path");
+  if (!p.startsWith(normalize(root))) throw new WorldsError("invalid_request", "bad path");
   return p;
 }
 

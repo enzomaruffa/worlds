@@ -45,9 +45,9 @@
   </main>
 
   <!-- the whole platform: identity, db, realtime, ai, uploads, ws — no keys, no config -->
-  <script src="/world.js"></script>
+  <script src="/worlds.js"></script>
   <script>
-    const notes = world.db.collection("notes");
+    const notes = worlds.db.collection("notes");
     const list = document.getElementById("list");
     const input = document.getElementById("msg");
     let me;
@@ -69,7 +69,7 @@
     }
 
     (async () => {
-      me = await world.me();
+      me = await worlds.me();
       document.getElementById("who").textContent = `signed in as ${me.name} (@${me.handle})`;
 
       // newest first, then live — your own posts and everyone else's land here

@@ -1,5 +1,5 @@
 import { config } from "./config";
-import { WorldError, json } from "./errors";
+import { WorldsError, json } from "./errors";
 import { identityFrom, requireCsrf } from "./identity";
 import { takeQuota } from "./ratelimit";
 import { store } from "./blobstore";
@@ -17,7 +17,7 @@ const EMBED_MODEL = "gemini-embedding-001";
 const BASE = "https://generativelanguage.googleapis.com/v1beta";
 
 function requireKey(): string {
-  if (!config.geminiKey) throw new WorldError("upstream_error", "AI is not configured (no GEMINI_API_KEY)");
+  if (!config.geminiKey) throw new WorldsError("upstream_error", "AI is not configured (no GEMINI_API_KEY)");
   return config.geminiKey;
 }
 
@@ -30,7 +30,7 @@ async function gemini(path: string, body: unknown): Promise<Record<string, unkno
   if (!res.ok) {
     const text = await res.text();
     console.error("gemini error", res.status, text.slice(0, 500));
-    throw new WorldError("upstream_error", `model provider returned ${res.status}`);
+    throw new WorldsError("upstream_error", `model provider returned ${res.status}`);
   }
   return (await res.json()) as Record<string, unknown>;
 }
@@ -51,7 +51,7 @@ export async function complete(req: Request): Promise<Response> {
   const body = (await req.json().catch(() => ({}))) as CompleteBody;
   const alias = body.model ?? "fast";
   const cfg = CHAT_MODELS[alias];
-  if (!cfg) throw new WorldError("invalid_request", `unknown model alias "${alias}"`);
+  if (!cfg) throw new WorldsError("invalid_request", `unknown model alias "${alias}"`);
 
   const contents = body.messages
     ? body.messages.map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: m.content }] }))
@@ -94,7 +94,7 @@ async function streamComplete(alias: string, modelId: string, reqBody: unknown):
   });
   if (!upstream.ok || !upstream.body) {
     console.error("gemini stream error", upstream.status, (await upstream.text().catch(() => "")).slice(0, 500));
-    throw new WorldError("upstream_error", `model provider returned ${upstream.status}`);
+    throw new WorldsError("upstream_error", `model provider returned ${upstream.status}`);
   }
   const enc = new TextEncoder();
   const dec = new TextDecoder();
@@ -130,7 +130,7 @@ async function streamComplete(alias: string, modelId: string, reqBody: unknown):
     },
   });
   return new Response(stream, {
-    headers: { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-store", "x-world-api-version": "1" },
+    headers: { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-store", "x-worlds-api-version": "1" },
   });
 }
 
@@ -148,7 +148,7 @@ export async function embed(req: Request): Promise<Response> {
   const who = identityFrom(req);
   takeQuota("ai", who.handle);
   const { text } = (await req.json().catch(() => ({}))) as { text?: string };
-  if (!text) throw new WorldError("invalid_request", "expected {text}");
+  if (!text) throw new WorldsError("invalid_request", "expected {text}");
   const vector = await embedText(text);
   return json({ vector, dim: vector.length, model: "embed-1" });
 }
@@ -158,13 +158,13 @@ export async function image(req: Request, site: string): Promise<Response> {
   const who = identityFrom(req);
   takeQuota("ai_image", who.handle);
   const { prompt } = (await req.json().catch(() => ({}))) as { prompt?: string };
-  if (!prompt) throw new WorldError("invalid_request", "expected {prompt}");
+  if (!prompt) throw new WorldsError("invalid_request", "expected {prompt}");
   const out = await gemini(`models/gemini-3.1-flash-image:generateContent`, {
     contents: [{ role: "user", parts: [{ text: prompt }] }],
   });
   const candidates = out.candidates as { content?: { parts?: { inlineData?: { data?: string } }[] } }[] | undefined;
   const b64 = candidates?.[0]?.content?.parts?.find((p) => p.inlineData?.data)?.inlineData?.data;
-  if (!b64) throw new WorldError("upstream_error", "model returned no image");
+  if (!b64) throw new WorldsError("upstream_error", "model returned no image");
   const name = `ai_img_${crypto.randomUUID().slice(0, 8)}.png`;
   const blob = new Blob([Buffer.from(b64, "base64")], { type: "image/png" });
   await store.putUpload(site, name, blob);
