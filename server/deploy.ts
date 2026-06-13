@@ -5,11 +5,21 @@ import { WorldsError, json } from "./errors";
 import { store } from "./blobstore";
 import { identityFrom, requireCsrf, type Identity } from "./identity";
 import { sql, dbReady } from "./db";
-import { upsertSite, siteUrl, publishSiteDoc } from "./sites";
+import { upsertSite, siteUrl, publishSiteDoc, getSite } from "./sites";
 import { allowDeploy } from "./ratelimit";
 import { postDeploy } from "./postdeploy";
 
 const SITE_NAME = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
+
+// Ownership: the first uploader owns a site; only the owner can overwrite it
+// (basic maintainer model). New sites are open to anyone.
+async function requireOwner(site: string, who: Identity): Promise<void> {
+  if (!dbReady()) return;
+  const existing = await getSite(site);
+  if (existing && existing.creator !== who.handle) {
+    throw new WorldsError("forbidden", `"${site}" is owned by @${existing.creator} — only the owner can update it`);
+  }
+}
 
 export interface DeployResult {
   site: string;
@@ -84,6 +94,7 @@ export async function handleDeploy(req: Request): Promise<Response> {
   if (bundle.size > LIMITS.deployBytes) {
     throw new WorldsError("payload_too_large", `bundle exceeds ${LIMITS.deployBytes / 1024 / 1024}MB`);
   }
+  await requireOwner(site, who);
   allowDeploy(site);
 
   // Stage: write the tarball, list-validate entries, then extract. The finally
@@ -139,6 +150,7 @@ export async function deployFileMap(site: string, files: Record<string, string>,
     total += content.length;
   }
   if (total > LIMITS.deployBytes) throw new WorldsError("payload_too_large", "files exceed the deploy size limit");
+  await requireOwner(site, who);
   allowDeploy(site);
 
   const staged = store.stagingDir();

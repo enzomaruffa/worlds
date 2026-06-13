@@ -1,7 +1,7 @@
 // The error envelope is part of the frozen v1 contract (see spec/world-v1.yaml).
 export type ErrorCode =
   | "unauthorized" | "not_found" | "rate_limited" | "payload_too_large"
-  | "quota_exceeded" | "invalid_request" | "reserved_name" | "conflict"
+  | "quota_exceeded" | "invalid_request" | "reserved_name" | "forbidden" | "conflict"
   | "replay_expired" | "maintenance" | "upstream_error" | "internal";
 
 export class WorldsError extends Error {

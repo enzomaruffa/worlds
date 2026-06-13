@@ -7,6 +7,7 @@ export type ErrorCode =
   | "quota_exceeded"
   | "invalid_request"
   | "reserved_name"
+  | "forbidden"
   | "conflict"
   | "replay_expired"
   | "maintenance"
@@ -21,6 +22,7 @@ const STATUS: Record<ErrorCode, number> = {
   quota_exceeded: 429,
   invalid_request: 400,
   reserved_name: 409,
+  forbidden: 403,
   conflict: 409,
   replay_expired: 410,
   maintenance: 503,

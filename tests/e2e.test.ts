@@ -109,6 +109,20 @@ describe("hosting", () => {
   test("unknown site 404s", async () => {
     expect((await req("GET", "/", { site: "nope" })).status).toBe(404);
   });
+
+  test("only the owner (first uploader) can overwrite a site", async () => {
+    const site = `${S1}-owned`;
+    expect((await deploy(site, { "index.html": "<h1>v1</h1>" })).status).toBe(200); // dev owns it
+
+    const form = new FormData();
+    form.set("site", site);
+    form.set("bundle", await bundle({ "index.html": "<h1>hijack</h1>" }), "bundle.tgz");
+    const intruder = await req("POST", "/api/v1/deploy", { form, site: "home", headers: { "x-auth-request-email": "intruder@example.com" } });
+    expect(intruder.status).toBe(403);
+    expect((await intruder.json()).error.code).toBe("forbidden");
+
+    expect((await deploy(site, { "index.html": "<h1>v2</h1>" })).status).toBe(200); // owner still can
+  });
 });
 
 describe("identity", () => {
