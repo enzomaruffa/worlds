@@ -234,7 +234,9 @@ const server = Bun.serve<SocketData, never>({
       if (config.routing === "path" && url.pathname.startsWith("/app/")) {
         const [, , appSite, ...rest] = url.pathname.split("/");
         if (appSite) {
-          if (rest.length === 0) return Response.redirect(`${url.origin}/app/${appSite}/`, 308);
+          // relative Location so it inherits the client's scheme (https), not the
+          // plain-http the server sees behind a tunnel.
+          if (rest.length === 0) return new Response(null, { status: 308, headers: { location: `/app/${appSite}/` } });
           const path = `/${rest.join("/")}`;
           if (appSite === "hello") return (await serveBundled(TUTORIAL_DIR, path)) ?? siteNotFound("hello");
           return (await serveSite(req, appSite, path)) ?? siteNotFound(appSite);
