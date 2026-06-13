@@ -202,7 +202,7 @@ function signinPage(rd: string): Response {
   <h1>Worlds</h1>
   <p>Sign in with Google to continue</p>
   <div id="g_id_onload" data-client_id="${cid}" data-callback="onCred" data-auto_prompt="true"></div>
-  <div id="btn" class="g_id_signin" data-type="standard" data-theme="filled_black" data-size="large" data-shape="pill" data-text="signin_with"></div>
+  <div id="btn" class="g_id_signin" data-type="standard" data-theme="filled_black" data-size="large" data-shape="rectangular" data-text="signin_with" data-logo_alignment="center" data-width="280"></div>
   <div id="err"></div>
 </div>
 <script>
