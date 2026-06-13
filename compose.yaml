@@ -1,0 +1,38 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: world
+      POSTGRES_PASSWORD: world
+      POSTGRES_DB: world
+    ports:
+      - "5499:5432"
+    volumes:
+      - world-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U world"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+  # The platform. `docker compose up` runs the whole stack; `docker compose up -d
+  # postgres` brings up just the DB for local `bun run dev`.
+  world:
+    build: .
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: postgres://world:world@postgres:5432/world
+      WORLD_DATA_DIR: /data
+    ports:
+      - "8420:8420"
+    volumes:
+      - world-data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  world-pg:
+  world-data:

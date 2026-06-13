@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>my world</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; display: grid; place-items: center;
+      background: #0a0a0b; color: #e4e4e7;
+      font: 15px/1.6 ui-sans-serif, system-ui, sans-serif;
+    }
+    main { width: min(560px, 92vw); padding: 2rem 0; }
+    h1 { font-size: 1.6rem; margin: 0 0 .25rem; }
+    .who { color: #71717a; font-size: .85rem; margin-bottom: 1.5rem; }
+    .row { display: flex; gap: .5rem; margin-bottom: 1rem; }
+    input {
+      flex: 1; padding: .6rem .8rem; border-radius: .5rem;
+      border: 1px solid #3f3f46; background: #18181b; color: inherit; font: inherit;
+    }
+    input:focus { outline: none; border-color: #e5a00d; }
+    button {
+      padding: .6rem 1rem; border-radius: .5rem; border: none; cursor: pointer;
+      background: #e5a00d; color: #101012; font: 600 inherit;
+    }
+    ul { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: .5rem; }
+    li { padding: .6rem .8rem; border-radius: .5rem; background: #131316; border: 1px solid #27272a; }
+    li b { color: #e5a00d; font-weight: 600; }
+    .empty { color: #52525b; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>my world 🌍</h1>
+    <p class="who" id="who">…</p>
+
+    <div class="row">
+      <input id="msg" placeholder="leave a note…" autocomplete="off" />
+      <button id="send">post</button>
+    </div>
+
+    <ul id="list"><li class="empty">no notes yet — be the first.</li></ul>
+  </main>
+
+  <!-- the whole platform: identity, db, realtime, ai, uploads, ws — no keys, no config -->
+  <script src="/world.js"></script>
+  <script>
+    const notes = world.db.collection("notes");
+    const list = document.getElementById("list");
+    const input = document.getElementById("msg");
+    let me;
+
+    function render(doc) {
+      document.querySelector(".empty")?.remove();
+      const li = document.createElement("li");
+      li.innerHTML = `<b></b> <span></span>`;
+      li.querySelector("b").textContent = doc.data.by + ":";
+      li.querySelector("span").textContent = doc.data.text;
+      list.prepend(li);
+    }
+
+    async function post() {
+      const text = input.value.trim();
+      if (!text) return;
+      input.value = "";
+      await notes.create({ text, by: me.name });   // realtime subscribe paints it
+    }
+
+    (async () => {
+      me = await world.me();
+      document.getElementById("who").textContent = `signed in as ${me.name} (@${me.handle})`;
+
+      // newest first, then live — your own posts and everyone else's land here
+      const page = await notes.list({ sort: "-created_at", limit: 50 });
+      page.items.forEach(render);
+      notes.subscribe(ev => { if (ev.type === "create") render(ev.doc); });
+    })();
+
+    document.getElementById("send").onclick = post;
+    input.addEventListener("keydown", e => { if (e.key === "Enter") post(); });
+  </script>
+</body>
+</html>

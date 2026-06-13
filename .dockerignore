@@ -1,0 +1,9 @@
+node_modules
+data
+bin
+examples
+!examples/universe
+tests
+.git
+.DS_Store
+*.tgz

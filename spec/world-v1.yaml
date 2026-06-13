@@ -1,0 +1,52 @@
+# World v1 API contract — the single source of truth (docs/PLAN.md, Draft B).
+# Frozen at launch: additive-only evolution, enforced by oasdiff + golden corpus in CI.
+openapi: "3.1.0"
+info:
+  title: World API
+  version: "1"
+paths:
+  /api/v1/me: { get: { summary: caller identity } }
+  /api/v1/site: { get: { summary: calling site context (Host-derived) } }
+  /api/v1/deploy: { post: { summary: multipart tarball -> live site } }
+  /api/v1/sites: { get: { summary: site directory } }
+  /api/v1/sites/{name}: { get: { summary: one site } }
+  /api/v1/sites/{name}/deploys: { get: { summary: deploy history } }
+  /api/v1/db: { get: { summary: list collections } }
+  /api/v1/db/{collection}:
+    post: { summary: create document }
+    get: { summary: list documents (filter, sort, cursor) }
+  /api/v1/db/{collection}/{id}:
+    get: { summary: read }
+    patch: { summary: shallow merge (If-Unmodified-Since-Version) }
+    put: { summary: replace }
+    delete: { summary: delete (idempotent) }
+  /api/v1/db/{collection}/{id}/increment: { post: { summary: atomic counter } }
+  /api/v1/socket: { get: { summary: multiplexed WebSocket (db subs + channels), subprotocol world.v1 } }
+  /api/v1/ai/complete: { post: { summary: Gemini completion (model aliases only) } }
+  /api/v1/ai/embed: { post: { summary: embedding } }
+  /api/v1/ai/image: { post: { summary: image -> stored upload } }
+  /api/v1/ai/models: { get: { summary: stable model aliases } }
+  /api/v1/uploads:
+    post: { summary: store file }
+    get: { summary: list uploads }
+  /api/v1/uploads/{name}: { delete: { summary: delete upload } }
+  /api/v1/notify/slack: { post: { summary: capped, sender-stamped Slack message } }
+  /api/v1/universe: { get: { summary: homepage payload } }
+  /api/v1/creators/{handle}: { get: { summary: creator page data } }
+  /api/v1/beacon/visit: { post: { summary: sendBeacon page view, always 204 } }
+  /api/v1/meta: { get: { summary: api_version + build (build is NOT stable) } }
+components:
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              enum: [unauthorized, not_found, rate_limited, payload_too_large, quota_exceeded,
+                     invalid_request, reserved_name, conflict, replay_expired, maintenance,
+                     upstream_error, internal]
+            message: { type: string }
+            retry_after: { type: number }

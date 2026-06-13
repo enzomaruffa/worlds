@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>hello, world</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: #0a0a0b; color: #e4e4e7;
+      font: 15px/1.65 ui-sans-serif, system-ui, sans-serif;
+    }
+    main { max-width: 760px; margin: 0 auto; padding: 3rem 1.25rem 6rem; }
+    .hero { display: flex; gap: 1rem; align-items: center; margin-bottom: .5rem; }
+    .hero img { width: 56px; height: 56px; border-radius: 50%; border: 2px solid #27272a; }
+    h1 { font-size: 2rem; margin: 0; }
+    h2 { font-size: 1.15rem; margin: 2.5rem 0 .5rem; }
+    .lede { color: #a1a1aa; }
+    .who { color: #e5a00d; font-weight: 600; }
+    code { font-family: ui-monospace, monospace; }
+    pre {
+      background: #131316; border: 1px solid #27272a; border-radius: .6rem;
+      padding: .9rem 1rem; overflow-x: auto; font: 13px/1.6 ui-monospace, monospace; position: relative;
+    }
+    pre .copy {
+      position: absolute; top: .5rem; right: .5rem; border: 1px solid #3f3f46; background: #18181b;
+      color: #a1a1aa; border-radius: .4rem; padding: .15rem .5rem; font-size: 11px; cursor: pointer;
+    }
+    .demo { border: 1px solid #27272a; border-radius: .6rem; padding: 1rem; background: #0f0f11; margin-top: .75rem; }
+    .row { display: flex; gap: .5rem; margin-bottom: .5rem; }
+    input {
+      flex: 1; padding: .55rem .75rem; border-radius: .5rem;
+      border: 1px solid #3f3f46; background: #18181b; color: inherit; font: inherit;
+    }
+    button.go { padding: .55rem 1rem; border: none; border-radius: .5rem; background: #e5a00d; color: #101012; font-weight: 600; cursor: pointer; }
+    ul { list-style: none; padding: 0; margin: .5rem 0 0; display: flex; flex-direction: column; gap: .35rem; }
+    li { padding: .45rem .7rem; border-radius: .4rem; background: #18181b; font-size: 14px; }
+    li b { color: #e5a00d; }
+    .out { white-space: pre-wrap; color: #d4d4d8; min-height: 1.5em; }
+    a { color: #e5a00d; }
+    .pill { display: inline-block; background: #18181b; border: 1px solid #27272a; border-radius: 999px; padding: .1rem .6rem; font-size: 12px; color: #a1a1aa; }
+  </style>
+</head>
+<body>
+<main>
+  <div class="hero">
+    <img id="avatar" alt="" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E" />
+    <div>
+      <h1>hello, world 🌍</h1>
+      <div class="lede" id="greeting">the 5-minute tour of the platform</div>
+    </div>
+  </div>
+
+  <p class="lede">
+    World turns a folder of static files into <span class="pill">&lt;name&gt;.<span data-base-host>your-world</span></span> —
+    employee-only, instant, with a built-in database, AI, uploads, realtime and identity.
+    One script tag, no keys. This page is itself a World site using only the public SDK.
+  </p>
+
+  <h2>1 · Make a site</h2>
+  <p class="lede">A folder with an <code>index.html</code>. Add the SDK with one tag:</p>
+  <pre>&lt;script src="/world.js"&gt;&lt;/script&gt;</pre>
+
+  <h2>2 · Know who's visiting — <code>world.me()</code></h2>
+  <pre>const me = await world.me();   // { email, name, handle, avatar_url }</pre>
+  <div class="demo">→ <span class="out" id="meOut">…</span></div>
+
+  <h2>3 · Store &amp; sync data — <code>world.db</code></h2>
+  <p class="lede">Named collections of JSON docs, scoped to your site, realtime across tabs. Sign the guestbook:</p>
+  <pre>const book = world.db.collection("guestbook");
+await book.create({ text, by: me.name });
+book.subscribe(ev =&gt; render(ev.doc));   // live</pre>
+  <div class="demo">
+    <div class="row">
+      <input id="gbInput" placeholder="leave a note…" autocomplete="off" />
+      <button class="go" id="gbSend">sign</button>
+    </div>
+    <ul id="gbList"></ul>
+  </div>
+
+  <h2>4 · Ask the model — <code>world.ai</code> (streaming)</h2>
+  <pre>await world.ai.complete({ prompt, stream: true, onToken: t =&gt; append(t) });</pre>
+  <div class="demo">
+    <div class="row">
+      <input id="aiInput" placeholder="ask anything…" value="In one sentence, what's a good use for an internal tool?" />
+      <button class="go" id="aiSend">ask</button>
+    </div>
+    <div class="out" id="aiOut"></div>
+  </div>
+
+  <h2>5 · Ship it</h2>
+  <p class="lede">Three equivalent ways — pick one:</p>
+  <pre>world deploy                         # the CLI, from your folder</pre>
+  <pre># or drag the folder onto your World homepage in the browser
+# or give Claude the MCP server and just ask:</pre>
+  <pre>Add the MCP server <span data-base-host>your-world</span>/mcp to Claude, then say:
+"Deploy this folder to World as 'my-demo'."</pre>
+
+  <h2>More</h2>
+  <p class="lede">
+    Full SDK: <a id="lnkDocs" href="/docs">/docs</a> ·
+    machine-readable: <a id="lnkLlms" href="/llms.txt">/llms.txt</a> ·
+    see every site in <a id="lnkUniverse" href="/">the universe</a>.
+    Also: <code>world.uploads</code> (files), <code>world.ws</code> (multiplayer channels),
+    <code>world.notify.slack</code> (ping a channel). No backends, no secrets, no cron — that's the deal.
+  </p>
+</main>
+
+<script src="/world.js"></script>
+<script>
+  // copy buttons on every snippet
+  for (const pre of document.querySelectorAll("pre")) {
+    const b = document.createElement("button");
+    b.className = "copy"; b.textContent = "copy";
+    b.onclick = () => { navigator.clipboard?.writeText(pre.textContent.replace(/copy$/, "").trim()); b.textContent = "✓"; setTimeout(() => (b.textContent = "copy"), 1200); };
+    pre.appendChild(b);
+  }
+
+  // host-agnostic links: the tutorial runs on the `hello` subdomain of any instance.
+  const baseHost = location.host.split(".").slice(1).join(".") || location.host;
+  const root = `${location.protocol}//${baseHost}`;
+  for (const el of document.querySelectorAll("[data-base-host]")) el.textContent = baseHost;
+  document.getElementById("lnkDocs").href = `${root}/docs`;
+  document.getElementById("lnkLlms").href = `${root}/llms.txt`;
+  document.getElementById("lnkUniverse").href = `${location.protocol}//universe.${baseHost}`;
+
+  let me;
+  (async () => {
+    me = await world.me();
+    document.getElementById("greeting").innerHTML = `welcome, <span class="who">${me.name}</span> — you're signed in via the employee gate`;
+    if (me.avatar_url) document.getElementById("avatar").src = me.avatar_url;
+    document.getElementById("meOut").textContent = JSON.stringify(me);
+  })();
+
+  // guestbook (db + realtime)
+  const book = world.db.collection("guestbook");
+  const gbList = document.getElementById("gbList");
+  const gbInput = document.getElementById("gbInput");
+  function renderNote(doc) {
+    const li = document.createElement("li");
+    li.innerHTML = "<b></b> <span></span>";
+    li.querySelector("b").textContent = doc.data.by + ":";
+    li.querySelector("span").textContent = doc.data.text;
+    gbList.prepend(li);
+  }
+  async function sign() {
+    const text = gbInput.value.trim();
+    if (!text || !me) return;
+    gbInput.value = "";
+    await book.create({ text, by: me.name });
+  }
+  (async () => {
+    for (const doc of (await book.list({ sort: "-created_at", limit: 25 })).items) renderNote(doc);
+    book.subscribe((ev) => { if (ev.type === "create") renderNote(ev.doc); });
+  })();
+  document.getElementById("gbSend").onclick = sign;
+  gbInput.addEventListener("keydown", (e) => { if (e.key === "Enter") sign(); });
+
+  // streaming AI
+  const aiOut = document.getElementById("aiOut");
+  document.getElementById("aiSend").onclick = async () => {
+    const prompt = document.getElementById("aiInput").value.trim();
+    if (!prompt) return;
+    aiOut.textContent = "";
+    try {
+      await world.ai.complete({ prompt, model: "fast", max_tokens: 200, stream: true, onToken: (t) => (aiOut.textContent += t) });
+    } catch (e) {
+      aiOut.textContent = e.code === "quota_exceeded" ? "(out of AI for today)" : `(${e.message})`;
+    }
+  };
+</script>
+</body>
+</html>
