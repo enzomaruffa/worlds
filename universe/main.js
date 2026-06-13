@@ -334,13 +334,15 @@ function makeStar(sys, name) {
   starBodies.push({ pos: sys.pos.clone(), r: sys.starR, mass: sys.starR * 9, hot: sys.hot });
 }
 const starBodies = [];
+// declared before the makeStar() calls below — makeStar → label → _labelTextures,
+// so a `const` declared after the calls would throw a TDZ ReferenceError at init.
+const _labelTextures = [];
 
 makeStar(SYSTEMS.misc, "hello.world");
 for (const [key, sys] of Object.entries(SYSTEMS)) {
   if (key !== "misc") makeStar(sys, sys.title);
 }
 
-const _labelTextures = [];
 function label(text, y, color = 0xe4e4e7) {
   const c = document.createElement("canvas");
   c.width = 512; c.height = 96;
