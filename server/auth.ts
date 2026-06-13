@@ -69,8 +69,13 @@ function readCookie(req: Request, name: string): string | null {
 function cookieAttrs(req: Request): string {
   const host = config.baseDomain.split(":")[0]!;
   const domain = host === "localhost" ? "" : `; Domain=.${host}`;
-  const secure = new URL(req.url).protocol === "https:" ? "; Secure" : "";
-  return `; Path=/; HttpOnly; SameSite=Lax${domain}${secure}`;
+  // Behind a TLS-terminating proxy/tunnel the server sees http; trust the configured
+  // public origin (or the forwarded proto) so the cookie is still marked Secure.
+  const https =
+    new URL(req.url).protocol === "https:" ||
+    req.headers.get("x-forwarded-proto") === "https" ||
+    (config.publicOrigin?.startsWith("https:") ?? false);
+  return `; Path=/; HttpOnly; SameSite=Lax${domain}${https ? "; Secure" : ""}`;
 }
 
 export function sessionFrom(req: Request): Session | null {

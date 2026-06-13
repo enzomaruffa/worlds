@@ -203,7 +203,10 @@ const server = Bun.serve<SocketData, never>({
         if (!exempt && !sessionFrom(req)) {
           if (req.method === "GET" && (req.headers.get("accept") ?? "").includes("text/html")) {
             const base = config.publicOrigin ?? `${url.protocol}//${config.baseDomain}`;
-            return Response.redirect(`${base}/auth/login?rd=${encodeURIComponent(url.href)}`, 302);
+            // Build the return target off the public origin too — behind a tunnel
+            // url.href is http, which would bounce the user through an extra upgrade.
+            const rd = `${base}${url.pathname}${url.search}`;
+            return Response.redirect(`${base}/auth/login?rd=${encodeURIComponent(rd)}`, 302);
           }
           return jsonError(new WorldsError("unauthorized", "sign in required"));
         }
