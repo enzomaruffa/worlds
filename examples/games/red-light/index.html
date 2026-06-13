@@ -245,6 +245,7 @@
     const EASE       = 9;        // velocity approach rate (higher = snappier)
     const SEND_HZ    = 12;       // position broadcasts per second (throttle)
     const STALE_MS   = 6000;     // drop remote players unheard-from this long
+    const HEARTBEAT_MS = 1500;   // re-broadcast our pose at least this often so idle players don't go stale & vanish
     const MOVE_WINDOW_MS = 180;  // recent-movement window for red-light elimination
     const WIN_RESET_MS   = 3500; // host delay before resetting after a win
     const GREEN_MIN = 1800, GREEN_MAX = 4500;
@@ -376,6 +377,8 @@
 
     function hostStep() {
       if (!isHost() || winnerName) return;
+      checkRoundEnd();              // watchdog: end the round if everyone's out
+      if (winnerName) return;
       const next = light.state === "green" ? "red" : "green";
       broadcastLight(next);
       const dur = next === "green" ? rnd(GREEN_MIN, GREEN_MAX) : rnd(RED_MIN, RED_MAX);
@@ -433,15 +436,34 @@
       }, WIN_RESET_MS);
     }
 
-    function showWinner(name) {
+    function concludeRound(text) {
       if (winnerName) return;
-      winnerName = name;
-      winText.textContent = (name === me.name ? "🏆 You win!" : `🏆 ${name} wins!`);
+      winnerName = text;        // non-null marks the round as over
+      winText.textContent = text;
       winSub.textContent = "next round starting…";
       winOverlay.classList.add("show");
       renderLight();
       updateMoveBtn();
-      hostScheduleReset();
+      hostScheduleReset();      // host-gated: only the host broadcasts the reset
+    }
+    function showWinner(name) {
+      concludeRound(name === me.name ? "🏆 You win!" : `🏆 ${name} wins!`);
+    }
+    // Everyone present is eliminated → nobody can win. The host ends the round so
+    // it never gets stuck (this is also the single-player "you lost → retry" path).
+    function allPresentOut() {
+      if (!self.out) return false;
+      for (const m of roster) {
+        if (m.handle === me.handle) continue;
+        const r = remotes.get(m.handle);
+        if (!r || !r.out) return false;   // someone present is still alive (or just joined)
+      }
+      return true;
+    }
+    function checkRoundEnd() {
+      if (isHost() && !winnerName && allPresentOut()) {
+        concludeRound(roster.length > 1 ? "Everyone's out! 🚫" : "You're out! 🚫");
+      }
     }
 
     // ── Movement control state ───────────────────────────────
@@ -487,7 +509,9 @@
       const due = now - lastSentAt >= 1000 / SEND_HZ;
       // throttle to SEND_HZ; always allow an immediate send when out/frozen flips
       const flip = lastSent && (payload.out !== lastSent.out || payload.frozen !== lastSent.frozen);
-      if ((due && changed) || flip) {
+      // heartbeat: re-broadcast even when idle so present players never go stale (and vanish)
+      const heartbeatDue = now - lastSentAt >= HEARTBEAT_MS;
+      if (flip || (due && changed) || heartbeatDue) {
         lastSentAt = now;
         lastSent = payload;
         publish({
@@ -552,6 +576,7 @@
       lastSent = null;
       publish({ t: "p", handle: me.handle, name: me.name,
                 y: Math.round(self.y * 1000) / 1000, frozen: false, out: true });
+      checkRoundEnd();
     }
 
     function pruneStale(now) {
@@ -719,6 +744,7 @@
             out: !!p.out,
             at: Date.now(),
           });
+          if (p.out) checkRoundEnd();   // a peer just went out — maybe everyone is now
           break;
         }
         case "light": {
