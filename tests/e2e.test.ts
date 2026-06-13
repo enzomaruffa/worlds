@@ -448,7 +448,7 @@ describe("auth (google mode)", () => {
     gdir = await mkdtemp(join(tmpdir(), "world-gauth-"));
     gproc = Bun.spawn(["bun", "server/index.ts"], {
       cwd: new URL("..", import.meta.url).pathname,
-      env: { ...process.env, WORLDS_PORT: String(GPORT), WORLDS_DATA_DIR: gdir, WORLDS_DEV: "0", WORLDS_AUTH: "google", WORLDS_SESSION_SECRET: SECRET, GOOGLE_CLIENT_ID: "test-client.apps.googleusercontent.com", WORLDS_PUBLIC_ORIGIN: GBASE, WORLDS_DISABLE_WORKERS: "1", WORLDS_SEED: "0" },
+      env: { ...process.env, WORLDS_PORT: String(GPORT), WORLDS_DATA_DIR: gdir, WORLDS_DEV: "0", WORLDS_AUTH: "google", WORLDS_SESSION_SECRET: SECRET, GOOGLE_CLIENT_ID: "test-client.apps.googleusercontent.com", GOOGLE_CLIENT_SECRET: "test-secret", WORLDS_PUBLIC_ORIGIN: GBASE, WORLDS_DISABLE_WORKERS: "1", WORLDS_SEED: "0" },
       stdout: "ignore",
       stderr: "ignore",
     });
@@ -484,6 +484,44 @@ describe("auth (google mode)", () => {
   });
   test("a tampered session is rejected", async () => {
     const res = await fetch(`${GBASE}/api/v1/me`, { headers: { cookie: `${session("tester@example.com")}TAMPER` } });
+    expect(res.status).toBe(401);
+  });
+});
+
+describe("auth (google GIS mode — client id, no secret)", () => {
+  const GPORT = 9500 + Math.floor(Math.random() * 80);
+  const GBASE = `http://localhost:${GPORT}`;
+  let gproc: ReturnType<typeof Bun.spawn>;
+  let gdir: string;
+
+  beforeAll(async () => {
+    gdir = await mkdtemp(join(tmpdir(), "world-gis-"));
+    gproc = Bun.spawn(["bun", "server/index.ts"], {
+      cwd: new URL("..", import.meta.url).pathname,
+      env: { ...process.env, WORLDS_PORT: String(GPORT), WORLDS_DATA_DIR: gdir, WORLDS_DEV: "0", WORLDS_AUTH: "google", WORLDS_SESSION_SECRET: "gis-secret", GOOGLE_CLIENT_ID: "test-client.apps.googleusercontent.com", WORLDS_PUBLIC_ORIGIN: GBASE, WORLDS_DISABLE_WORKERS: "1", WORLDS_SEED: "0" },
+      stdout: "ignore",
+      stderr: "ignore",
+    });
+    for (let i = 0; i < 60; i++) {
+      try { if ((await fetch(`${GBASE}/healthz`)).ok) break; } catch { /* not up yet */ }
+      await Bun.sleep(100);
+    }
+  });
+  afterAll(async () => { gproc?.kill(); await rm(gdir, { recursive: true, force: true }); });
+
+  test("/auth/login serves the GIS sign-in page (no Google redirect)", async () => {
+    const res = await fetch(`${GBASE}/auth/login`, { redirect: "manual" });
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain("accounts.google.com/gsi/client");
+    expect(html).toContain('data-client_id="test-client.apps.googleusercontent.com"');
+  });
+  test("/auth/google with no credential is 400", async () => {
+    const res = await fetch(`${GBASE}/auth/google`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+    expect(res.status).toBe(400);
+  });
+  test("/auth/google with a garbage credential is rejected (401)", async () => {
+    const res = await fetch(`${GBASE}/auth/google`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ credential: "not.a.jwt" }) });
     expect(res.status).toBe(401);
   });
 });
