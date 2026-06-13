@@ -42,6 +42,16 @@ function siteFromHost(host: string): string {
   return config.forwardSite || "home"; // unknown hosts (e.g. a tunnel) → forwarded site, else homepage
 }
 
+// The calling site for an API/socket request. Subdomain mode: from Host. Path mode:
+// all sites share the apex origin, so the SDK declares its site via the
+// `x-worlds-site` header (fetch) or `?site` (socket); static /app/<site>/ is routed by path.
+function siteFromRequest(req: Request, url: URL): string {
+  if (config.routing === "path") {
+    return req.headers.get("x-worlds-site") || url.searchParams.get("site") || "home";
+  }
+  return siteFromHost(req.headers.get("host") ?? "");
+}
+
 function loader(file: string, immutable: boolean): Promise<Response | null> {
   const f = Bun.file(join(SDK_DIR, file));
   return f.exists().then((ok) =>
@@ -180,7 +190,7 @@ const server = Bun.serve<SocketData, never>({
   port: config.port,
   async fetch(req, srv) {
     const url = new URL(req.url);
-    const site = siteFromHost(req.headers.get("host") ?? "");
+    const site = siteFromRequest(req, url);
     try {
       // Built-in sign-in routes (google mode).
       if (url.pathname.startsWith("/auth/")) return await handleAuth(req, url.pathname);
@@ -217,6 +227,18 @@ const server = Bun.serve<SocketData, never>({
       if (url.pathname.startsWith("/u/")) {
         const [, , uSite, ...rest] = url.pathname.split("/");
         if (uSite && rest.length) return await uploads.serveUpload(uSite, rest.join("/"));
+      }
+
+      // Path-routing mode: /app/<site>/… serves that site off the apex origin
+      // (no wildcard DNS/cert). Sites must use relative asset paths.
+      if (config.routing === "path" && url.pathname.startsWith("/app/")) {
+        const [, , appSite, ...rest] = url.pathname.split("/");
+        if (appSite) {
+          if (rest.length === 0) return Response.redirect(`${url.origin}/app/${appSite}/`, 308);
+          const path = `/${rest.join("/")}`;
+          if (appSite === "hello") return (await serveBundled(TUTORIAL_DIR, path)) ?? siteNotFound("hello");
+          return (await serveSite(req, appSite, path)) ?? siteNotFound(appSite);
+        }
       }
 
       // the `hello` host — the bundled tutorial (a reserved name, not a deployable site).

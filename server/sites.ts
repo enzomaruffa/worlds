@@ -24,6 +24,7 @@ export const CATEGORIES = new Set(["games", "work", "tools", "experiments", "mis
 export function siteUrl(name: string): string {
   const scheme = config.dev ? "http" : "https";
   const port = config.dev ? `:${config.port}` : "";
+  if (config.routing === "path") return `${scheme}://${config.baseDomain}${port}/app/${name}`;
   return `${scheme}://${name}.${config.baseDomain}${port}`;
 }
 

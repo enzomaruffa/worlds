@@ -17,6 +17,11 @@ export const config = {
   // at their root — lets you forward a single site over a non-wildcard tunnel.
   forwardSite: process.env.WORLDS_FORWARD_SITE || null,
 
+  // "subdomain" (default): sites at <name>.<base>. "path": sites at <base>/app/<name>
+  // — one origin, no wildcard DNS/cert needed (free behind Cloudflare). Trades
+  // per-site origin isolation; fine inside the sign-in boundary.
+  routing: (process.env.WORLDS_ROUTING ?? "subdomain") as "subdomain" | "path",
+
   // Auth: "google" = built-in Google sign-in (self-host default), "gateway" =
   // trust a verified-email header from an upstream proxy (e.g. behind IAP/CF Access).
   authMode: (process.env.WORLDS_AUTH ?? "google") as "google" | "gateway",

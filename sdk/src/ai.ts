@@ -1,4 +1,4 @@
-import { call } from "./http";
+import { call, HEADERS } from "./http";
 import { WorldsError } from "./error";
 
 interface CompleteOpts {
@@ -27,7 +27,7 @@ async function streamComplete(opts: CompleteOpts): Promise<{ text: string; model
   const { onToken, ...body } = opts;
   const res = await fetch("/api/v1/ai/complete", {
     method: "POST",
-    headers: { "x-worlds-csrf": "1", "content-type": "application/json" },
+    headers: { ...HEADERS, "content-type": "application/json" },
     body: JSON.stringify(body),
   });
   if (res.status === 401) {

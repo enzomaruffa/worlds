@@ -1,8 +1,14 @@
 import { WorldsError } from "./error";
 
 // Custom header forces a CORS preflight → same-origin only. Auth is the gateway's
-// session cookie; sites never carry tokens.
-const HEADERS: Record<string, string> = { "x-worlds-csrf": "1" };
+// session cookie; sites never carry tokens. In path-routing mode (sites at
+// /app/<site>/), the page shares the apex origin, so declare the site explicitly.
+function siteHeaders(): Record<string, string> {
+  if (typeof location === "undefined") return {};
+  const m = location.pathname.match(/^\/app\/([^/]+)/);
+  return m ? { "x-worlds-site": m[1]! } : {};
+}
+export const HEADERS: Record<string, string> = { "x-worlds-csrf": "1", ...siteHeaders() };
 
 export interface CallOpts {
   headers?: Record<string, string>;

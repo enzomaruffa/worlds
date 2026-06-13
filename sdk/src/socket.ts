@@ -20,7 +20,10 @@ export const sock = {
   open(): void {
     if (this.ws && (this.ws.readyState === 0 || this.ws.readyState === 1)) return;
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
-    this.ws = new WebSocket(`${proto}//${location.host}/api/v1/socket`, "worlds.v1");
+    // Path mode: declare the site via query (WebSockets can't send custom headers).
+    const m = location.pathname.match(/^\/app\/([^/]+)/);
+    const q = m ? `?site=${encodeURIComponent(m[1]!)}` : "";
+    this.ws = new WebSocket(`${proto}//${location.host}/api/v1/socket${q}`, "worlds.v1");
     this.ws.onopen = () => {
       this.backoff = 1000;
       for (const [id, sub] of this.subs) {

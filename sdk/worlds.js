@@ -16,7 +16,13 @@
   }
 
   // sdk/src/http.ts
-  var HEADERS = { "x-worlds-csrf": "1" };
+  function siteHeaders() {
+    if (typeof location === "undefined")
+      return {};
+    const m = location.pathname.match(/^\/app\/([^/]+)/);
+    return m ? { "x-worlds-site": m[1] } : {};
+  }
+  var HEADERS = { "x-worlds-csrf": "1", ...siteHeaders() };
   async function call(method, path, body, opts = {}) {
     const init = { method, headers: { ...HEADERS, ...opts.headers ?? {} } };
     if (body instanceof FormData) {
@@ -56,7 +62,9 @@
       if (this.ws && (this.ws.readyState === 0 || this.ws.readyState === 1))
         return;
       const proto = location.protocol === "https:" ? "wss:" : "ws:";
-      this.ws = new WebSocket(`${proto}//${location.host}/api/v1/socket`, "worlds.v1");
+      const m = location.pathname.match(/^\/app\/([^/]+)/);
+      const q = m ? `?site=${encodeURIComponent(m[1])}` : "";
+      this.ws = new WebSocket(`${proto}//${location.host}/api/v1/socket${q}`, "worlds.v1");
       this.ws.onopen = () => {
         this.backoff = 1000;
         for (const [id, sub] of this.subs) {
@@ -69,10 +77,10 @@
           this.ws.send(f);
         this.outbox = [];
       };
-      this.ws.onmessage = (m) => {
+      this.ws.onmessage = (m2) => {
         let f;
         try {
-          f = JSON.parse(m.data);
+          f = JSON.parse(m2.data);
         } catch {
           return;
         }
@@ -173,7 +181,7 @@
     const { onToken, ...body } = opts;
     const res = await fetch("/api/v1/ai/complete", {
       method: "POST",
-      headers: { "x-worlds-csrf": "1", "content-type": "application/json" },
+      headers: { ...HEADERS, "content-type": "application/json" },
       body: JSON.stringify(body)
     });
     if (res.status === 401) {

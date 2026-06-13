@@ -487,3 +487,51 @@ describe("auth (google mode)", () => {
     expect(res.status).toBe(401);
   });
 });
+
+describe("path routing (WORLDS_ROUTING=path)", () => {
+  const PPORT = 9600 + Math.floor(Math.random() * 300);
+  const PB = `http://localhost:${PPORT}`;
+  const SITE = `${S1}-p`;
+  let pproc: ReturnType<typeof Bun.spawn>;
+  let pdir: string;
+
+  beforeAll(async () => {
+    pdir = await mkdtemp(join(tmpdir(), "worlds-path-"));
+    pproc = Bun.spawn(["bun", "server/index.ts"], {
+      cwd: new URL("..", import.meta.url).pathname,
+      env: { ...process.env, WORLDS_PORT: String(PPORT), WORLDS_DATA_DIR: pdir, WORLDS_DEV: "1", WORLDS_ROUTING: "path", WORLDS_DISABLE_WORKERS: "1", WORLDS_SEED: "0" },
+      stdout: "ignore",
+      stderr: "ignore",
+    });
+    for (let i = 0; i < 60; i++) {
+      try { if ((await fetch(`${PB}/healthz`)).ok) break; } catch { /* booting */ }
+      await Bun.sleep(100);
+    }
+    const form = new FormData();
+    form.set("site", SITE);
+    form.set("bundle", await bundle({ "index.html": `<h1>path ${SITE}</h1>` }), "bundle.tgz");
+    await fetch(`${PB}/api/v1/deploy`, { method: "POST", headers: { "x-worlds-csrf": "1" }, body: form });
+  });
+  afterAll(async () => { pproc?.kill(); await rm(pdir, { recursive: true, force: true }); });
+
+  test("site is served at /app/<name>/", async () => {
+    const res = await fetch(`${PB}/app/${SITE}/`);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain(`path ${SITE}`);
+  });
+  test("/app/<name> redirects to the trailing slash", async () => {
+    const res = await fetch(`${PB}/app/${SITE}`, { redirect: "manual" });
+    expect(res.status).toBe(308);
+  });
+  test("siteUrl is path-based", async () => {
+    const s = await (await fetch(`${PB}/api/v1/sites/${SITE}`)).json();
+    expect(s.url).toContain(`/app/${SITE}`);
+  });
+  test("db is scoped by the x-worlds-site header (not Host)", async () => {
+    await fetch(`${PB}/api/v1/db/notes`, { method: "POST", headers: { "x-worlds-csrf": "1", "x-worlds-site": SITE, "content-type": "application/json" }, body: JSON.stringify({ v: 1 }) });
+    const mine = await (await fetch(`${PB}/api/v1/db/notes`, { headers: { "x-worlds-site": SITE } })).json();
+    expect(mine.items.length).toBe(1);
+    const home = await (await fetch(`${PB}/api/v1/db/notes`)).json(); // no header → home
+    expect(home.items.length).toBe(0);
+  });
+});
