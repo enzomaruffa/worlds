@@ -1,6 +1,11 @@
 export const config = {
   port: Number(process.env.WORLDS_PORT ?? 8420),
   dataDir: process.env.WORLDS_DATA_DIR ?? "./data",
+  // Remote app source: when set, deploys + uploads go to this S3 bucket and reads
+  // fall through to the local bundle. Creds come from the standard AWS_* env vars.
+  s3Bucket: process.env.WORLDS_S3_BUCKET,
+  s3Region: process.env.WORLDS_S3_REGION,
+  s3Endpoint: process.env.WORLDS_S3_ENDPOINT,
   // In dev any "<site>.<baseDomain>" Host works, e.g. mysite.worlds.localhost:8420.
   baseDomain: process.env.WORLDS_BASE_DOMAIN ?? "worlds.localhost",
   // dev stubs identity (no real auth) — explicit opt-in.

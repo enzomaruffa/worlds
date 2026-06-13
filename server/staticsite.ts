@@ -1,14 +1,13 @@
-import type { Stats } from "node:fs";
 import { join } from "node:path";
-import { store } from "./blobstore";
+import { store, type Stored } from "./blobstore";
 import { spaFallback } from "./sites";
 
 // Caching contract (docs/PLAN.md Q2): HTML no-cache + ETag so overwrite-deploys
 // show immediately; other assets get a short stale-while-revalidate window.
-function respond(req: Request, file: ReturnType<typeof Bun.file>, path: string, s: Stats): Response {
+function respond(req: Request, path: string, st: Stored): Response {
   const isHtml = path.endsWith(".html") || path.endsWith("/");
-  const etag = `"${s.size.toString(16)}-${Math.floor(s.mtime.getTime() / 1000).toString(16)}"`;
-  const res = new Response(file, {
+  const etag = `"${st.size.toString(16)}-${Math.floor(st.mtime / 1000).toString(16)}"`;
+  const res = new Response(st.body, {
     headers: {
       etag,
       "cache-control": isHtml ? "no-cache" : "max-age=60, stale-while-revalidate=600",
@@ -26,26 +25,13 @@ function checkEtag(req: Request, res: Response): Response {
   return res;
 }
 
-// One stat per candidate (the hit path used to stat twice — costly over an S3
-// mount). A directory is treated as a miss so extensionless/SPA fallbacks apply.
-async function statFile(file: ReturnType<typeof Bun.file>): Promise<Stats | null> {
-  try {
-    const s = await file.stat();
-    return s.isDirectory() ? null : s;
-  } catch {
-    return null;
-  }
-}
-
 export async function serveSite(req: Request, site: string, pathname: string): Promise<Response | null> {
   let path = decodeURIComponent(pathname);
   if (path.endsWith("/")) path += "index.html";
 
   const tryServe = async (p: string): Promise<Response | null> => {
-    const file = store.open(site, p);
-    if (!file) return null;
-    const s = await statFile(file);
-    return s ? respond(req, file, p, s) : null;
+    const st = await store.readSite(site, p);
+    return st ? respond(req, p, st) : null;
   };
 
   let res = await tryServe(path);

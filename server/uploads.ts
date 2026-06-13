@@ -49,9 +49,9 @@ export async function deleteUpload(req: Request, site: string, name: string): Pr
 }
 
 export async function serveUpload(site: string, name: string): Promise<Response> {
-  const file = store.openUpload(site, decodeURIComponent(name));
-  if (!file || !(await file.exists())) throw new WorldsError("not_found", "no such upload");
-  return new Response(file, {
+  const st = await store.readUpload(site, decodeURIComponent(name));
+  if (!st) throw new WorldsError("not_found", "no such upload");
+  return new Response(st.body, {
     headers: { "cache-control": "max-age=60, stale-while-revalidate=600" },
   });
 }

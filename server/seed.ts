@@ -1,6 +1,6 @@
 import { cp, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { store } from "./blobstore";
+import { localStore } from "./blobstore";
 import { dbReady } from "./db";
 import { avatarFor, type Identity } from "./identity";
 import { getSite, upsertSite, publishSiteDoc } from "./sites";
@@ -17,7 +17,7 @@ const SYSTEM: Identity = {
 
 export async function seedWorlds(): Promise<void> {
   if (process.env.WORLDS_SEED === "0" || !dbReady()) return;
-  const dir = new URL("../examples/universe", import.meta.url).pathname;
+  const dir = new URL("../universe", import.meta.url).pathname;
   try {
     if (!(await stat(join(dir, "index.html"))).isFile()) return;
   } catch {
@@ -25,9 +25,11 @@ export async function seedWorlds(): Promise<void> {
   }
   if (await getSite("universe")) return; // already present
 
-  const staged = store.stagingDir();
+  // Bundled apps always live on the local store (shipped in the image) — they're
+  // the "local source" the composed store falls back to.
+  const staged = localStore.stagingDir();
   await cp(dir, staged, { recursive: true });
-  await store.swapSite("universe", staged);
+  await localStore.swapSite("universe", staged);
   await upsertSite("universe", SYSTEM, {
     description: "Fly through every world as a planet in a living 3D galaxy.",
     category: "tools",

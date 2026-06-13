@@ -58,6 +58,9 @@ and skips its own sign-in. The proxy must protect every host, including `*.<your
 ## Storage & scaling
 
 Sites and uploads live under `WORLDS_DATA_DIR` via a `BlobStore` abstraction (local
-filesystem by default). For multi-instance or object-store backends, implement `BlobStore`
-for S3/GCS (the interface is in `server/blobstore.ts`). The realtime change-feed is
-in-process today (single instance); fan out via Postgres `LISTEN/NOTIFY` before scaling out.
+filesystem by default). Set `WORLDS_S3_BUCKET` (+ `WORLDS_S3_REGION` / `WORLDS_S3_ENDPOINT`,
+AWS creds via the standard `AWS_*` env) to store deploys + uploads in S3 (or any
+S3-compatible store like R2/MinIO) — reads fall through to the local bundle, so the
+shipped apps (the universe) stay local while user sites persist remotely. The realtime
+change-feed is in-process today (single instance); fan out via Postgres `LISTEN/NOTIFY`
+before scaling out.
