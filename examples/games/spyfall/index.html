@@ -1,0 +1,686 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Spyfall — Worlds</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #09090b;
+    --surface: #0c0c0f;
+    --surface-2: #131318;
+    --border: #27272a;
+    --border-soft: #1c1c20;
+    --gold: #f59e0b;
+    --gold-bright: #fbbf24;
+    --text: #e4e4e7;
+    --muted: #a1a1aa;
+    --muted-2: #71717a;
+    --danger: #ef4444;
+    --good: #22c55e;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background:
+      radial-gradient(1200px 600px at 50% -10%, rgba(245,158,11,.06), transparent 60%),
+      var(--bg);
+    color: var(--text);
+    font-family: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+  a { color: var(--gold); }
+  .wrap {
+    width: min(820px, 94vw);
+    margin: 0 auto;
+    padding: 1.25rem 0 4rem;
+  }
+
+  /* ── Header ─────────────────────────────── */
+  header.top {
+    display: flex; align-items: center; gap: .75rem;
+    padding: .25rem 0 1rem;
+    border-bottom: 1px solid var(--border-soft);
+    margin-bottom: 1.25rem;
+  }
+  .badge {
+    width: 42px; height: 42px; border-radius: 11px; flex: none;
+    display: grid; place-items: center;
+    background: linear-gradient(160deg, #1a1a1f, #0b0b0e);
+    border: 1px solid var(--border);
+    box-shadow: 0 0 0 1px rgba(245,158,11,.08) inset;
+    font-size: 1.35rem;
+  }
+  .titles h1 {
+    margin: 0; font-size: 1.18rem; letter-spacing: .04em; font-weight: 600;
+  }
+  .titles h1 .accent { color: var(--gold); }
+  .titles p { margin: .1rem 0 0; font-size: .78rem; color: var(--muted-2); letter-spacing: .02em; }
+  .me-chip {
+    margin-left: auto; display: flex; align-items: center; gap: .5rem;
+    padding: .35rem .6rem; border-radius: 999px;
+    background: var(--surface); border: 1px solid var(--border);
+    font-size: .78rem; color: var(--muted); white-space: nowrap;
+  }
+  .me-chip img { width: 22px; height: 22px; border-radius: 50%; object-fit: cover; }
+  .me-chip .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--good); box-shadow: 0 0 8px var(--good); }
+
+  /* ── Cards / surfaces ───────────────────── */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 1.1rem 1.15rem;
+  }
+  .card + .card, .card + .grid, .grid + .card { margin-top: 1rem; }
+  .section-label {
+    font-size: .7rem; text-transform: uppercase; letter-spacing: .18em;
+    color: var(--muted-2); margin: 0 0 .65rem;
+  }
+
+  .grid { display: grid; gap: 1rem; }
+  @media (min-width: 720px) { .grid.cols { grid-template-columns: 1fr 1fr; align-items: start; } }
+
+  /* ── Buttons ────────────────────────────── */
+  button {
+    font-family: inherit; font-size: .92rem; font-weight: 600;
+    cursor: pointer; border-radius: 10px; border: 1px solid transparent;
+    padding: .7rem 1rem; transition: transform .06s ease, filter .15s ease, background .15s ease;
+    color: #0a0a0b;
+  }
+  button:active { transform: translateY(1px); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  .btn-primary { background: linear-gradient(180deg, var(--gold-bright), var(--gold)); }
+  .btn-primary:hover:not(:disabled) { filter: brightness(1.06); }
+  .btn-ghost { background: var(--surface-2); color: var(--text); border-color: var(--border); }
+  .btn-ghost:hover:not(:disabled) { border-color: #3f3f46; }
+  .btn-danger { background: transparent; color: #fca5a5; border-color: #7f1d1d; }
+  .btn-danger:hover:not(:disabled) { background: rgba(239,68,68,.08); }
+  .btn-block { width: 100%; }
+  .btn-row { display: flex; gap: .6rem; flex-wrap: wrap; }
+  .btn-row > button { flex: 1; min-width: 130px; }
+
+  /* ── Roster ─────────────────────────────── */
+  ul.roster { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .45rem; }
+  ul.roster li {
+    display: flex; align-items: center; gap: .6rem;
+    padding: .5rem .65rem; border-radius: 9px;
+    background: var(--surface-2); border: 1px solid var(--border-soft);
+    font-size: .9rem;
+  }
+  ul.roster li .pdot { width: 8px; height: 8px; border-radius: 50%; background: var(--good); flex: none; box-shadow: 0 0 6px rgba(34,197,94,.6); }
+  ul.roster li.me-row { border-color: rgba(245,158,11,.4); }
+  ul.roster li .you { color: var(--gold); font-size: .68rem; margin-left: auto; letter-spacing: .12em; text-transform: uppercase; }
+  ul.roster li .spy-tag { color: var(--danger); font-size: .68rem; margin-left: auto; letter-spacing: .1em; text-transform: uppercase; font-weight: 700; }
+  .count-pill { color: var(--muted-2); font-weight: 400; }
+
+  .howto { font-size: .85rem; color: var(--muted); }
+  .howto ol { margin: .4rem 0 0; padding-left: 1.1rem; }
+  .howto li { margin: .25rem 0; }
+  .howto b { color: var(--text); }
+
+  /* ── Secret card ────────────────────────── */
+  .secret {
+    position: relative; border-radius: 16px; overflow: hidden;
+    border: 1px solid var(--border); cursor: pointer; user-select: none;
+    background: linear-gradient(165deg, #16161c, #0a0a0d);
+    min-height: 220px;
+  }
+  .secret .face { padding: 1.4rem 1.3rem; transition: opacity .25s ease; }
+  .secret .cover {
+    position: absolute; inset: 0; display: grid; place-items: center; text-align: center;
+    background:
+      repeating-linear-gradient(135deg, rgba(245,158,11,.05) 0 14px, transparent 14px 28px),
+      linear-gradient(160deg, #15151b, #0a0a0d);
+    transition: opacity .3s ease; gap: .4rem;
+  }
+  .secret.revealed .cover { opacity: 0; pointer-events: none; }
+  .secret .cover .lock { font-size: 2rem; }
+  .secret .cover .hint { font-size: .78rem; color: var(--muted-2); letter-spacing: .14em; text-transform: uppercase; }
+  .secret .cover .role-mini { font-size: .92rem; color: var(--muted); }
+
+  .secret .kicker { font-size: .68rem; letter-spacing: .2em; text-transform: uppercase; color: var(--gold); margin-bottom: .5rem; }
+  .secret .loc { font-size: 2rem; font-weight: 700; line-height: 1.05; letter-spacing: -.01em; }
+  .secret .role { margin-top: .6rem; font-size: 1.05rem; color: var(--text); }
+  .secret .role span { color: var(--muted); }
+
+  .secret.spy { background: linear-gradient(160deg, #20060a, #0c0405); border-color: #7f1d1d; }
+  .secret.spy .kicker { color: var(--danger); }
+  .secret.spy .loc { color: #fecaca; font-size: 1.7rem; }
+  .secret.spy .role { color: #fca5a5; }
+  .peek-note { font-size: .72rem; color: var(--muted-2); margin-top: .55rem; text-align: center; }
+
+  /* ── Timer ──────────────────────────────── */
+  .timer {
+    text-align: center; padding: 1rem;
+  }
+  .timer .clock {
+    font-size: 2.6rem; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: .02em;
+  }
+  .timer.warn .clock { color: var(--gold-bright); }
+  .timer.danger .clock { color: var(--danger); animation: pulse 1s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .55; } }
+  .timer .sub { font-size: .72rem; color: var(--muted-2); letter-spacing: .14em; text-transform: uppercase; margin-top: .15rem; }
+  .timer .bar { height: 5px; border-radius: 999px; background: var(--border); margin-top: .8rem; overflow: hidden; }
+  .timer .bar > i { display: block; height: 100%; background: linear-gradient(90deg, var(--gold), var(--gold-bright)); transition: width .9s linear; }
+
+  /* ── Chat ───────────────────────────────── */
+  .chat-log {
+    height: 240px; overflow-y: auto; display: flex; flex-direction: column; gap: .5rem;
+    padding-right: .2rem; margin-bottom: .7rem;
+  }
+  .chat-log::-webkit-scrollbar { width: 6px; }
+  .chat-log::-webkit-scrollbar-thumb { background: var(--border); border-radius: 999px; }
+  .msg { font-size: .87rem; line-height: 1.35; }
+  .msg .who { color: var(--gold); font-weight: 600; margin-right: .35rem; }
+  .msg.mine .who { color: var(--gold-bright); }
+  .msg .txt { color: var(--text); word-break: break-word; }
+  .msg.sys { color: var(--muted-2); font-style: italic; font-size: .8rem; }
+  .chat-empty { color: var(--muted-2); font-size: .85rem; text-align: center; padding: 1rem 0; }
+  .chat-row { display: flex; gap: .5rem; }
+  .chat-row input {
+    flex: 1; min-width: 0; padding: .65rem .8rem; border-radius: 10px;
+    border: 1px solid var(--border); background: var(--surface-2); color: var(--text);
+    font: inherit; font-size: .9rem;
+  }
+  .chat-row input:focus { outline: none; border-color: var(--gold); }
+  .chat-row button { flex: none; padding: .65rem .9rem; }
+
+  /* ── Over screen ────────────────────────── */
+  .verdict { text-align: center; padding: 1.5rem 1rem; }
+  .verdict .tag { font-size: .72rem; letter-spacing: .22em; text-transform: uppercase; color: var(--muted-2); }
+  .verdict .spy-name { font-size: 2.1rem; font-weight: 700; margin: .35rem 0; color: var(--danger); }
+  .verdict .loc-was { font-size: .95rem; color: var(--muted); margin-top: .6rem; }
+  .verdict .loc-was b { color: var(--gold-bright); font-weight: 700; }
+  .verdict .flourish { font-size: 2.4rem; margin-bottom: .3rem; }
+
+  .muted { color: var(--muted); }
+  .hidden { display: none !important; }
+  .center { text-align: center; }
+  .tiny { font-size: .75rem; color: var(--muted-2); }
+  footer.foot { margin-top: 2rem; text-align: center; font-size: .72rem; color: var(--muted-2); letter-spacing: .04em; }
+
+  /* loading / error states */
+  #boot { text-align: center; padding: 4rem 1rem; color: var(--muted); }
+  .toast {
+    position: fixed; left: 50%; bottom: 1.2rem; transform: translateX(-50%);
+    background: var(--surface); border: 1px solid var(--border); color: var(--text);
+    padding: .6rem 1rem; border-radius: 10px; font-size: .85rem; z-index: 50;
+    box-shadow: 0 10px 30px rgba(0,0,0,.5); opacity: 0; transition: opacity .2s ease; pointer-events: none;
+  }
+  .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="badge">🕵️</div>
+    <div class="titles">
+      <h1>SPY<span class="accent">FALL</span></h1>
+      <p>One of you is lying. Find out who.</p>
+    </div>
+    <div class="me-chip" id="meChip"><span class="dot"></span><span id="meName">connecting…</span></div>
+  </header>
+
+  <div id="boot">Establishing secure channel…</div>
+
+  <!-- ░░░ LOBBY ░░░ -->
+  <main id="screenLobby" class="hidden">
+    <div class="grid cols">
+      <div class="card">
+        <p class="section-label">In the room <span class="count-pill" id="lobbyCount"></span></p>
+        <ul class="roster" id="lobbyRoster"></ul>
+      </div>
+      <div class="card">
+        <p class="section-label">How to play</p>
+        <div class="howto">
+          A secret <b>location</b> is dealt to everyone — plus a <b>role</b> there.
+          One player is the <b>SPY</b> and sees neither.
+          <ol>
+            <li>Take turns asking each other <b>pointed questions</b> out loud.</li>
+            <li>Non-spies: expose the spy <b>without</b> naming the location.</li>
+            <li>The spy: blend in &amp; deduce where you are.</li>
+            <li>Hit <b>Reveal</b> anytime (or when the timer runs out).</li>
+          </ol>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <button id="btnStart" class="btn-primary btn-block">Start round</button>
+      <p class="tiny center" style="margin:.7rem 0 0">Deals to everyone currently in the room. Need at least 3 players.</p>
+    </div>
+  </main>
+
+  <!-- ░░░ PLAYING ░░░ -->
+  <main id="screenPlay" class="hidden">
+    <div class="grid cols">
+      <div>
+        <div class="secret" id="secretCard">
+          <div class="face" id="secretFace"></div>
+          <div class="cover" id="secretCover">
+            <div class="lock">🔒</div>
+            <div class="hint">Tap to reveal</div>
+            <div class="role-mini">your secret card</div>
+          </div>
+        </div>
+        <p class="peek-note">Tap the card to peek — tap again to hide it from prying eyes.</p>
+      </div>
+      <div>
+        <div class="card timer" id="timerCard">
+          <div class="clock" id="clock">6:00</div>
+          <div class="sub">Round <span id="roundNum">1</span> · time remaining</div>
+          <div class="bar"><i id="timerBar" style="width:100%"></i></div>
+        </div>
+        <div class="card" style="margin-top:1rem">
+          <p class="section-label">Players this round <span class="count-pill" id="playCount"></span></p>
+          <ul class="roster" id="playRoster"></ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" id="chatCard">
+      <p class="section-label">Banter &amp; accusations</p>
+      <div class="chat-log" id="chatLog"></div>
+      <div class="chat-row">
+        <input id="chatInput" placeholder="ask something pointed…" maxlength="240" autocomplete="off" />
+        <button id="chatSend" class="btn-ghost">Send</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <button id="btnReveal" class="btn-danger btn-block">Reveal the spy &amp; end round</button>
+    </div>
+  </main>
+
+  <!-- ░░░ OVER ░░░ -->
+  <main id="screenOver" class="hidden">
+    <div class="card">
+      <div class="verdict">
+        <div class="flourish" id="overFlourish">🎭</div>
+        <div class="tag">The spy was</div>
+        <div class="spy-name" id="overSpy">—</div>
+        <div class="loc-was">The location was <b id="overLoc">—</b></div>
+      </div>
+    </div>
+    <div class="card">
+      <p class="section-label">Round <span id="overRound"></span> · who played</p>
+      <ul class="roster" id="overRoster"></ul>
+    </div>
+    <div class="card">
+      <div class="btn-row">
+        <button id="btnNewRound" class="btn-primary">New round</button>
+        <button id="btnBackLobby" class="btn-ghost">Back to lobby</button>
+      </div>
+    </div>
+  </main>
+
+  <footer class="foot">SPYFALL · a Worlds party game · ephemeral chat, shared round state</footer>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="/worlds.js"></script>
+<script>
+(() => {
+  "use strict";
+
+  // ── Constants / identity ─────────────────────────────────
+  const ROUND_MS = 360000;            // 6 minutes
+  const DOC_KEY = "spyfall-main";     // logical key stored on the doc itself
+  const COLLECTION = "spyfall";       // db collection name
+  const ROOM = "room";                // ws channel name
+  const CHAT_LIMIT = 120;             // rendered chat lines kept in DOM
+  const clientId = crypto.randomUUID();
+
+  const LOCATIONS = [
+    { name: "Casino", roles: ["Dealer", "High Roller", "Bartender", "Security Guard", "Cocktail Waiter", "Pit Boss", "Compulsive Gambler"] },
+    { name: "Space Station", roles: ["Commander", "Mission Specialist", "Engineer", "Doctor", "Space Tourist", "Alien Stowaway", "Comms Officer"] },
+    { name: "Pirate Ship", roles: ["Captain", "First Mate", "Cabin Boy", "Cook", "Cannoneer", "Bound Prisoner", "Lookout"] },
+    { name: "Hospital", roles: ["Surgeon", "Nurse", "Anesthesiologist", "Intern", "Patient", "Therapist", "Receptionist"] },
+    { name: "Movie Studio", roles: ["Director", "Lead Actor", "Stunt Double", "Camera Operator", "Costume Designer", "Producer", "Sound Engineer"] },
+    { name: "Submarine", roles: ["Captain", "Sonar Operator", "Navigator", "Cook", "Radio Operator", "Engineer", "Sailor"] },
+    { name: "Beach Resort", roles: ["Lifeguard", "Tourist", "Bartender", "Masseur", "Beach Photographer", "Hotel Manager", "Diving Instructor"] },
+    { name: "Airplane", roles: ["Pilot", "Flight Attendant", "First Class Passenger", "Air Marshal", "Mechanic", "Economy Passenger", "Co-Pilot"] },
+    { name: "School", roles: ["Principal", "Math Teacher", "Janitor", "Student", "Cafeteria Worker", "Gym Coach", "Substitute"] },
+    { name: "Restaurant", roles: ["Head Chef", "Waiter", "Sommelier", "Food Critic", "Dishwasher", "Hostess", "Hungry Customer"] },
+    { name: "Bank", roles: ["Manager", "Teller", "Security Guard", "Armored Truck Driver", "Customer", "Loan Officer", "Robber"] },
+    { name: "Circus", roles: ["Ringmaster", "Acrobat", "Clown", "Lion Tamer", "Juggler", "Fire Breather", "Ticket Seller"] },
+    { name: "Police Station", roles: ["Detective", "Patrol Officer", "Forensic Analyst", "Suspect", "Lawyer", "Chief", "Dispatcher"] },
+    { name: "Theater", roles: ["Lead Actor", "Director", "Prompter", "Stagehand", "Audience Member", "Costume Designer", "Usher"] },
+    { name: "Ski Resort", roles: ["Ski Instructor", "Snowboarder", "Lift Operator", "Lodge Bartender", "Tourist", "Patrol Medic", "Hot Cocoa Vendor"] },
+    { name: "Crusader Army", roles: ["Knight", "Squire", "Archer", "Bishop", "Servant", "Captured Spy", "Healer"] }
+  ];
+
+  // ── DOM refs ─────────────────────────────────────────────
+  const $ = (id) => document.getElementById(id);
+  const boot = $("boot");
+  const screens = { lobby: $("screenLobby"), playing: $("screenPlay"), over: $("screenOver") };
+  const toastEl = $("toast");
+
+  // ── Worlds handles ───────────────────────────────────────
+  const col = worlds.db.collection(COLLECTION);
+  const room = worlds.ws.channel(ROOM);
+
+  // ── Runtime state ────────────────────────────────────────
+  let me = null;                 // {handle,name,...}
+  let docId = null;              // db doc id once known
+  let docVersion = null;         // updated_at for optimistic concurrency
+  let game = null;               // doc.data
+  let presence = [];             // [{handle,name}] live roster
+  let cardRevealed = false;
+  let tickHandle = null;
+  let starting = false;          // local re-entrancy guard
+
+  // ── Helpers ──────────────────────────────────────────────
+  function toast(text) {
+    toastEl.textContent = text;
+    toastEl.classList.add("show");
+    clearTimeout(toast._t);
+    toast._t = setTimeout(() => toastEl.classList.remove("show"), 2600);
+  }
+  function showScreen(name) {
+    boot.classList.add("hidden");
+    for (const k in screens) screens[k].classList.toggle("hidden", k !== name);
+  }
+  function esc(s) { const d = document.createElement("div"); d.textContent = s == null ? "" : String(s); return d.innerHTML; }
+  function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+  function shuffle(arr) {
+    const a = arr.slice();
+    for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+    return a;
+  }
+  function uniqByHandle(list) {
+    const seen = new Set(), out = [];
+    for (const m of list) { if (m && m.handle && !seen.has(m.handle)) { seen.add(m.handle); out.push({ handle: m.handle, name: m.name || m.handle }); } }
+    return out;
+  }
+  function blankGame() { return { key: DOC_KEY, phase: "lobby", location: null, roles: {}, spy: null, players: [], endsAt: 0, startedBy: null, roundNum: 0 }; }
+
+  // ── DB doc bootstrap (single shared doc) ────────────────
+  async function loadDoc() {
+    const page = await col.list({ sort: "-created_at", limit: 100 });
+    const found = page.items.find((d) => d.data && d.data.key === DOC_KEY) || page.items[0];
+    if (found) { docId = found.id; docVersion = found.updated_at; return found.data; }
+    // none yet → create the lobby doc (race-safe: if two create, we converge on subscribe)
+    const created = await col.create(blankGame());
+    docId = created.id; docVersion = created.updated_at;
+    return created.data;
+  }
+
+  // Write the doc with optimistic concurrency; on conflict, reload & let caller decide.
+  async function writeDoc(next) {
+    try {
+      const res = await col.replace(docId, next);
+      docVersion = res.updated_at;
+      adoptDoc(res);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function adoptDoc(doc) {
+    if (!doc) return;
+    const incoming = doc.data || blankGame();
+    // Drop stale/out-of-order writes: never regress to an earlier round.
+    if (game && (incoming.roundNum || 0) < (game.roundNum || 0)) return;
+    docId = doc.id;
+    if (doc.updated_at) docVersion = doc.updated_at;
+    game = incoming;
+    renderGame();
+  }
+
+  // ── Start a round (anyone in lobby) ──────────────────────
+  async function startRound() {
+    if (starting) return;
+    const players = uniqByHandle(presence);
+    if (players.length < 3) { toast("Need at least 3 players in the room."); return; }
+    starting = true;
+    $("btnStart").disabled = true;
+    try {
+      const loc = pick(LOCATIONS);
+      const shuffledRoles = shuffle(loc.roles);
+      const roles = {};
+      players.forEach((p, i) => { roles[p.handle] = shuffledRoles[i % shuffledRoles.length]; });
+      const spy = pick(players).handle;
+      const next = {
+        key: DOC_KEY,
+        phase: "playing",
+        location: loc.name,
+        roles,
+        spy,
+        players,
+        endsAt: Date.now() + ROUND_MS,
+        startedBy: { handle: me.handle, name: me.name },
+        roundNum: (game?.roundNum || 0) + 1
+      };
+      const ok = await writeDoc(next);
+      if (!ok) { toast("Someone else started — syncing…"); await refetch(); }
+    } catch (e) {
+      toast("Couldn't start the round. Try again.");
+    } finally {
+      starting = false;
+      $("btnStart").disabled = false;
+    }
+  }
+
+  async function revealRound() {
+    if (!game || game.phase !== "playing") return;
+    const next = { ...game, phase: "over", endsAt: Date.now() };
+    const ok = await writeDoc(next);
+    if (!ok) await refetch();
+  }
+
+  async function newRound() { await startRound(); }
+
+  async function backToLobby() {
+    const next = { ...blankGame(), roundNum: game?.roundNum || 0 };
+    const ok = await writeDoc(next);
+    if (!ok) await refetch();
+  }
+
+  async function refetch() {
+    try { const doc = await col.get(docId); adoptDoc(doc); } catch (e) {}
+  }
+
+  // ── Rendering ────────────────────────────────────────────
+  function renderRoster(el, list, opts = {}) {
+    el.innerHTML = "";
+    const items = uniqByHandle(list);
+    if (!items.length) { el.innerHTML = '<li class="muted" style="border:none;background:transparent">No one here yet…</li>'; return; }
+    for (const p of items) {
+      const li = document.createElement("li");
+      const isMe = me && p.handle === me.handle;
+      if (isMe) li.classList.add("me-row");
+      let right = "";
+      if (opts.revealSpy && opts.spy === p.handle) right = '<span class="spy-tag">spy</span>';
+      else if (isMe) right = '<span class="you">you</span>';
+      li.innerHTML = `<span class="pdot"></span><span>${esc(p.name)}</span>${right}`;
+      el.appendChild(li);
+    }
+  }
+
+  function renderGame() {
+    if (!game) return;
+    if (game.phase === "playing") {
+      renderPlaying();
+    } else if (game.phase === "over") {
+      renderOver();
+    } else {
+      renderLobby();
+    }
+  }
+
+  function renderLobby() {
+    stopTick();
+    showScreen("lobby");
+    renderRoster($("lobbyRoster"), presence);
+    const n = uniqByHandle(presence).length;
+    $("lobbyCount").textContent = `${n} online`;
+    $("btnStart").disabled = starting || n < 3;
+  }
+
+  function renderPlaying() {
+    showScreen("playing");
+    $("roundNum").textContent = game.roundNum || 1;
+    renderRoster($("playRoster"), game.players);
+    $("playCount").textContent = `${uniqByHandle(game.players).length}`;
+    renderSecret();
+    startTick();
+  }
+
+  function renderSecret() {
+    const card = $("secretCard");
+    const face = $("secretFace");
+    const amInRound = game.players.some((p) => p.handle === me.handle);
+    const isSpy = game.spy === me.handle;
+    card.classList.toggle("spy", isSpy);
+
+    if (!amInRound) {
+      card.classList.remove("spy");
+      face.innerHTML = `<div class="kicker">Spectating</div><div class="loc" style="font-size:1.3rem">You joined mid-round</div><div class="role">You'll be dealt in next round. Watch the chaos unfold.</div>`;
+      $("secretCover").querySelector(".role-mini").textContent = "spectator";
+      return;
+    }
+    if (isSpy) {
+      face.innerHTML = `<div class="kicker">⚠ Top Secret</div><div class="loc">YOU ARE THE SPY</div><div class="role">Blend in. Figure out the location — without giving yourself away.</div>`;
+      $("secretCover").querySelector(".role-mini").textContent = "your assignment";
+    } else {
+      const role = game.roles[me.handle] || "Visitor";
+      face.innerHTML = `<div class="kicker">Location · keep it secret</div><div class="loc">${esc(game.location)}</div><div class="role">You are the <b style="color:var(--gold-bright)">${esc(role)}</b></div>`;
+      $("secretCover").querySelector(".role-mini").textContent = "your secret card";
+    }
+  }
+
+  function renderOver() {
+    stopTick();
+    showScreen("over");
+    const spyP = uniqByHandle(game.players).find((p) => p.handle === game.spy);
+    $("overSpy").textContent = spyP ? spyP.name : (game.spy || "Unknown");
+    $("overLoc").textContent = game.location || "—";
+    $("overRound").textContent = game.roundNum || "";
+    $("overFlourish").textContent = pick(["🎭", "🕵️", "🔍", "🎩"]);
+    renderRoster($("overRoster"), game.players, { revealSpy: true, spy: game.spy });
+  }
+
+  // ── Countdown timer (visual only, derived from endsAt) ───
+  function startTick() {
+    stopTick();
+    tickHandle = setInterval(updateClock, 250);
+    updateClock();
+  }
+  function stopTick() { if (tickHandle) { clearInterval(tickHandle); tickHandle = null; } }
+  function updateClock() {
+    if (!game || game.phase !== "playing") { stopTick(); return; }
+    const remaining = Math.max(0, game.endsAt - Date.now());
+    const total = ROUND_MS;
+    const secs = Math.ceil(remaining / 1000);
+    const mm = Math.floor(secs / 60), ss = secs % 60;
+    $("clock").textContent = `${mm}:${String(ss).padStart(2, "0")}`;
+    $("timerBar").style.width = `${Math.max(0, (remaining / total) * 100)}%`;
+    const card = $("timerCard");
+    card.classList.toggle("warn", remaining <= 60000 && remaining > 20000);
+    card.classList.toggle("danger", remaining <= 20000);
+    if (remaining <= 0) {
+      stopTick();
+      $("clock").textContent = "0:00";
+      // anyone may flip to "over"; first writer wins, others sync via subscribe
+      if (game.phase === "playing") revealRound();
+    }
+  }
+
+  // ── Secret card peek toggle ──────────────────────────────
+  $("secretCard").addEventListener("click", () => {
+    cardRevealed = !cardRevealed;
+    $("secretCard").classList.toggle("revealed", cardRevealed);
+  });
+
+  // ── Chat (ephemeral over ws) ─────────────────────────────
+  const chatLog = $("chatLog");
+  let chatEmpty = true;
+  function setChatEmptyState() {
+    if (chatEmpty) chatLog.innerHTML = '<div class="chat-empty">No chatter yet. Ask the first question.</div>';
+  }
+  function pushChat({ name, text, mine, sys }) {
+    if (chatEmpty) { chatLog.innerHTML = ""; chatEmpty = false; }
+    const div = document.createElement("div");
+    if (sys) {
+      div.className = "msg sys";
+      div.textContent = text;
+    } else {
+      div.className = "msg" + (mine ? " mine" : "");
+      div.innerHTML = `<span class="who">${esc(name)}</span><span class="txt">${esc(text)}</span>`;
+    }
+    chatLog.appendChild(div);
+    while (chatLog.children.length > CHAT_LIMIT) chatLog.removeChild(chatLog.firstChild);
+    chatLog.scrollTop = chatLog.scrollHeight;
+  }
+  function sendChat() {
+    const input = $("chatInput");
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = "";
+    pushChat({ name: me.name, text, mine: true });   // optimistic local echo; our broadcast is ignored on return
+    room.publish({ cid: clientId, t: "msg", handle: me.handle, name: me.name, text });
+  }
+  $("chatSend").addEventListener("click", sendChat);
+  $("chatInput").addEventListener("keydown", (e) => { if (e.key === "Enter") sendChat(); });
+
+  // ── Button wiring ────────────────────────────────────────
+  $("btnStart").addEventListener("click", startRound);
+  $("btnReveal").addEventListener("click", revealRound);
+  $("btnNewRound").addEventListener("click", newRound);
+  $("btnBackLobby").addEventListener("click", backToLobby);
+
+  // ── Boot ─────────────────────────────────────────────────
+  (async () => {
+    try {
+      await worlds.ready;
+      me = await worlds.me();
+      $("meName").textContent = me.name || me.handle;
+
+      game = await loadDoc();
+
+      // Live shared round state
+      col.subscribe((ev) => {
+        if (!ev || !ev.doc) return;
+        const d = ev.doc;
+        const k = d.data && d.data.key;
+        // accept the doc we're tracking, or any doc carrying our logical key
+        if (d.id === docId || k === DOC_KEY) {
+          if (ev.type === "delete") { game = blankGame(); renderGame(); return; }
+          adoptDoc(d);
+        }
+      });
+
+      // Live roster via presence
+      room.presence((members) => {
+        presence = uniqByHandle(members || []);
+        // refresh lobby/over rosters that depend on live presence
+        if (game && game.phase === "lobby") renderLobby();
+      });
+
+      // Ephemeral chat + presence join/leave hints
+      room.subscribe((msg) => {
+        const p = msg && msg.payload;
+        if (!p || p.cid === clientId) return;        // ignore our own echo
+        if (p.t === "msg" && typeof p.text === "string") {
+          pushChat({ name: p.name || (msg.from && msg.from.name) || "?", text: p.text, mine: false });
+        }
+      });
+
+      setChatEmptyState();
+      renderGame();
+    } catch (e) {
+      boot.textContent = "Couldn't connect to Worlds. Refresh to retry.";
+      console.error("[spyfall] boot failed", e);
+    }
+  })();
+})();
+</script>
+</body>
+</html>

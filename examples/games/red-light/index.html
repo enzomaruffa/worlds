@@ -1,0 +1,807 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>Red Light, Green Light</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #09090b;
+      --surface: #0c0c0f;
+      --border: #27272a;
+      --gold: #f59e0b;
+      --gold-bright: #fbbf24;
+      --green: #22c55e;
+      --red: #ef4444;
+      --text: #e4e4e7;
+      --muted: #a1a1aa;
+    }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+      overflow: hidden;
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: manipulation;
+    }
+    #app {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Topbar ───────────────────────────────────────────── */
+    header {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      gap: .75rem;
+      padding: .55rem .9rem;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      min-height: 52px;
+    }
+    header .title {
+      font-weight: 700;
+      font-size: 1rem;
+      letter-spacing: .02em;
+      white-space: nowrap;
+    }
+    header .title .dot {
+      display: inline-block;
+      width: .6rem; height: .6rem;
+      border-radius: 50%;
+      margin: 0 .35rem;
+      vertical-align: middle;
+      background: var(--muted);
+      transition: background .12s, box-shadow .12s;
+    }
+    header.green .title .dot { background: var(--green); box-shadow: 0 0 10px var(--green); }
+    header.red   .title .dot { background: var(--red);   box-shadow: 0 0 10px var(--red); }
+    header .spacer { flex: 1 1 auto; }
+    header .meta {
+      display: flex;
+      gap: .55rem;
+      align-items: center;
+      font-size: .78rem;
+      color: var(--muted);
+      white-space: nowrap;
+      overflow: hidden;
+    }
+    header .pill {
+      padding: .2rem .5rem;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--bg);
+      white-space: nowrap;
+    }
+    header .pill b { color: var(--gold-bright); font-weight: 700; }
+    header .pill.you-host { border-color: var(--gold); color: var(--gold-bright); }
+
+    /* ── Light banner ─────────────────────────────────────── */
+    #banner {
+      flex: 0 0 auto;
+      text-align: center;
+      font-weight: 800;
+      font-size: clamp(1.4rem, 7vw, 2.6rem);
+      letter-spacing: .12em;
+      padding: .5rem;
+      transition: background .1s, color .1s;
+      text-transform: uppercase;
+      background: #18181b;
+      color: var(--muted);
+    }
+    #banner.green { background: rgba(34,197,94,.16);  color: var(--green); text-shadow: 0 0 18px rgba(34,197,94,.5); }
+    #banner.red   { background: rgba(239,68,68,.16);  color: var(--red);   text-shadow: 0 0 18px rgba(239,68,68,.5); }
+
+    /* ── Canvas stage ─────────────────────────────────────── */
+    #stage {
+      flex: 1 1 auto;
+      position: relative;
+      min-height: 0;
+    }
+    canvas { display: block; width: 100%; height: 100%; }
+
+    /* overlays */
+    .overlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      gap: .35rem;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity .25s;
+      padding: 1rem;
+    }
+    .overlay.show { opacity: 1; }
+    #winOverlay { background: radial-gradient(ellipse at center, rgba(245,158,11,.18), rgba(9,9,11,.78)); }
+    #winOverlay .big {
+      font-size: clamp(1.8rem, 9vw, 3.4rem);
+      font-weight: 800;
+      color: var(--gold-bright);
+      text-shadow: 0 0 24px rgba(245,158,11,.6);
+    }
+    #winOverlay .sub { color: var(--muted); font-size: .95rem; }
+    #outBadge {
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%) rotate(-8deg);
+      background: rgba(239,68,68,.92);
+      color: #fff;
+      font-weight: 800;
+      font-size: clamp(1.4rem, 8vw, 2.6rem);
+      letter-spacing: .14em;
+      padding: .35rem 1.2rem;
+      border-radius: .5rem;
+      border: 3px solid #fff;
+      box-shadow: 0 0 30px rgba(239,68,68,.6);
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity .2s;
+    }
+    #outBadge.show { opacity: 1; }
+    #outBadge small { display: block; font-size: .55em; letter-spacing: .05em; opacity: .85; font-weight: 600; }
+
+    /* ── Move control ─────────────────────────────────────── */
+    #controls {
+      flex: 0 0 auto;
+      padding: .7rem .9rem calc(.7rem + env(safe-area-inset-bottom, 0px));
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+    }
+    #moveBtn {
+      width: 100%;
+      padding: 1.1rem;
+      font-family: inherit;
+      font-weight: 800;
+      font-size: 1.15rem;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: #101012;
+      background: var(--gold);
+      border: none;
+      border-radius: .75rem;
+      cursor: pointer;
+      box-shadow: 0 4px 0 #b45309;
+      transition: transform .05s, box-shadow .05s, background .1s, opacity .15s;
+      touch-action: none;
+    }
+    #moveBtn:active, #moveBtn.held {
+      transform: translateY(3px);
+      box-shadow: 0 1px 0 #b45309;
+      background: var(--gold-bright);
+    }
+    #moveBtn:disabled {
+      background: #3f3f46;
+      color: #71717a;
+      box-shadow: 0 4px 0 #27272a;
+      cursor: not-allowed;
+      opacity: .8;
+    }
+    #hint {
+      text-align: center;
+      color: #71717a;
+      font-size: .72rem;
+      margin-top: .45rem;
+    }
+    .kbd {
+      display: inline-block;
+      padding: .05rem .4rem;
+      border: 1px solid var(--border);
+      border-bottom-width: 2px;
+      border-radius: .3rem;
+      background: var(--bg);
+      color: var(--muted);
+      font-size: .92em;
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <header id="header">
+      <span class="title">RED&nbsp;LIGHT<span class="dot"></span>GREEN&nbsp;LIGHT</span>
+      <span class="spacer"></span>
+      <span class="meta">
+        <span class="pill" id="playersPill"><b id="playerCount">1</b>&nbsp;in lobby</span>
+        <span class="pill" id="hostPill">host: <b id="hostName">—</b></span>
+      </span>
+    </header>
+
+    <div id="banner">connecting…</div>
+
+    <div id="stage">
+      <canvas id="canvas"></canvas>
+      <div class="overlay" id="winOverlay">
+        <div class="big" id="winText">winner!</div>
+        <div class="sub" id="winSub">next round starting…</div>
+      </div>
+      <div id="outBadge">OUT<small>you moved on red</small></div>
+    </div>
+
+    <div id="controls">
+      <button id="moveBtn">MOVE (hold)</button>
+      <div id="hint">Desktop: hold <span class="kbd">Space</span> or <span class="kbd">↑</span> &nbsp;·&nbsp; move only on <b style="color:var(--green)">GREEN</b></div>
+    </div>
+  </div>
+
+  <script src="/worlds.js"></script>
+  <script>
+  (() => {
+    "use strict";
+
+    // ── Constants ────────────────────────────────────────────
+    const CHANNEL    = "arena";
+    const SPEED      = 0.18;     // y units / sec while moving (0..1 track)
+    const EASE       = 9;        // velocity approach rate (higher = snappier)
+    const SEND_HZ    = 12;       // position broadcasts per second (throttle)
+    const STALE_MS   = 6000;     // drop remote players unheard-from this long
+    const MOVE_WINDOW_MS = 180;  // recent-movement window for red-light elimination
+    const WIN_RESET_MS   = 3500; // host delay before resetting after a win
+    const GREEN_MIN = 1800, GREEN_MAX = 4500;
+    const RED_MIN   = 1200, RED_MAX   = 3000;
+
+    const clientId = (crypto.randomUUID && crypto.randomUUID()) ||
+      (Date.now().toString(36) + Math.random().toString(36).slice(2));
+
+    // ── DOM ──────────────────────────────────────────────────
+    const headerEl   = document.getElementById("header");
+    const bannerEl   = document.getElementById("banner");
+    const canvas     = document.getElementById("canvas");
+    const ctx        = canvas.getContext("2d");
+    const moveBtn    = document.getElementById("moveBtn");
+    const playerCountEl = document.getElementById("playerCount");
+    const hostNameEl = document.getElementById("hostName");
+    const hostPill   = document.getElementById("hostPill");
+    const winOverlay = document.getElementById("winOverlay");
+    const winText    = document.getElementById("winText");
+    const winSub     = document.getElementById("winSub");
+    const outBadge   = document.getElementById("outBadge");
+
+    // ── State ────────────────────────────────────────────────
+    const me = { handle: null, name: "you" };
+
+    const self = {
+      y: 0,            // normalized position 0..1
+      vel: 0,          // current velocity (eased)
+      out: false,      // eliminated this round
+      won: false,      // already broadcast a win this round
+      lastMoveAt: 0,   // ts of last detectable upward movement
+    };
+
+    // light: rendered state everyone agrees on (host-driven)
+    const light = { state: "red", seq: -1, at: 0 };
+
+    // round identity. We tie movement-allowed + reset to seq monotonicity.
+    let roundSeq = 0;            // increments on every reset we apply
+    let winnerName = null;       // non-null while showing winner overlay
+
+    // remote players: handle -> { name, y, frozen, out, at }
+    const remotes = new Map();
+
+    // presence roster: array of {handle, name}
+    let roster = [];
+    let hostHandle = null;
+
+    let pressed = false;         // move control currently held
+    let room = null;
+
+    // ── Host election ────────────────────────────────────────
+    function isHost() {
+      return me.handle != null && hostHandle === me.handle;
+    }
+    function recomputeHost() {
+      // smallest handle in current roster (include self defensively)
+      const handles = new Set(roster.map(m => m.handle).filter(Boolean));
+      if (me.handle) handles.add(me.handle);
+      let smallest = null;
+      for (const h of handles) {
+        if (smallest === null || h < smallest) smallest = h;
+      }
+      const prev = hostHandle;
+      hostHandle = smallest;
+      const hostMember = roster.find(m => m.handle === hostHandle);
+      hostNameEl.textContent = hostHandle == null ? "—"
+        : (hostHandle === me.handle ? (me.name + " (you)")
+        : (hostMember ? hostMember.name : hostHandle));
+      hostPill.classList.toggle("you-host", isHost());
+
+      if (isHost() && prev !== hostHandle) {
+        // we just became host — make sure a light loop is running
+        startHostLoopIfNeeded();
+      }
+    }
+
+    function updatePlayerCount() {
+      // unique handles currently present (roster) — includes us
+      const handles = new Set(roster.map(m => m.handle).filter(Boolean));
+      if (me.handle) handles.add(me.handle);
+      const n = handles.size || 1;
+      playerCountEl.textContent = String(n);
+      document.getElementById("playersPill").innerHTML =
+        `<b id="playerCount">${n}</b>&nbsp;${n === 1 ? "player" : "players"}`;
+    }
+
+    // ── Light banner render ──────────────────────────────────
+    function renderLight() {
+      const s = winnerName ? "wait" : light.state;
+      bannerEl.classList.toggle("green", s === "green");
+      bannerEl.classList.toggle("red", s === "red");
+      headerEl.classList.toggle("green", s === "green");
+      headerEl.classList.toggle("red", s === "red");
+      if (winnerName) {
+        bannerEl.textContent = "ROUND OVER";
+      } else {
+        bannerEl.textContent = s === "green" ? "GREEN — GO!" : "RED — FREEZE!";
+      }
+    }
+
+    function setLight(state, seq, at) {
+      // accept only newer (or equal-but-changed) light frames
+      if (seq != null && seq < light.seq) return;
+      light.state = state;
+      light.seq = (seq != null) ? seq : light.seq;
+      light.at = at || Date.now();
+      renderLight();
+      updateMoveBtn();
+    }
+
+    // ── Host light loop ──────────────────────────────────────
+    let hostTimer = null;
+    let lightSeqCounter = 0;
+    let resetTimer = null;
+
+    function rnd(min, max) { return min + Math.random() * (max - min); }
+
+    function clearHostLoop() {
+      if (hostTimer) { clearTimeout(hostTimer); hostTimer = null; }
+    }
+
+    function broadcastLight(state) {
+      lightSeqCounter = Math.max(lightSeqCounter, light.seq) + 1;
+      const at = Date.now();
+      // apply locally first so host renders instantly, then broadcast
+      setLight(state, lightSeqCounter, at);
+      publish({ t: "light", state, seq: lightSeqCounter, at });
+    }
+
+    function hostStep() {
+      if (!isHost() || winnerName) return;
+      const next = light.state === "green" ? "red" : "green";
+      broadcastLight(next);
+      const dur = next === "green" ? rnd(GREEN_MIN, GREEN_MAX) : rnd(RED_MIN, RED_MAX);
+      hostTimer = setTimeout(hostStep, dur);
+    }
+
+    function startHostLoopIfNeeded() {
+      if (!isHost() || winnerName) return;
+      clearHostLoop();
+      // if we just took over mid-game, keep current state and just schedule next flip
+      const elapsed = Date.now() - (light.at || Date.now());
+      let remain;
+      if (light.seq < 0) {
+        // fresh start: begin from red, flip to green soon
+        broadcastLight("red");
+        remain = rnd(RED_MIN, RED_MAX);
+      } else {
+        const span = light.state === "green"
+          ? rnd(GREEN_MIN, GREEN_MAX) : rnd(RED_MIN, RED_MAX);
+        remain = Math.max(400, span - elapsed);
+      }
+      hostTimer = setTimeout(hostStep, remain);
+    }
+
+    // ── Reset / new round ────────────────────────────────────
+    function applyReset(seq) {
+      if (resetTimer) { clearTimeout(resetTimer); resetTimer = null; }
+      roundSeq = (seq != null) ? seq : roundSeq + 1;
+      winnerName = null;
+      self.y = 0;
+      self.vel = 0;
+      self.out = false;
+      self.won = false;
+      self.lastMoveAt = 0;
+      for (const r of remotes.values()) { r.y = 0; r.out = false; r.frozen = false; }
+      light.state = "red";
+      light.seq = -1;        // force-accept the host's first fresh light frame
+      light.at = Date.now();
+      lightSeqCounter = 0;
+      winOverlay.classList.remove("show");
+      outBadge.classList.remove("show");
+      renderLight();
+      updateMoveBtn();
+      if (isHost()) startHostLoopIfNeeded();
+    }
+
+    function hostScheduleReset() {
+      if (!isHost()) return;
+      if (resetTimer) clearTimeout(resetTimer);
+      clearHostLoop();
+      resetTimer = setTimeout(() => {
+        roundSeq += 1;
+        publish({ t: "reset", seq: roundSeq, at: Date.now() });
+        applyReset(roundSeq);
+      }, WIN_RESET_MS);
+    }
+
+    function showWinner(name) {
+      if (winnerName) return;
+      winnerName = name;
+      winText.textContent = (name === me.name ? "🏆 You win!" : `🏆 ${name} wins!`);
+      winSub.textContent = "next round starting…";
+      winOverlay.classList.add("show");
+      renderLight();
+      updateMoveBtn();
+      hostScheduleReset();
+    }
+
+    // ── Movement control state ───────────────────────────────
+    function canMove() {
+      return !self.out && !self.won && !winnerName && light.state === "green";
+    }
+    function updateMoveBtn() {
+      const ok = canMove();
+      moveBtn.disabled = !ok;
+      if (self.out)        moveBtn.textContent = "OUT — wait for reset";
+      else if (winnerName) moveBtn.textContent = "round over…";
+      else if (light.state === "red") moveBtn.textContent = "FREEZE — don't move!";
+      else                 moveBtn.textContent = "MOVE (hold)";
+    }
+
+    function press()   { pressed = true;  moveBtn.classList.add("held"); }
+    function release() { pressed = false; moveBtn.classList.remove("held"); }
+
+    // ── Publish helpers ──────────────────────────────────────
+    // Every outgoing payload carries our per-tab cid so echoes (and our own
+    // other tabs sharing a handle) are deduped on the receive side.
+    function publish(obj) {
+      if (!room) return;
+      obj.cid = clientId;
+      try { room.publish(obj); } catch (_) { /* SDK buffers/reconnects */ }
+    }
+
+    let lastSentAt = 0;
+    let lastSent = null;
+    function maybeSendPosition(now) {
+      // only when alive, in a round, not over
+      if (winnerName) return;
+      const moving = self.vel > 0.0005;
+      const payload = {
+        y: Math.round(self.y * 1000) / 1000,
+        frozen: light.state === "red" && !moving,
+        out: self.out,
+      };
+      const changed = !lastSent ||
+        payload.out !== lastSent.out ||
+        payload.frozen !== lastSent.frozen ||
+        Math.abs(payload.y - lastSent.y) > 0.0005;
+      const due = now - lastSentAt >= 1000 / SEND_HZ;
+      // throttle to SEND_HZ; always allow an immediate send when out/frozen flips
+      const flip = lastSent && (payload.out !== lastSent.out || payload.frozen !== lastSent.frozen);
+      if ((due && changed) || flip) {
+        lastSentAt = now;
+        lastSent = payload;
+        publish({
+          t: "p",
+          handle: me.handle,
+          name: me.name,
+          y: payload.y,
+          frozen: payload.frozen,
+          out: payload.out,
+        });
+      }
+    }
+
+    // ── Game loop ────────────────────────────────────────────
+    let lastFrame = performance.now();
+    function tick(now) {
+      const dt = Math.min(0.05, (now - lastFrame) / 1000); // clamp big gaps
+      lastFrame = now;
+
+      // target velocity from input
+      const wantMove = pressed && canMove();
+      const targetVel = wantMove ? SPEED : 0;
+      // ease toward target (so stopping isn't instant)
+      self.vel += (targetVel - self.vel) * Math.min(1, EASE * dt);
+      if (self.vel < 0.0008 && targetVel === 0) self.vel = 0;
+
+      if (!self.out && !self.won && !winnerName) {
+        const prevY = self.y;
+        if (self.vel > 0) {
+          self.y = Math.min(1, self.y + self.vel * dt);
+          if (self.y > prevY + 1e-6) self.lastMoveAt = now;
+        }
+
+        // red-light self-elimination: moved within window while red
+        if (light.state === "red" && (now - self.lastMoveAt) < MOVE_WINDOW_MS && self.y > 0) {
+          eliminateSelf();
+        }
+
+        // win detection
+        if (self.y >= 1 && !self.won) {
+          self.y = 1;
+          self.won = true;
+          publish({ t: "win", handle: me.handle, name: me.name });
+          showWinner(me.name);
+        }
+      }
+
+      maybeSendPosition(now);
+      pruneStale(now);
+      draw();
+      requestAnimationFrame(tick);
+    }
+
+    function eliminateSelf() {
+      if (self.out) return;
+      self.out = true;
+      self.vel = 0;
+      release();
+      outBadge.classList.add("show");
+      updateMoveBtn();
+      // immediate broadcast of OUT
+      lastSent = null;
+      publish({ t: "p", handle: me.handle, name: me.name,
+                y: Math.round(self.y * 1000) / 1000, frozen: false, out: true });
+    }
+
+    function pruneStale(now) {
+      for (const [h, r] of remotes) {
+        if (now - r.at > STALE_MS) remotes.delete(h);
+      }
+    }
+
+    // ── Rendering ────────────────────────────────────────────
+    let DPR = Math.min(window.devicePixelRatio || 1, 2);
+    let W = 0, H = 0;
+    function resize() {
+      const stage = document.getElementById("stage");
+      const rect = stage.getBoundingClientRect();
+      DPR = Math.min(window.devicePixelRatio || 1, 2);
+      W = Math.max(1, Math.floor(rect.width));
+      H = Math.max(1, Math.floor(rect.height));
+      canvas.width = Math.floor(W * DPR);
+      canvas.height = Math.floor(H * DPR);
+      canvas.style.width = W + "px";
+      canvas.style.height = H + "px";
+      ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    }
+    window.addEventListener("resize", resize);
+
+    const PAD_TOP = 46;     // px from top to finish line
+    const PAD_BOT = 46;     // px from bottom to start line
+
+    function yToPx(y) {
+      const top = PAD_TOP, bot = H - PAD_BOT;
+      return bot - y * (bot - top);
+    }
+
+    function laneX(idx, total) {
+      // spread dots horizontally across track, stable per index
+      const margin = 42;
+      const usable = Math.max(1, W - margin * 2);
+      if (total <= 1) return W / 2;
+      return margin + (usable * (idx + 0.5)) / total;
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, W, H);
+
+      // track background gradient
+      const grad = ctx.createLinearGradient(0, 0, 0, H);
+      grad.addColorStop(0, "#0e0e12");
+      grad.addColorStop(1, "#0a0a0d");
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, W, H);
+
+      // faint lane lines
+      ctx.strokeStyle = "rgba(255,255,255,0.03)";
+      ctx.lineWidth = 1;
+      for (let i = 1; i < 6; i++) {
+        const x = (W * i) / 6;
+        ctx.beginPath(); ctx.moveTo(x, PAD_TOP); ctx.lineTo(x, H - PAD_BOT); ctx.stroke();
+      }
+
+      // FINISH ribbon (top) — checkered
+      const fy = yToPx(1);
+      drawCheckered(fy - 10, 20);
+      ctx.fillStyle = "#fbbf24";
+      ctx.font = "700 12px 'Space Grotesk', system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText("FINISH", W / 2, fy - 16);
+
+      // START line (bottom)
+      const sy = yToPx(0);
+      ctx.strokeStyle = "rgba(245,158,11,0.55)";
+      ctx.setLineDash([8, 6]);
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(20, sy); ctx.lineTo(W - 20, sy); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = "rgba(245,158,11,0.7)";
+      ctx.font = "600 11px 'Space Grotesk', system-ui, sans-serif";
+      ctx.fillText("START", W / 2, sy + 18);
+
+      // assemble all players (self + remotes), sorted by handle for stable lanes
+      const all = [];
+      all.push({ handle: me.handle || "~self", name: me.name, y: self.y,
+                 out: self.out, isSelf: true });
+      for (const [h, r] of remotes) {
+        if (h === me.handle) continue; // our own echo never tracked, but be safe
+        all.push({ handle: h, name: r.name, y: r.y, out: !!r.out, isSelf: false });
+      }
+      all.sort((a, b) => (a.handle < b.handle ? -1 : a.handle > b.handle ? 1 : 0));
+
+      const total = all.length;
+      const radius = Math.max(11, Math.min(20, (W / Math.max(total, 1)) * 0.28));
+
+      all.forEach((p, i) => {
+        const x = laneX(i, total);
+        const py = yToPx(Math.max(0, Math.min(1, p.y)));
+        drawPlayer(x, py, radius, p);
+      });
+    }
+
+    function drawCheckered(top, h) {
+      const sq = 10;
+      for (let x = 0; x < W; x += sq) {
+        const even = (Math.floor(x / sq)) % 2 === 0;
+        ctx.fillStyle = even ? "#e4e4e7" : "#27272a";
+        ctx.fillRect(x, top, sq, h / 2);
+        ctx.fillStyle = even ? "#27272a" : "#e4e4e7";
+        ctx.fillRect(x, top + h / 2, sq, h / 2);
+      }
+    }
+
+    function drawPlayer(x, y, r, p) {
+      const out = p.out;
+      const fill = out ? "#3f3f46" : (p.isSelf ? "#fbbf24" : "#60a5fa");
+      const ring = out ? "#52525b" : (p.isSelf ? "#fde68a" : "#93c5fd");
+
+      // shadow / glow
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fillStyle = fill;
+      if (!out) { ctx.shadowColor = p.isSelf ? "rgba(245,158,11,0.6)" : "rgba(96,165,250,0.45)"; ctx.shadowBlur = 14; }
+      ctx.fill();
+      ctx.shadowBlur = 0;
+
+      // ring (self gets a thicker highlight)
+      ctx.lineWidth = p.isSelf ? 3 : 2;
+      ctx.strokeStyle = ring;
+      ctx.stroke();
+
+      if (out) {
+        // X through eliminated players
+        ctx.strokeStyle = "#ef4444";
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(x - r * 0.6, y - r * 0.6); ctx.lineTo(x + r * 0.6, y + r * 0.6);
+        ctx.moveTo(x + r * 0.6, y - r * 0.6); ctx.lineTo(x - r * 0.6, y + r * 0.6);
+        ctx.stroke();
+      }
+
+      // label
+      const label = (p.name || "?").slice(0, 12) + (p.isSelf ? " (you)" : "");
+      ctx.font = (p.isSelf ? "700 " : "600 ") + "11px 'Space Grotesk', system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "bottom";
+      const tw = ctx.measureText(label).width;
+      ctx.fillStyle = "rgba(9,9,11,0.78)";
+      ctx.fillRect(x - tw / 2 - 5, y - r - 18, tw + 10, 15);
+      ctx.fillStyle = out ? "#a1a1aa" : (p.isSelf ? "#fde68a" : "#dbeafe");
+      ctx.fillText(label, x, y - r - 5);
+      ctx.textBaseline = "alphabetic";
+    }
+
+    // ── Incoming messages ────────────────────────────────────
+    function onMessage(msg) {
+      const p = msg && msg.payload;
+      if (!p || typeof p !== "object") return;
+      if (p.cid === clientId) return;     // ignore our own echoes (and our own tabs share handle, dedupe on cid)
+
+      switch (p.t) {
+        case "p": {
+          if (!p.handle || p.handle === me.handle) return; // never render our own handle from the wire
+          const prev = remotes.get(p.handle) || {};
+          remotes.set(p.handle, {
+            name: typeof p.name === "string" ? p.name : (prev.name || p.handle),
+            y: typeof p.y === "number" ? Math.max(0, Math.min(1, p.y)) : (prev.y || 0),
+            frozen: !!p.frozen,
+            out: !!p.out,
+            at: Date.now(),
+          });
+          break;
+        }
+        case "light": {
+          if (isHost()) return;           // host trusts only its own loop
+          if (p.state !== "green" && p.state !== "red") return;
+          if (winnerName) return;         // ignore stray light frames during round-over
+          setLight(p.state, p.seq, p.at);
+          break;
+        }
+        case "win": {
+          if (typeof p.name === "string") showWinner(p.name);
+          break;
+        }
+        case "reset": {
+          // apply when newer than our round, or whenever we're waiting on a
+          // round-over screen. Drops stale/duplicate resets (monotone).
+          const seq = typeof p.seq === "number" ? p.seq : roundSeq + 1;
+          if (seq > roundSeq || winnerName) applyReset(seq);
+          break;
+        }
+      }
+    }
+
+    // ── Presence ─────────────────────────────────────────────
+    function onPresence(members) {
+      roster = Array.isArray(members)
+        ? members.filter(m => m && m.handle).map(m => ({ handle: m.handle, name: m.name || m.handle }))
+        : [];
+      // drop remote players who left presence
+      const present = new Set(roster.map(m => m.handle));
+      for (const h of [...remotes.keys()]) {
+        if (!present.has(h)) remotes.delete(h);
+      }
+      recomputeHost();
+      updatePlayerCount();
+    }
+
+    // ── Boot ─────────────────────────────────────────────────
+    // keyboard
+    const MOVE_KEYS = new Set([" ", "Spacebar", "ArrowUp", "Up", "w", "W"]);
+    window.addEventListener("keydown", (e) => {
+      if (MOVE_KEYS.has(e.key)) { e.preventDefault(); press(); }
+    }, { passive: false });
+    window.addEventListener("keyup", (e) => {
+      if (MOVE_KEYS.has(e.key)) { e.preventDefault(); release(); }
+    }, { passive: false });
+
+    // pointer (covers mouse + touch + pen)
+    moveBtn.addEventListener("pointerdown", (e) => { e.preventDefault(); press(); });
+    moveBtn.addEventListener("pointerup",   (e) => { e.preventDefault(); release(); });
+    moveBtn.addEventListener("pointercancel", () => release());
+    moveBtn.addEventListener("pointerleave",  () => release());
+    moveBtn.addEventListener("contextmenu", (e) => e.preventDefault());
+    window.addEventListener("blur", () => release());
+    document.addEventListener("visibilitychange", () => { if (document.hidden) release(); });
+
+    resize();
+    requestAnimationFrame(tick);
+
+    (async () => {
+      try { await worlds.ready; } catch (_) {}
+      try {
+        const info = await worlds.me();
+        if (info && info.handle) { me.handle = info.handle; me.name = info.name || info.handle; }
+      } catch (_) {
+        // anonymous fallback — still playable locally / single
+        me.handle = "anon-" + clientId.slice(0, 8);
+        me.name = "guest";
+      }
+
+      recomputeHost();
+      updatePlayerCount();
+      updateMoveBtn();
+      renderLight();
+
+      room = worlds.ws.channel(CHANNEL);
+      room.subscribe(onMessage);
+      room.presence(onPresence);
+
+      // announce ourselves so peers see us before our first move
+      publish({ t: "p", handle: me.handle, name: me.name, y: 0, frozen: false, out: false });
+    })();
+  })();
+  </script>
+</body>
+</html>

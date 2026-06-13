@@ -1,0 +1,1258 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>Draw &amp; Guess — Worlds</title>
+<style>
+:root {
+  --bg: #09090b;
+  --surface: #0c0c0f;
+  --surface-2: #111114;
+  --border: #27272a;
+  --gold: #f59e0b;
+  --gold-2: #fbbf24;
+  --text: #e4e4e7;
+  --muted: #a1a1aa;
+  --green: #22c55e;
+  --red: #ef4444;
+  --font: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 15px;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+button { font-family: inherit; cursor: pointer; }
+input { font-family: inherit; }
+
+/* ---------- layout ---------- */
+#app {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  max-width: 1280px;
+  margin: 0 auto;
+}
+header.topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  flex-wrap: wrap;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  font-size: 18px;
+  color: var(--text);
+}
+.brand .dot { color: var(--gold); }
+.brand .pencil {
+  width: 22px; height: 22px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 6px;
+  background: linear-gradient(135deg, var(--gold), var(--gold-2));
+  color: #09090b; font-size: 14px;
+}
+.status-strip {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-left: auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.word-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 0;
+}
+.word-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+}
+.word {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  white-space: nowrap;
+  color: var(--gold-2);
+}
+.word.guess { letter-spacing: 0.32em; color: var(--text); font-family: ui-monospace, monospace; }
+.timer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.timer .t {
+  font-size: 22px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.timer.low .t { color: var(--red); }
+.round-badge {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+
+main {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 320px;
+  gap: 12px;
+  padding: 12px;
+  min-height: 0;
+}
+.left {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  min-width: 0;
+}
+.canvas-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fafafa;
+  overflow: hidden;
+  touch-action: none;
+}
+#board { display: block; width: 100%; height: 100%; }
+.canvas-overlay {
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 16px;
+  text-align: center;
+  padding: 24px;
+  background: rgba(9,9,11,0.92);
+  color: var(--text);
+  z-index: 5;
+}
+.canvas-overlay.show { display: flex; }
+.canvas-overlay h2 { margin: 0; font-size: 26px; letter-spacing: -0.01em; }
+.canvas-overlay p { margin: 0; color: var(--muted); max-width: 420px; line-height: 1.5; }
+.canvas-overlay .big-word { font-size: 30px; font-weight: 700; color: var(--gold-2); letter-spacing: 0.04em; }
+
+/* toolbar */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  flex-wrap: wrap;
+}
+.toolbar.disabled { opacity: 0.4; pointer-events: none; }
+.swatches { display: flex; gap: 6px; }
+.swatch {
+  width: 24px; height: 24px;
+  border-radius: 6px;
+  border: 2px solid transparent;
+  padding: 0;
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.25);
+}
+.swatch.active { border-color: var(--gold); }
+.sizes { display: flex; gap: 6px; align-items: center; }
+.size-btn {
+  width: 28px; height: 28px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.size-btn.active { border-color: var(--gold); background: #1a1206; }
+.size-btn .dot { background: #e4e4e7; border-radius: 50%; }
+.btn {
+  padding: 7px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 500;
+}
+.btn:hover { border-color: #3f3f46; }
+.btn.gold {
+  background: linear-gradient(135deg, var(--gold), var(--gold-2));
+  color: #09090b;
+  border: none;
+  font-weight: 700;
+}
+.btn.gold:hover { filter: brightness(1.05); }
+.btn.ghost { background: transparent; }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.spacer { flex: 1; }
+
+/* right column */
+.right {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+.panel {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.panel-head {
+  padding: 10px 12px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.panel-head .count { color: var(--gold); }
+
+.players-panel { flex: 0 0 auto; max-height: 38%; }
+.roster { overflow-y: auto; padding: 6px; display: flex; flex-direction: column; gap: 2px; }
+.player-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  font-size: 14px;
+}
+.player-row.you { background: var(--surface-2); }
+.player-row .av {
+  width: 26px; height: 26px;
+  border-radius: 50%;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 700; color: var(--gold-2);
+  flex: 0 0 auto;
+  overflow: hidden;
+}
+.player-row .av img { width: 100%; height: 100%; object-fit: cover; }
+.player-row .name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.player-row .pts { font-variant-numeric: tabular-nums; font-weight: 700; color: var(--text); }
+.player-row .tag {
+  font-size: 10px; padding: 2px 6px; border-radius: 999px;
+  text-transform: uppercase; letter-spacing: 0.06em; font-weight: 700;
+}
+.tag.drawer { background: #1a1206; color: var(--gold-2); border: 1px solid #4a3208; }
+.tag.guessed { background: #06210f; color: var(--green); border: 1px solid #14532d; }
+.player-row .off { font-size: 10px; color: var(--muted); }
+
+.chat-panel { flex: 1; }
+.chat-log {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.msg { font-size: 14px; line-height: 1.4; word-break: break-word; }
+.msg .who { font-weight: 700; color: var(--gold-2); }
+.msg.system { color: var(--muted); font-style: italic; }
+.msg.correct { color: var(--green); font-weight: 600; }
+.msg.correct .who { color: var(--green); }
+.msg.close { color: var(--gold); }
+.chat-input-row {
+  display: flex;
+  gap: 8px;
+  padding: 8px;
+  border-top: 1px solid var(--border);
+}
+.chat-input-row input {
+  flex: 1;
+  min-width: 0;
+  padding: 9px 11px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 14px;
+  outline: none;
+}
+.chat-input-row input:focus { border-color: var(--gold); }
+.chat-input-row input:disabled { opacity: 0.5; }
+
+/* lobby / connection banners */
+.banner {
+  padding: 8px 12px;
+  font-size: 13px;
+  text-align: center;
+  background: #1a1206;
+  color: var(--gold-2);
+  border-bottom: 1px solid #4a3208;
+}
+.banner.hidden { display: none; }
+
+/* loading screen */
+#loading {
+  position: fixed; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  flex-direction: column; gap: 14px;
+  background: var(--bg); z-index: 100;
+}
+.spinner {
+  width: 36px; height: 36px;
+  border: 3px solid var(--border);
+  border-top-color: var(--gold);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.muted { color: var(--muted); }
+
+/* toast for "you may not draw" feedback */
+#toast {
+  position: fixed;
+  bottom: 16px; left: 50%;
+  transform: translateX(-50%) translateY(20px);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 10px 16px;
+  border-radius: 10px;
+  font-size: 13px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s, transform 0.2s;
+  z-index: 50;
+}
+#toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+/* ---------- responsive ---------- */
+@media (max-width: 820px) {
+  main {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(0, 1.4fr) minmax(0, 1fr);
+  }
+  .right { flex-direction: row; gap: 10px; }
+  .players-panel { flex: 1 1 0; max-height: none; }
+  .chat-panel { flex: 1.3 1 0; }
+  .word { font-size: 18px; }
+  .timer .t { font-size: 18px; }
+  .status-strip { gap: 10px; }
+}
+@media (max-width: 520px) {
+  header.topbar { padding: 8px 12px; gap: 8px; }
+  .brand { font-size: 16px; }
+  .status-strip { width: 100%; justify-content: space-between; margin-left: 0; }
+  main { padding: 8px; gap: 8px; }
+  .toolbar { padding: 6px; gap: 6px; }
+  .right { flex-direction: column; }
+  .players-panel { max-height: 30%; }
+}
+</style>
+</head>
+<body>
+<div id="loading">
+  <div class="spinner"></div>
+  <div class="muted">Connecting to Worlds…</div>
+</div>
+
+<div id="app" style="display:none">
+  <header class="topbar">
+    <div class="brand">
+      <span class="pencil">✏️</span>
+      Draw <span class="dot">&amp;</span> Guess
+    </div>
+    <div class="status-strip">
+      <div class="round-badge" id="roundBadge">Lobby</div>
+      <div class="word-box">
+        <div class="word-label" id="wordLabel">Waiting</div>
+        <div class="word" id="wordDisplay">—</div>
+      </div>
+      <div class="timer" id="timerWrap">
+        <div class="word-label">Time</div>
+        <div class="t" id="timer">—</div>
+      </div>
+    </div>
+  </header>
+
+  <div class="banner hidden" id="connBanner">Reconnecting…</div>
+
+  <main>
+    <section class="left">
+      <div class="canvas-wrap">
+        <canvas id="board"></canvas>
+        <div class="canvas-overlay" id="overlay">
+          <h2 id="ovTitle">Draw &amp; Guess</h2>
+          <p id="ovText"></p>
+          <div class="big-word" id="ovWord" style="display:none"></div>
+          <button class="btn gold" id="startBtn" style="display:none">Start game</button>
+        </div>
+      </div>
+      <div class="toolbar disabled" id="toolbar">
+        <div class="swatches" id="swatches"></div>
+        <div class="sizes" id="sizes"></div>
+        <button class="btn ghost" id="clearBtn">Clear</button>
+        <div class="spacer"></div>
+        <span class="muted" id="toolHint">Spectating</span>
+      </div>
+    </section>
+
+    <aside class="right">
+      <div class="panel players-panel">
+        <div class="panel-head">
+          Players <span class="count" id="playerCount">0</span>
+        </div>
+        <div class="roster" id="roster"></div>
+      </div>
+      <div class="panel chat-panel">
+        <div class="panel-head">Guesses &amp; chat</div>
+        <div class="chat-log" id="chatLog"></div>
+        <div class="chat-input-row">
+          <input id="chatInput" type="text" maxlength="120" autocomplete="off"
+                 placeholder="Type your guess…" disabled />
+          <button class="btn gold" id="sendBtn" disabled>Send</button>
+        </div>
+      </div>
+    </aside>
+  </main>
+</div>
+
+<div id="toast"></div>
+
+<script src="/worlds.js"></script>
+<script>
+"use strict";
+(async function () {
+  // ---------------------------------------------------------------------------
+  // Constants
+  // ---------------------------------------------------------------------------
+  const ROUND_MS = 80000;
+  const REVEAL_MS = 4500;
+  const GAME_DOC_ID = "main";          // single authoritative doc id in `game`
+  const STROKE_THROTTLE_MS = 30;       // ~33 sends/sec cap on movement; batched below
+  const COLORS = ["#18181b", "#ef4444", "#f59e0b", "#22c55e", "#3b82f6", "#a855f7", "#ec4899", "#ffffff"];
+  const SIZES = [3, 7, 14];
+
+  const WORDS = [
+    "cat","dog","house","tree","car","boat","fish","star","moon","sun",
+    "apple","banana","pizza","burger","rocket","guitar","piano","drum","robot","ghost",
+    "snake","spider","bee","butterfly","flower","mountain","river","cloud","rainbow","umbrella",
+    "clock","key","door","window","ladder","bridge","castle","crown","sword","shield",
+    "anchor","compass","map","camera","phone","laptop","book","pencil","scissors","glasses",
+    "hat","shoe","sock","shirt","glove","ring","bell","candle","balloon","kite",
+    "snowman","cactus","mushroom","carrot","cheese","egg","bread","donut","icecream","cake",
+    "lion","tiger","bear","elephant","giraffe","monkey","penguin","owl","frog","turtle",
+    "shark","whale","dolphin","crab","octopus","dragon","unicorn","wizard","pirate","ninja",
+    "train","plane","bicycle","helicopter","submarine","tractor","lighthouse","windmill","volcano","island",
+    "guitar","sandwich","telescope","hammer","wrench","battery","magnet","feather","skull","heart"
+  ];
+
+  // ---------------------------------------------------------------------------
+  // Identity / client id
+  // ---------------------------------------------------------------------------
+  const clientId = crypto.randomUUID();
+  let me;
+  try {
+    me = await worlds.me();
+  } catch (e) {
+    me = { handle: "anon-" + clientId.slice(0, 6), name: "Guest", email: "", avatar_url: "" };
+  }
+  await worlds.ready.catch(() => {});
+  const myHandle = me.handle;
+  const myName = me.name || me.handle || "Player";
+
+  // ---------------------------------------------------------------------------
+  // DOM refs
+  // ---------------------------------------------------------------------------
+  const $ = (id) => document.getElementById(id);
+  const els = {
+    loading: $("loading"), app: $("app"),
+    roundBadge: $("roundBadge"), wordLabel: $("wordLabel"), wordDisplay: $("wordDisplay"),
+    timerWrap: $("timerWrap"), timer: $("timer"),
+    connBanner: $("connBanner"),
+    board: $("board"), overlay: $("overlay"),
+    ovTitle: $("ovTitle"), ovText: $("ovText"), ovWord: $("ovWord"), startBtn: $("startBtn"),
+    toolbar: $("toolbar"), swatches: $("swatches"), sizes: $("sizes"),
+    clearBtn: $("clearBtn"), toolHint: $("toolHint"),
+    roster: $("roster"), playerCount: $("playerCount"),
+    chatLog: $("chatLog"), chatInput: $("chatInput"), sendBtn: $("sendBtn"),
+    toast: $("toast"),
+  };
+
+  // ---------------------------------------------------------------------------
+  // Local state
+  // ---------------------------------------------------------------------------
+  let game = null;          // latest authoritative game doc.data (or null = lobby/none)
+  let gameDocId = null;     // resolved id of the game doc (may differ from GAME_DOC_ID)
+  let presence = [];        // [{handle,name}] currently connected
+  const guessedThisRound = new Set();  // handles that already guessed correctly (drawer-tracked + local display)
+  let drawColor = COLORS[0];
+  let drawSize = SIZES[1];
+  let advancing = false;    // guard so we only fire one db transition at a time
+  let lastRoundNumSeen = -1;
+  let revealTimer = null;
+
+  // ---------------------------------------------------------------------------
+  // Helpers
+  // ---------------------------------------------------------------------------
+  const now = () => Date.now();
+  const norm = (s) => (s || "").trim().toLowerCase();
+  // Am I the named drawer for the current round (any phase)?
+  const amDrawer = () => !!(game && game.drawer && game.drawer.handle === myHandle);
+  // May I draw on the canvas right now? Only the drawer, only during the draw phase.
+  const isDrawer = () => !!(amDrawer() && game.phase === "draw");
+
+  function presentHandles() {
+    return new Set(presence.map((p) => p.handle));
+  }
+  // Of the present players, am I the one responsible for advancing when the drawer is gone?
+  function isFallbackController() {
+    if (!game || !game.drawer) return false;
+    const present = presentHandles();
+    if (present.has(game.drawer.handle)) return false; // drawer present, they control
+    const presentSorted = [...present].sort();
+    return presentSorted.length > 0 && presentSorted[0] === myHandle;
+  }
+  // Whoever should drive db transitions for the current doc state: the drawer (across
+  // draw AND reveal), or — if the drawer has left — the lexicographically-smallest present handle.
+  function iControl() {
+    return amDrawer() || isFallbackController();
+  }
+
+  function pickWord(exclude) {
+    const pool = WORDS.filter((w) => w !== exclude);
+    return pool[Math.floor(Math.random() * pool.length)];
+  }
+
+  function maskWord(word) {
+    if (!word) return "";
+    return word
+      .split("")
+      .map((ch) => (ch === " " ? "  " : "_"))
+      .join(" ");
+  }
+
+  function initials(name) {
+    const parts = (name || "?").trim().split(/\s+/);
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  }
+
+  function showToast(text) {
+    els.toast.textContent = text;
+    els.toast.classList.add("show");
+    clearTimeout(showToast._t);
+    showToast._t = setTimeout(() => els.toast.classList.remove("show"), 1800);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Channels
+  // ---------------------------------------------------------------------------
+  const strokeChan = worlds.ws.channel("strokes");
+  const chatChan = worlds.ws.channel("chat");
+
+  // ---------------------------------------------------------------------------
+  // Canvas
+  // ---------------------------------------------------------------------------
+  const canvas = els.board;
+  const ctx = canvas.getContext("2d");
+  let cssW = 0, cssH = 0, dpr = 1;
+
+  function resizeCanvas() {
+    const wrap = canvas.parentElement;
+    const r = wrap.getBoundingClientRect();
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    cssW = Math.max(1, Math.floor(r.width));
+    cssH = Math.max(1, Math.floor(r.height));
+    // preserve current drawing
+    let snapshot = null;
+    if (canvas.width > 0 && canvas.height > 0) {
+      try { snapshot = document.createElement("canvas"); snapshot.width = canvas.width; snapshot.height = canvas.height; snapshot.getContext("2d").drawImage(canvas, 0, 0); } catch (e) { snapshot = null; }
+    }
+    canvas.width = Math.floor(cssW * dpr);
+    canvas.height = Math.floor(cssH * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = "#fafafa";
+    ctx.fillRect(0, 0, cssW, cssH);
+    if (snapshot) {
+      ctx.drawImage(snapshot, 0, 0, snapshot.width, snapshot.height, 0, 0, cssW, cssH);
+    }
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+  }
+
+  function clearBoard() {
+    ctx.fillStyle = "#fafafa";
+    ctx.fillRect(0, 0, cssW, cssH);
+  }
+
+  // Draw a normalized-coordinate segment onto the canvas.
+  function drawSegment(x0, y0, x1, y1, color, size) {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = size;
+    ctx.beginPath();
+    ctx.moveTo(x0 * cssW, y0 * cssH);
+    ctx.lineTo(x1 * cssW, y1 * cssH);
+    ctx.stroke();
+  }
+
+  window.addEventListener("resize", resizeCanvas);
+
+  // ---- local drawing (drawer only) ----
+  let drawing = false;
+  let lastPt = null;
+  let strokeQueue = [];   // batched outgoing segments
+  let lastFlush = 0;
+
+  function pointerPos(ev) {
+    const r = canvas.getBoundingClientRect();
+    const cx = (ev.touches ? ev.touches[0].clientX : ev.clientX) - r.left;
+    const cy = (ev.touches ? ev.touches[0].clientY : ev.clientY) - r.top;
+    return { x: clamp01(cx / r.width), y: clamp01(cy / r.height) };
+  }
+  const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
+
+  function startDraw(ev) {
+    if (!isDrawer()) {
+      if (game && game.phase === "draw") showToast("Only the drawer can draw");
+      return;
+    }
+    ev.preventDefault();
+    drawing = true;
+    lastPt = pointerPos(ev);
+  }
+
+  function moveDraw(ev) {
+    if (!drawing || !isDrawer()) return;
+    ev.preventDefault();
+    const p = pointerPos(ev);
+    if (!lastPt) { lastPt = p; return; }
+    drawSegment(lastPt.x, lastPt.y, p.x, p.y, drawColor, drawSize);
+    strokeQueue.push({ x0: lastPt.x, y0: lastPt.y, x1: p.x, y1: p.y, color: drawColor, size: drawSize });
+    lastPt = p;
+    maybeFlush();
+  }
+
+  function endDraw(ev) {
+    if (!drawing) return;
+    if (ev) ev.preventDefault();
+    drawing = false;
+    lastPt = null;
+    flushStrokes();
+  }
+
+  // Batch segments to respect the ~12 msgs/sec throttle: one publish per ~80ms,
+  // bundling many segments in a single {t:"stroke"} via a `segs` array.
+  function maybeFlush() {
+    const t = now();
+    if (t - lastFlush >= 80) flushStrokes();
+  }
+  function flushStrokes() {
+    if (strokeQueue.length === 0) return;
+    const segs = strokeQueue;
+    strokeQueue = [];
+    lastFlush = now();
+    // chunk to stay well under 16KB
+    while (segs.length) {
+      const chunk = segs.splice(0, 60);
+      strokeChan.publish({ cid: clientId, t: "stroke", segs: chunk });
+    }
+  }
+  setInterval(flushStrokes, 90);
+
+  // pointer events (mouse + touch unified)
+  canvas.addEventListener("mousedown", startDraw);
+  window.addEventListener("mousemove", moveDraw);
+  window.addEventListener("mouseup", endDraw);
+  canvas.addEventListener("touchstart", startDraw, { passive: false });
+  canvas.addEventListener("touchmove", moveDraw, { passive: false });
+  canvas.addEventListener("touchend", endDraw, { passive: false });
+  canvas.addEventListener("touchcancel", endDraw, { passive: false });
+
+  // ---- incoming strokes (everyone renders) ----
+  strokeChan.subscribe((msg) => {
+    const p = msg.payload;
+    if (!p || p.cid === clientId) return;          // ignore my own echo
+    // Only honor strokes from the current drawer (defensive against stragglers).
+    if (game && game.drawer && msg.from && msg.from.handle !== game.drawer.handle) return;
+    if (p.t === "clear") {
+      clearBoard();
+    } else if (p.t === "stroke") {
+      if (Array.isArray(p.segs)) {
+        for (const s of p.segs) drawSegment(s.x0, s.y0, s.x1, s.y1, s.color, s.size);
+      } else if (typeof p.x0 === "number") {
+        drawSegment(p.x0, p.y0, p.x1, p.y1, p.color, p.size); // single-seg fallback
+      }
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // Chat / guesses
+  // ---------------------------------------------------------------------------
+  function appendChat({ who, text, cls }) {
+    const div = document.createElement("div");
+    div.className = "msg" + (cls ? " " + cls : "");
+    if (cls === "system") {
+      div.textContent = text;
+    } else {
+      const w = document.createElement("span");
+      w.className = "who";
+      w.textContent = who + ": ";
+      div.appendChild(w);
+      div.appendChild(document.createTextNode(text));
+    }
+    els.chatLog.appendChild(div);
+    // cap log length
+    while (els.chatLog.children.length > 200) els.chatLog.removeChild(els.chatLog.firstChild);
+    els.chatLog.scrollTop = els.chatLog.scrollHeight;
+  }
+  function systemMsg(text) { appendChat({ text, cls: "system" }); }
+
+  function handleGuess(handle, name, text) {
+    // Display + correctness check. Runs on every client for the display;
+    // the *authoritative scoring* only happens on the controller's client.
+    const guess = norm(text);
+    const isGuessPhase = game && game.phase === "draw";
+    const word = game && game.word ? norm(game.word) : "";
+    const guesserIsDrawer = game && game.drawer && handle === game.drawer.handle;
+
+    if (isGuessPhase && word && guess === word && !guesserIsDrawer) {
+      // Correct guess: mask the word in the public log so latecomers can't read it.
+      if (!guessedThisRound.has(handle)) {
+        guessedThisRound.add(handle);
+        appendChat({ who: name, text: "guessed the word! ✅", cls: "correct" });
+        renderRoster();
+      }
+      // Controller awards points + advances to reveal (only first winner matters).
+      if (iControl() && !game._scored) {
+        awardAndReveal(handle, name);
+      }
+      return;
+    }
+
+    // "close" hint (one char off) — purely cosmetic, only for non-drawers in draw phase
+    let cls = "";
+    if (isGuessPhase && word && !guesserIsDrawer && handle === myHandle) {
+      if (levenshtein1(guess, word)) cls = "close";
+    }
+    appendChat({ who: name, text, cls });
+  }
+
+  function levenshtein1(a, b) {
+    if (a === b) return false;
+    if (Math.abs(a.length - b.length) > 1) return false;
+    let edits = 0, i = 0, j = 0;
+    while (i < a.length && j < b.length) {
+      if (a[i] === b[j]) { i++; j++; continue; }
+      if (++edits > 1) return false;
+      if (a.length > b.length) i++;
+      else if (a.length < b.length) j++;
+      else { i++; j++; }
+    }
+    if (i < a.length || j < b.length) edits++;
+    return edits <= 1;
+  }
+
+  chatChan.subscribe((msg) => {
+    const p = msg.payload;
+    if (!p || p.t !== "msg") return;
+    if (p.cid === clientId) return;                // my own echo handled at send time
+    handleGuess(p.handle, p.name, p.text);
+  });
+
+  function sendChat() {
+    const text = els.chatInput.value.trim();
+    if (!text) return;
+    els.chatInput.value = "";
+    // Drawer is blocked from chatting during their own draw phase (can't spoil/guess).
+    if (isDrawer()) { showToast("You're drawing — no chatting!"); return; }
+    const payload = { cid: clientId, t: "msg", handle: myHandle, name: myName, text };
+    chatChan.publish(payload);
+    // render + process locally immediately (echo is ignored by cid)
+    handleGuess(myHandle, myName, text);
+  }
+  els.sendBtn.addEventListener("click", sendChat);
+  els.chatInput.addEventListener("keydown", (e) => { if (e.key === "Enter") sendChat(); });
+
+  // ---------------------------------------------------------------------------
+  // Authoritative game transitions (controller only)
+  // ---------------------------------------------------------------------------
+  async function ensureDoc(data) {
+    // Try to create the known doc; if it already exists, fall back to the existing one.
+    try {
+      const doc = await worlds.db.collection("game").create({ _id: GAME_DOC_ID, ...data });
+      gameDocId = doc.id;
+      return doc;
+    } catch (e) {
+      // creation may fail or id may be server-assigned; resolve via list
+      const found = await loadGameDoc();
+      if (found) {
+        await worlds.db.collection("game").replace(found.id, data);
+        gameDocId = found.id;
+        return { id: found.id, data };
+      }
+      // last resort: plain create
+      const doc = await worlds.db.collection("game").create(data);
+      gameDocId = doc.id;
+      return doc;
+    }
+  }
+
+  async function loadGameDoc() {
+    const res = await worlds.db.collection("game").list({ limit: 1, sort: "-created_at" });
+    if (res && res.items && res.items.length) return res.items[0];
+    return null;
+  }
+
+  async function patchGame(patch) {
+    if (!gameDocId) {
+      const found = await loadGameDoc();
+      if (found) gameDocId = found.id;
+    }
+    if (!gameDocId) return;
+    try {
+      await worlds.db.collection("game").update(gameDocId, patch);
+    } catch (e) {
+      // benign: another controller may have advanced first
+    }
+  }
+
+  async function awardAndReveal(winnerHandle, winnerName) {
+    if (advancing) return;
+    advancing = true;
+    try {
+      const scores = Object.assign({}, game.scores || {});
+      scores[winnerHandle] = (scores[winnerHandle] || 0) + 3;
+      if (game.drawer && game.drawer.handle) {
+        scores[game.drawer.handle] = (scores[game.drawer.handle] || 0) + 2;
+      }
+      await patchGame({
+        phase: "reveal",
+        scores,
+        lastWinner: { handle: winnerHandle, name: winnerName },
+        _scored: true,
+      });
+    } finally {
+      advancing = false;
+    }
+  }
+
+  async function timeoutReveal() {
+    if (advancing) return;
+    advancing = true;
+    try {
+      await patchGame({ phase: "reveal", lastWinner: null, _scored: true });
+    } finally {
+      advancing = false;
+    }
+  }
+
+  function nextDrawer(players, currentHandle) {
+    if (!players || players.length === 0) return null;
+    const idx = players.findIndex((p) => p.handle === currentHandle);
+    if (idx === -1) return players[0];
+    return players[(idx + 1) % players.length];
+  }
+
+  async function startNextRound() {
+    if (advancing) return;
+    advancing = true;
+    try {
+      // refresh players from presence + keep anyone with a score who left? keep order stable:
+      // base rotation on existing players list, but drop players no longer present.
+      const present = presentHandles();
+      let players = (game.players || []).filter((p) => present.has(p.handle));
+      // add any present people not yet in the list (joined mid-game)
+      for (const p of presence) {
+        if (!players.some((q) => q.handle === p.handle)) players.push({ handle: p.handle, name: p.name });
+      }
+      if (players.length === 0) {
+        // nobody present — back to lobby
+        await patchGame({ phase: "lobby" });
+        return;
+      }
+      const nd = nextDrawer(players, game.drawer ? game.drawer.handle : null) || players[0];
+      const word = pickWord(game.word);
+      await patchGame({
+        phase: "draw",
+        drawer: { handle: nd.handle, name: nd.name },
+        word,
+        players,
+        roundEndsAt: now() + ROUND_MS,
+        roundNum: (game.roundNum || 0) + 1,
+        lastWinner: game.lastWinner || null,
+        _scored: false,
+      });
+    } finally {
+      advancing = false;
+    }
+  }
+
+  async function startGame() {
+    const present = presence.length ? presence.slice() : [{ handle: myHandle, name: myName }];
+    const players = present.map((p) => ({ handle: p.handle, name: p.name }));
+    const word = pickWord(null);
+    const data = {
+      phase: "draw",
+      drawer: { handle: myHandle, name: myName },
+      word,
+      roundEndsAt: now() + ROUND_MS,
+      roundNum: 1,
+      scores: {},
+      lastWinner: null,
+      players,
+      _scored: false,
+    };
+    els.startBtn.disabled = true;
+    try {
+      if (gameDocId) {
+        await worlds.db.collection("game").replace(gameDocId, data);
+      } else {
+        await ensureDoc(data);
+      }
+    } catch (e) {
+      systemMsg("Couldn't start the game — try again.");
+    }
+    els.startBtn.disabled = false;
+  }
+  els.startBtn.addEventListener("click", startGame);
+
+  // ---------------------------------------------------------------------------
+  // Reacting to authoritative state changes
+  // ---------------------------------------------------------------------------
+  function applyGame(data) {
+    const prev = game;
+    game = data;
+
+    // New round started: reset per-round local state + clear board.
+    const newRound = data && data.roundNum !== lastRoundNumSeen && data.phase === "draw";
+
+    if (newRound) {
+      lastRoundNumSeen = data.roundNum;
+      guessedThisRound.clear();
+      clearBoard();
+      strokeQueue = [];
+      if (data.drawer) {
+        if (data.drawer.handle === myHandle) {
+          systemMsg("Your turn to draw! The word is \"" + data.word + "\".");
+        } else {
+          systemMsg("Round " + data.roundNum + " — " + data.drawer.name + " is drawing.");
+        }
+      }
+    }
+
+    // Reveal transition: announce + schedule next round (controller).
+    if (data && data.phase === "reveal" && (!prev || prev.phase !== "reveal" || prev.roundNum !== data.roundNum)) {
+      const w = data.word || "";
+      if (data.lastWinner) {
+        systemMsg("\"" + w + "\" — " + data.lastWinner.name + " got it! (+3, drawer +2)");
+      } else {
+        systemMsg("Time! The word was \"" + w + "\".");
+      }
+    }
+
+    renderUI();
+
+    // Drive the reveal → next-round transition if I'm the controller.
+    scheduleControllerWork();
+  }
+
+  function scheduleControllerWork() {
+    if (revealTimer) { clearTimeout(revealTimer); revealTimer = null; }
+    if (!game) return;
+    if (!iControl()) return;
+
+    if (game.phase === "reveal") {
+      revealTimer = setTimeout(() => {
+        if (game && game.phase === "reveal" && iControl()) startNextRound();
+      }, REVEAL_MS);
+    }
+  }
+
+  // Per-second tick: timer display + drawer-side timeout enforcement.
+  setInterval(() => {
+    if (!game) return;
+    if (game.phase === "draw" && game.roundEndsAt) {
+      const remain = Math.max(0, game.roundEndsAt - now());
+      const secs = Math.ceil(remain / 1000);
+      els.timer.textContent = secs + "s";
+      els.timerWrap.classList.toggle("low", secs <= 10);
+      if (remain <= 0 && iControl() && !game._scored && !advancing) {
+        timeoutReveal();
+      }
+    }
+  }, 250);
+
+  // ---------------------------------------------------------------------------
+  // Rendering
+  // ---------------------------------------------------------------------------
+  function renderUI() {
+    const phase = game ? game.phase : "lobby";
+
+    // round badge
+    if (!game || phase === "lobby") {
+      els.roundBadge.textContent = "Lobby";
+    } else {
+      els.roundBadge.textContent = "Round " + (game.roundNum || 1);
+    }
+
+    // word + label
+    if (!game || phase === "lobby") {
+      els.wordLabel.textContent = "Waiting";
+      els.wordDisplay.textContent = "—";
+      els.wordDisplay.className = "word";
+      els.timer.textContent = "—";
+      els.timerWrap.classList.remove("low");
+    } else if (phase === "draw") {
+      if (isDrawer()) {
+        els.wordLabel.textContent = "You draw";
+        els.wordDisplay.textContent = game.word || "";
+        els.wordDisplay.className = "word";
+      } else {
+        els.wordLabel.textContent = "Guess (" + (game.word ? game.word.replace(/\s/g, "").length : 0) + " letters)";
+        els.wordDisplay.textContent = maskWord(game.word);
+        els.wordDisplay.className = "word guess";
+      }
+    } else if (phase === "reveal") {
+      els.wordLabel.textContent = "The word was";
+      els.wordDisplay.textContent = game.word || "";
+      els.wordDisplay.className = "word";
+      els.timer.textContent = "—";
+      els.timerWrap.classList.remove("low");
+    }
+
+    renderOverlay();
+    renderToolbar();
+    renderRoster();
+    renderChatInput();
+  }
+
+  function renderOverlay() {
+    const phase = game ? game.phase : "lobby";
+    const present = presentHandles();
+    if (!game || phase === "lobby") {
+      els.overlay.classList.add("show");
+      els.ovTitle.textContent = "Draw & Guess";
+      els.ovText.textContent = presence.length > 1
+        ? "Everyone's here. Hit start — you'll draw first, then it rotates."
+        : "Waiting for players to join. You can start solo to warm up, or wait for the crew.";
+      els.ovWord.style.display = "none";
+      els.startBtn.style.display = "inline-block";
+      els.startBtn.textContent = presence.length > 1 ? "Start game" : "Start game";
+    } else if (phase === "reveal") {
+      els.overlay.classList.add("show");
+      els.ovWord.style.display = "block";
+      els.ovWord.textContent = game.word || "";
+      els.startBtn.style.display = "none";
+      if (game.lastWinner) {
+        els.ovTitle.textContent = "🎉 " + game.lastWinner.name + " guessed it!";
+        els.ovText.textContent = "Next round starting…";
+      } else {
+        els.ovTitle.textContent = "Time's up!";
+        els.ovText.textContent = "Nobody guessed it. Next round starting…";
+      }
+    } else {
+      // draw phase — hide overlay
+      els.overlay.classList.remove("show");
+    }
+  }
+
+  function renderToolbar() {
+    const canDraw = isDrawer();
+    els.toolbar.classList.toggle("disabled", !canDraw);
+    els.toolHint.textContent = canDraw ? "You're drawing" :
+      (game && game.phase === "draw" && game.drawer ? "Watching " + game.drawer.name : "Spectating");
+  }
+
+  function renderChatInput() {
+    const phase = game ? game.phase : "lobby";
+    const drawer = isDrawer();
+    // Allow chat in lobby/reveal (banter); block the drawer during their own draw phase.
+    els.chatInput.disabled = drawer && phase === "draw";
+    els.sendBtn.disabled = els.chatInput.disabled;
+    if (phase === "draw" && !drawer) els.chatInput.placeholder = "Type your guess…";
+    else if (drawer && phase === "draw") els.chatInput.placeholder = "You're drawing — others guess";
+    else els.chatInput.placeholder = "Say something…";
+  }
+
+  function renderRoster() {
+    const present = presentHandles();
+    const scores = (game && game.scores) || {};
+    const drawerHandle = game && game.drawer ? game.drawer.handle : null;
+
+    // Build the union of known players: presence + anyone in players/scores.
+    const map = new Map();
+    for (const p of presence) map.set(p.handle, { handle: p.handle, name: p.name, online: true });
+    if (game && game.players) {
+      for (const p of game.players) {
+        if (!map.has(p.handle)) map.set(p.handle, { handle: p.handle, name: p.name, online: false });
+      }
+    }
+    for (const h of Object.keys(scores)) {
+      if (!map.has(h)) map.set(h, { handle: h, name: h, online: false });
+    }
+    // ensure self present
+    if (!map.has(myHandle)) map.set(myHandle, { handle: myHandle, name: myName, online: true });
+
+    const rows = [...map.values()].map((p) => ({
+      ...p,
+      pts: scores[p.handle] || 0,
+      online: present.has(p.handle),
+    }));
+    rows.sort((a, b) => (b.pts - a.pts) || (b.online - a.online) || a.name.localeCompare(b.name));
+
+    els.playerCount.textContent = present.size;
+    els.roster.innerHTML = "";
+    for (const p of rows) {
+      const row = document.createElement("div");
+      row.className = "player-row" + (p.handle === myHandle ? " you" : "");
+      const av = document.createElement("div");
+      av.className = "av";
+      av.textContent = initials(p.name);
+      row.appendChild(av);
+
+      const name = document.createElement("span");
+      name.className = "name";
+      name.textContent = p.name + (p.handle === myHandle ? " (you)" : "");
+      row.appendChild(name);
+
+      if (p.handle === drawerHandle && game && game.phase !== "lobby") {
+        const tag = document.createElement("span");
+        tag.className = "tag drawer";
+        tag.textContent = "✏️ drawing";
+        row.appendChild(tag);
+      } else if (guessedThisRound.has(p.handle)) {
+        const tag = document.createElement("span");
+        tag.className = "tag guessed";
+        tag.textContent = "✓ got it";
+        row.appendChild(tag);
+      }
+
+      if (!p.online) {
+        const off = document.createElement("span");
+        off.className = "off";
+        off.textContent = "offline";
+        row.appendChild(off);
+      }
+
+      const pts = document.createElement("span");
+      pts.className = "pts";
+      pts.textContent = p.pts;
+      row.appendChild(pts);
+
+      els.roster.appendChild(row);
+    }
+  }
+
+  // Build swatches + size buttons
+  function buildToolbar() {
+    COLORS.forEach((c, i) => {
+      const b = document.createElement("button");
+      b.className = "swatch" + (c === drawColor ? " active" : "");
+      b.style.background = c;
+      b.title = c;
+      b.addEventListener("click", () => {
+        drawColor = c;
+        [...els.swatches.children].forEach((el, j) => el.classList.toggle("active", COLORS[j] === c));
+      });
+      els.swatches.appendChild(b);
+    });
+    SIZES.forEach((s) => {
+      const b = document.createElement("button");
+      b.className = "size-btn" + (s === drawSize ? " active" : "");
+      const dot = document.createElement("span");
+      dot.className = "dot";
+      const d = Math.max(4, Math.min(18, s + 2));
+      dot.style.width = d + "px";
+      dot.style.height = d + "px";
+      b.appendChild(dot);
+      b.addEventListener("click", () => {
+        drawSize = s;
+        [...els.sizes.children].forEach((el, j) => el.classList.toggle("active", SIZES[j] === s));
+      });
+      els.sizes.appendChild(b);
+    });
+  }
+
+  els.clearBtn.addEventListener("click", () => {
+    if (!isDrawer()) { showToast("Only the drawer can clear"); return; }
+    clearBoard();
+    strokeChan.publish({ cid: clientId, t: "clear" });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Presence
+  // ---------------------------------------------------------------------------
+  strokeChan.presence((members) => {
+    // dedupe by handle (two tabs share a handle)
+    const seen = new Map();
+    for (const m of members || []) {
+      if (m && m.handle) seen.set(m.handle, { handle: m.handle, name: m.name || m.handle });
+    }
+    if (!seen.has(myHandle)) seen.set(myHandle, { handle: myHandle, name: myName });
+    presence = [...seen.values()];
+    renderUI();
+    scheduleControllerWork();
+  });
+
+  // ---------------------------------------------------------------------------
+  // DB subscription + initial load
+  // ---------------------------------------------------------------------------
+  worlds.db.collection("game").subscribe((ev) => {
+    if (!ev || !ev.doc) return;
+    // Track our resolved doc id; ignore stray docs other than the one we know about.
+    if (gameDocId && ev.doc.id !== gameDocId) return;
+    if (!gameDocId) gameDocId = ev.doc.id;
+    if (ev.type === "delete") { applyGame(null); return; }
+    applyGame(ev.doc.data);
+  });
+
+  async function init() {
+    buildToolbar();
+    resizeCanvas();
+    // give the wrapper a frame to lay out, then size again (mobile flex quirks)
+    requestAnimationFrame(resizeCanvas);
+
+    const existing = await loadGameDoc().catch(() => null);
+    if (existing) {
+      gameDocId = existing.id;
+      applyGame(existing.data);
+    } else {
+      applyGame(null); // lobby
+    }
+
+    els.loading.style.display = "none";
+    els.app.style.display = "flex";
+    requestAnimationFrame(resizeCanvas);
+    setTimeout(resizeCanvas, 120);
+  }
+
+  await init();
+})();
+</script>
+</body>
+</html>

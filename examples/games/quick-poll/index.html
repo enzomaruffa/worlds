@@ -1,0 +1,781 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Quick Poll — Worlds</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #09090b;
+    --surface: #0c0c0f;
+    --surface-2: #131318;
+    --border: #27272a;
+    --border-soft: #1c1c20;
+    --gold: #f59e0b;
+    --gold-bright: #fbbf24;
+    --text: #e4e4e7;
+    --muted: #a1a1aa;
+    --muted-2: #71717a;
+    --danger: #ef4444;
+    --good: #22c55e;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background:
+      radial-gradient(1200px 600px at 50% -10%, rgba(245,158,11,.06), transparent 60%),
+      var(--bg);
+    color: var(--text);
+    font-family: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+  a { color: var(--gold); }
+  .wrap {
+    width: min(640px, 94vw);
+    margin: 0 auto;
+    padding: 1.25rem 0 4rem;
+  }
+
+  /* ── Header ─────────────────────────────── */
+  header.top {
+    display: flex; align-items: center; gap: .75rem;
+    padding: .25rem 0 1rem;
+    border-bottom: 1px solid var(--border-soft);
+    margin-bottom: 1.25rem;
+  }
+  .badge {
+    width: 42px; height: 42px; border-radius: 11px; flex: none;
+    display: grid; place-items: center;
+    background: linear-gradient(160deg, #1a1a1f, #0b0b0e);
+    border: 1px solid var(--border);
+    box-shadow: 0 0 0 1px rgba(245,158,11,.08) inset;
+    font-size: 1.35rem;
+  }
+  .titles h1 { margin: 0; font-size: 1.18rem; letter-spacing: .04em; font-weight: 600; }
+  .titles h1 .accent { color: var(--gold); }
+  .titles p { margin: .1rem 0 0; font-size: .78rem; color: var(--muted-2); letter-spacing: .02em; }
+  .me-chip {
+    margin-left: auto; display: flex; align-items: center; gap: .5rem;
+    padding: .35rem .6rem; border-radius: 999px;
+    background: var(--surface); border: 1px solid var(--border);
+    font-size: .78rem; color: var(--muted); white-space: nowrap;
+  }
+  .me-chip img { width: 22px; height: 22px; border-radius: 50%; object-fit: cover; }
+  .me-chip .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--good); box-shadow: 0 0 8px var(--good); }
+
+  /* ── Cards / surfaces ───────────────────── */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 1.1rem 1.15rem;
+  }
+  .card + .card { margin-top: 1rem; }
+  .section-label {
+    font-size: .7rem; text-transform: uppercase; letter-spacing: .18em;
+    color: var(--muted-2); margin: 0 0 .65rem;
+  }
+
+  /* ── Inputs ─────────────────────────────── */
+  label.field { display: block; }
+  .lab {
+    font-size: .72rem; text-transform: uppercase; letter-spacing: .12em;
+    color: var(--muted-2); margin: 0 0 .4rem;
+  }
+  input[type="text"] {
+    width: 100%;
+    font-family: inherit; font-size: .95rem;
+    color: var(--text);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: .65rem .75rem;
+    outline: none;
+    transition: border-color .15s ease, box-shadow .15s ease;
+  }
+  input[type="text"]:focus {
+    border-color: var(--gold);
+    box-shadow: 0 0 0 3px rgba(245,158,11,.12);
+  }
+  input[type="text"]::placeholder { color: var(--muted-2); }
+
+  .opt-rows { display: flex; flex-direction: column; gap: .55rem; margin-top: .35rem; }
+  .opt-row { display: flex; align-items: center; gap: .5rem; }
+  .opt-row .idx {
+    flex: none; width: 1.4rem; text-align: center;
+    font-size: .82rem; color: var(--muted-2); font-variant-numeric: tabular-nums;
+  }
+  .opt-row input { flex: 1; }
+  .icon-btn {
+    flex: none; width: 38px; height: 38px; border-radius: 9px;
+    display: grid; place-items: center;
+    font-family: inherit; font-size: 1.1rem; line-height: 1; font-weight: 600;
+    color: var(--muted); cursor: pointer;
+    background: var(--surface-2); border: 1px solid var(--border);
+    transition: background .15s ease, color .15s ease, border-color .15s ease;
+  }
+  .icon-btn:hover:not(:disabled) { color: var(--danger); border-color: var(--danger); }
+  .icon-btn:disabled { opacity: .35; cursor: not-allowed; }
+
+  /* ── Buttons ────────────────────────────── */
+  button {
+    font-family: inherit; font-size: .92rem; font-weight: 600;
+    cursor: pointer;
+  }
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: .45rem;
+    padding: .7rem 1.1rem; border-radius: 11px;
+    border: 1px solid var(--border);
+    background: var(--surface-2); color: var(--text);
+    transition: background .15s ease, border-color .15s ease, transform .05s ease, opacity .15s ease;
+  }
+  .btn:hover:not(:disabled) { border-color: var(--muted-2); }
+  .btn:active:not(:disabled) { transform: translateY(1px); }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .btn.primary {
+    background: linear-gradient(160deg, var(--gold-bright), var(--gold));
+    color: #1a1205; border-color: transparent;
+    box-shadow: 0 6px 20px -8px rgba(245,158,11,.5);
+  }
+  .btn.primary:hover:not(:disabled) { filter: brightness(1.05); }
+  .btn.ghost { background: transparent; }
+  .btn.full { width: 100%; }
+  .btn.lg { font-size: 1rem; padding: .8rem 1.2rem; }
+
+  .add-row { margin-top: .65rem; }
+  .row-actions { margin-top: 1.1rem; }
+
+  /* ── Share box ──────────────────────────── */
+  .share {
+    margin-top: .25rem;
+    background: var(--surface-2);
+    border: 1px dashed var(--border);
+    border-radius: 12px;
+    padding: .75rem .8rem;
+    display: flex; align-items: center; gap: .6rem; flex-wrap: wrap;
+  }
+  .share .link {
+    flex: 1; min-width: 0;
+    font-size: .85rem; color: var(--gold-bright);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  .share .btn { flex: none; padding: .5rem .8rem; }
+
+  /* ── Vote buttons ───────────────────────── */
+  .vote-list { display: flex; flex-direction: column; gap: .6rem; margin-top: .3rem; }
+  .vote-btn {
+    width: 100%; text-align: left;
+    padding: .85rem 1rem; border-radius: 12px;
+    border: 1px solid var(--border); background: var(--surface-2); color: var(--text);
+    font-size: .98rem; font-weight: 500;
+    transition: background .15s ease, border-color .15s ease, transform .05s ease;
+  }
+  .vote-btn:hover:not(:disabled) { border-color: var(--gold); background: #16130b; }
+  .vote-btn:active:not(:disabled) { transform: translateY(1px); }
+  .vote-btn:disabled { opacity: .6; cursor: progress; }
+
+  /* ── Bar chart ──────────────────────────── */
+  .question {
+    font-size: 1.22rem; font-weight: 600; line-height: 1.35;
+    margin: 0 0 .3rem;
+  }
+  .q-meta { font-size: .78rem; color: var(--muted-2); margin: 0 0 1.1rem; }
+  .bars { display: flex; flex-direction: column; gap: .8rem; }
+  .bar-row { display: block; }
+  .bar-head {
+    display: flex; align-items: baseline; gap: .5rem;
+    margin-bottom: .35rem;
+  }
+  .bar-label { font-size: .92rem; font-weight: 500; color: var(--text); flex: 1; min-width: 0; word-break: break-word; }
+  .bar-row.lead .bar-label { color: var(--gold-bright); font-weight: 600; }
+  .bar-pct { font-size: .9rem; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .bar-row.lead .bar-pct { color: var(--gold-bright); }
+  .bar-count { font-size: .76rem; color: var(--muted-2); font-variant-numeric: tabular-nums; }
+  .bar-track {
+    position: relative;
+    height: 14px; border-radius: 999px;
+    background: var(--surface-2);
+    border: 1px solid var(--border-soft);
+    overflow: hidden;
+  }
+  .bar-fill {
+    position: absolute; inset: 0 auto 0 0;
+    width: 0%;
+    border-radius: 999px;
+    background: linear-gradient(90deg, #3f3f46, #52525b);
+    transition: width .6s cubic-bezier(.22,.61,.36,1);
+  }
+  .bar-row.lead .bar-fill {
+    background: linear-gradient(90deg, var(--gold), var(--gold-bright));
+    box-shadow: 0 0 14px -2px rgba(245,158,11,.55);
+  }
+
+  .totals {
+    display: flex; align-items: center; gap: .5rem;
+    margin-top: 1.1rem; padding-top: .9rem;
+    border-top: 1px solid var(--border-soft);
+    font-size: .85rem; color: var(--muted);
+  }
+  .totals .n { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .live {
+    margin-left: auto; display: inline-flex; align-items: center; gap: .4rem;
+    font-size: .74rem; color: var(--muted-2); letter-spacing: .04em;
+  }
+  .live .pulse {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--good); box-shadow: 0 0 8px var(--good);
+    animation: pulse 1.8s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .25; } }
+
+  .you-voted {
+    margin-top: 1rem; font-size: .82rem; color: var(--muted);
+    background: rgba(34,197,94,.07); border: 1px solid rgba(34,197,94,.25);
+    border-radius: 10px; padding: .55rem .75rem;
+  }
+  .you-voted b { color: var(--good); }
+
+  /* ── Recent polls ───────────────────────── */
+  .recent { margin-top: 1.2rem; }
+  .recent ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .4rem; }
+  .recent li a {
+    display: block; text-decoration: none; color: var(--text);
+    padding: .55rem .7rem; border-radius: 9px;
+    background: var(--surface-2); border: 1px solid var(--border-soft);
+    font-size: .88rem;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    transition: border-color .15s ease;
+  }
+  .recent li a:hover { border-color: var(--gold); }
+
+  /* ── Misc / states ──────────────────────── */
+  .boot, .err { text-align: center; color: var(--muted-2); padding: 3rem 1rem; font-size: .95rem; }
+  .err { color: var(--muted); }
+  .err .icon { font-size: 2rem; display: block; margin-bottom: .5rem; }
+  .hidden { display: none !important; }
+  .toast {
+    position: fixed; left: 50%; bottom: 1.4rem;
+    transform: translateX(-50%) translateY(1.5rem);
+    background: var(--surface-2); border: 1px solid var(--border);
+    color: var(--text); padding: .6rem 1rem; border-radius: 999px;
+    font-size: .85rem; box-shadow: 0 12px 30px -10px rgba(0,0,0,.6);
+    opacity: 0; pointer-events: none; transition: opacity .2s ease, transform .2s ease; z-index: 50;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .footer { margin-top: 1.5rem; text-align: center; font-size: .76rem; color: var(--muted-2); }
+  .footer button { background: none; border: none; color: var(--gold); font-size: inherit; padding: 0; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="top">
+      <div class="badge">📊</div>
+      <div class="titles">
+        <h1>Quick <span class="accent">Poll</span></h1>
+        <p>Make a poll · share a link · watch live</p>
+      </div>
+      <div class="me-chip" id="meChip" hidden>
+        <span class="dot"></span>
+        <img id="meAvatar" alt="" hidden />
+        <span id="meName">…</span>
+      </div>
+    </header>
+
+    <div id="boot" class="boot">Connecting to Worlds…</div>
+
+    <!-- CREATE -->
+    <section id="screenCreate" class="hidden">
+      <div class="card">
+        <p class="section-label">New poll</p>
+        <label class="field">
+          <div class="lab">Question</div>
+          <input id="qInput" type="text" maxlength="200" placeholder="What should we name the new mascot?" />
+        </label>
+
+        <div style="margin-top:1rem;">
+          <div class="lab">Options</div>
+          <div id="optRows" class="opt-rows"></div>
+          <button id="addOpt" class="btn ghost add-row">＋ Add option</button>
+        </div>
+
+        <div class="row-actions">
+          <button id="createBtn" class="btn primary full lg">Create poll</button>
+        </div>
+      </div>
+
+      <div id="recentWrap" class="recent hidden">
+        <p class="section-label">Recent polls you made</p>
+        <ul id="recentList"></ul>
+      </div>
+    </section>
+
+    <!-- VOTE / RESULTS -->
+    <section id="screenPoll" class="hidden">
+      <div class="card">
+        <h2 id="pollQuestion" class="question"></h2>
+        <p id="pollMeta" class="q-meta"></p>
+
+        <div id="voteList" class="vote-list hidden"></div>
+
+        <div id="resultsWrap" class="hidden">
+          <div id="bars" class="bars"></div>
+          <div class="totals">
+            <span><span class="n" id="totalVotes">0</span> votes</span>
+            <span class="live"><span class="pulse"></span>LIVE</span>
+          </div>
+        </div>
+
+        <div id="youVoted" class="you-voted hidden">You picked <b id="yourPick"></b>. Results update live as others vote.</div>
+      </div>
+
+      <div class="card" id="shareCard">
+        <p class="section-label">Share this link</p>
+        <div class="share">
+          <span class="link" id="shareLink"></span>
+          <button class="btn" id="copyBtn">Copy</button>
+        </div>
+      </div>
+
+      <div class="footer">
+        <button id="makeAnother">＋ Make another poll</button>
+      </div>
+    </section>
+
+    <!-- NOT FOUND -->
+    <section id="screenError" class="hidden">
+      <div class="card err">
+        <span class="icon">🫥</span>
+        <div id="errMsg">That poll couldn't be found. It may have been removed, or the link is incomplete.</div>
+        <div style="margin-top:1.2rem;">
+          <button class="btn primary" id="errCreate">Create a new poll</button>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+<script src="/worlds.js"></script>
+<script>
+(() => {
+  "use strict";
+
+  // ── Constants ────────────────────────────────────────────
+  const COLLECTION = "polls";
+  const MIN_OPTS = 2;
+  const MAX_OPTS = 8;
+  const RECENT_KEY = "quickpoll.recent.v1";
+  const votedKey = (id) => "quickpoll.voted." + id;
+
+  // ── DOM refs ─────────────────────────────────────────────
+  const $ = (id) => document.getElementById(id);
+  const boot = $("boot");
+  const screens = {
+    create: $("screenCreate"),
+    poll: $("screenPoll"),
+    error: $("screenError"),
+  };
+  const toastEl = $("toast");
+
+  // ── Worlds handle ────────────────────────────────────────
+  const col = worlds.db.collection(COLLECTION);
+
+  // ── State ────────────────────────────────────────────────
+  let me = null;          // {handle,name,avatar_url,...}
+  let currentPoll = null; // {id, data}
+  let unsub = null;       // live subscription teardown
+  let voting = false;     // re-entrancy guard
+
+  // ── Helpers ──────────────────────────────────────────────
+  function showScreen(name) {
+    boot.classList.add("hidden");
+    for (const k in screens) screens[k].classList.toggle("hidden", k !== name);
+  }
+  function toast(text) {
+    toastEl.textContent = text;
+    toastEl.classList.add("show");
+    clearTimeout(toast._t);
+    toast._t = setTimeout(() => toastEl.classList.remove("show"), 2400);
+  }
+  function pollIdFromUrl() {
+    const p = new URLSearchParams(location.search).get("p");
+    if (p) return p.trim();
+    const h = location.hash.replace(/^#/, "").trim();
+    return h || null;
+  }
+  function shareUrlFor(id) {
+    return location.origin + location.pathname + "?p=" + encodeURIComponent(id);
+  }
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) => (
+      { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+    ));
+  }
+
+  // counts is an object keyed by option index: { "0": n, "1": n, ... }
+  function countFor(data, i) {
+    const c = data && data.counts;
+    if (!c) return 0;
+    const v = c[String(i)];
+    return typeof v === "number" && isFinite(v) ? v : 0;
+  }
+  function totalVotes(data) {
+    const opts = (data && data.options) || [];
+    let t = 0;
+    for (let i = 0; i < opts.length; i++) t += countFor(data, i);
+    return t;
+  }
+
+  // ── localStorage: recent polls + voted flag ──────────────
+  function recentPolls() {
+    try { return JSON.parse(localStorage.getItem(RECENT_KEY) || "[]"); }
+    catch { return []; }
+  }
+  function rememberPoll(id, question) {
+    try {
+      const list = recentPolls().filter((r) => r.id !== id);
+      list.unshift({ id, question, at: Date.now() });
+      localStorage.setItem(RECENT_KEY, JSON.stringify(list.slice(0, 8)));
+    } catch { /* storage may be unavailable */ }
+  }
+  function hasVoted(id) {
+    try { return localStorage.getItem(votedKey(id)) != null; }
+    catch { return false; }
+  }
+  function markVoted(id, optionIndex) {
+    try { localStorage.setItem(votedKey(id), String(optionIndex)); }
+    catch { /* ignore */ }
+  }
+  function votedIndex(id) {
+    try {
+      const v = localStorage.getItem(votedKey(id));
+      return v == null ? -1 : Number(v);
+    } catch { return -1; }
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  //  CREATE MODE
+  // ═══════════════════════════════════════════════════════════
+  function buildOptionRow(value) {
+    const row = document.createElement("div");
+    row.className = "opt-row";
+    const idx = document.createElement("span");
+    idx.className = "idx";
+    const input = document.createElement("input");
+    input.type = "text";
+    input.maxLength = 80;
+    input.value = value || "";
+    const del = document.createElement("button");
+    del.className = "icon-btn";
+    del.type = "button";
+    del.title = "Remove option";
+    del.textContent = "×";
+    del.addEventListener("click", () => { row.remove(); refreshOptionRows(); });
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); $("createBtn").click(); }
+    });
+    row.append(idx, input, del);
+    return row;
+  }
+  function refreshOptionRows() {
+    const rows = [...$("optRows").children];
+    rows.forEach((row, i) => {
+      row.querySelector(".idx").textContent = i + 1;
+      const del = row.querySelector(".icon-btn");
+      del.disabled = rows.length <= MIN_OPTS;
+      const input = row.querySelector("input");
+      input.placeholder = "Option " + (i + 1);
+    });
+    $("addOpt").disabled = rows.length >= MAX_OPTS;
+  }
+  function initCreateForm() {
+    const host = $("optRows");
+    host.innerHTML = "";
+    for (let i = 0; i < MIN_OPTS; i++) host.appendChild(buildOptionRow(""));
+    refreshOptionRows();
+
+    $("addOpt").onclick = () => {
+      if ($("optRows").children.length >= MAX_OPTS) return;
+      const row = buildOptionRow("");
+      $("optRows").appendChild(row);
+      refreshOptionRows();
+      row.querySelector("input").focus();
+    };
+
+    $("createBtn").onclick = createPoll;
+
+    renderRecent();
+  }
+  function renderRecent() {
+    const list = recentPolls();
+    const wrap = $("recentWrap");
+    if (!list.length) { wrap.classList.add("hidden"); return; }
+    wrap.classList.remove("hidden");
+    const ul = $("recentList");
+    ul.innerHTML = "";
+    for (const r of list) {
+      const li = document.createElement("li");
+      const a = document.createElement("a");
+      a.href = shareUrlFor(r.id);
+      a.textContent = r.question || "(untitled poll)";
+      li.appendChild(a);
+      ul.appendChild(li);
+    }
+  }
+  async function createPoll() {
+    const question = $("qInput").value.trim();
+    const opts = [...$("optRows").querySelectorAll("input")]
+      .map((i) => i.value.trim())
+      .filter((v) => v.length);
+
+    if (!question) { toast("Add a question first."); $("qInput").focus(); return; }
+    if (opts.length < MIN_OPTS) { toast("Add at least " + MIN_OPTS + " options."); return; }
+
+    const btn = $("createBtn");
+    btn.disabled = true;
+    btn.textContent = "Creating…";
+    try {
+      const counts = {};
+      opts.forEach((_, i) => { counts[String(i)] = 0; });
+      const doc = await col.create({
+        question,
+        options: opts.map((text) => ({ text })),
+        counts,
+        created_by: me.handle,
+        created_at: new Date().toISOString(),
+      });
+      rememberPoll(doc.id, question);
+      // Move into the poll view via URL so refresh/share is consistent.
+      history.replaceState(null, "", shareUrlFor(doc.id));
+      openPoll(doc);
+    } catch (e) {
+      console.error("[quick-poll] create failed", e);
+      toast("Couldn't create the poll. Try again.");
+      btn.disabled = false;
+      btn.textContent = "Create poll";
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  //  VOTE / RESULTS MODE
+  // ═══════════════════════════════════════════════════════════
+  function openPoll(doc) {
+    currentPoll = doc;
+    const id = doc.id;
+
+    $("pollQuestion").textContent = doc.data.question || "(untitled poll)";
+    const link = shareUrlFor(id);
+    $("shareLink").textContent = link;
+    $("copyBtn").onclick = () => copyLink(link);
+    $("makeAnother").onclick = goCreate;
+
+    renderPoll();
+    showScreen("poll");
+
+    // Live: re-render whenever THIS poll's doc changes.
+    if (unsub) { try { unsub(); } catch {} unsub = null; }
+    unsub = col.subscribe((ev) => {
+      if (!ev || !ev.doc || ev.doc.id !== id) return;
+      if (ev.type === "delete") {
+        showError("This poll was removed by its creator.");
+        if (unsub) { try { unsub(); } catch {} unsub = null; }
+        return;
+      }
+      currentPoll = ev.doc;
+      renderPoll();
+    });
+  }
+
+  function renderPoll() {
+    const data = currentPoll.data;
+    const id = currentPoll.id;
+    const opts = data.options || [];
+    const voted = hasVoted(id);
+
+    $("pollMeta").textContent = (opts.length + " options · started " +
+      (data.created_at ? new Date(data.created_at).toLocaleDateString() : "recently"));
+
+    if (voted) {
+      renderResults();
+      const pickIdx = votedIndex(id);
+      const pick = opts[pickIdx];
+      if (pick) {
+        $("yourPick").textContent = pick.text;
+        $("youVoted").classList.remove("hidden");
+      } else {
+        $("youVoted").classList.add("hidden");
+      }
+      $("voteList").classList.add("hidden");
+    } else {
+      renderBallot();
+      $("resultsWrap").classList.add("hidden");
+      $("youVoted").classList.add("hidden");
+    }
+  }
+
+  function renderBallot() {
+    const list = $("voteList");
+    list.innerHTML = "";
+    const opts = currentPoll.data.options || [];
+    opts.forEach((opt, i) => {
+      const b = document.createElement("button");
+      b.className = "vote-btn";
+      b.type = "button";
+      b.textContent = opt.text;
+      b.addEventListener("click", () => castVote(i));
+      list.appendChild(b);
+    });
+    list.classList.remove("hidden");
+  }
+
+  async function castVote(optionIndex) {
+    if (voting) return;
+    const id = currentPoll.id;
+    if (hasVoted(id)) { renderPoll(); return; }
+    voting = true;
+    const buttons = [...$("voteList").querySelectorAll("button")];
+    buttons.forEach((b) => { b.disabled = true; });
+
+    try {
+      const updated = await col.increment(id, "counts." + optionIndex, 1);
+      markVoted(id, optionIndex);
+      currentPoll = updated || currentPoll;
+      renderPoll();
+      toast("Vote counted.");
+    } catch (e) {
+      console.error("[quick-poll] vote failed", e);
+      toast("Couldn't record your vote. Try again.");
+      buttons.forEach((b) => { b.disabled = false; });
+    } finally {
+      voting = false;
+    }
+  }
+
+  function renderResults() {
+    const data = currentPoll.data;
+    const opts = data.options || [];
+    const total = totalVotes(data);
+
+    let maxCount = 0;
+    for (let i = 0; i < opts.length; i++) maxCount = Math.max(maxCount, countFor(data, i));
+
+    const bars = $("bars");
+    // Reuse existing rows when option count matches so width transitions animate.
+    let rows = [...bars.children];
+    if (rows.length !== opts.length) {
+      bars.innerHTML = "";
+      rows = opts.map(() => {
+        const row = document.createElement("div");
+        row.className = "bar-row";
+        row.innerHTML =
+          '<div class="bar-head">' +
+            '<span class="bar-label"></span>' +
+            '<span class="bar-pct"></span>' +
+          '</div>' +
+          '<div class="bar-track"><div class="bar-fill"></div></div>' +
+          '<div class="bar-count"></div>';
+        bars.appendChild(row);
+        return row;
+      });
+    }
+
+    opts.forEach((opt, i) => {
+      const count = countFor(data, i);
+      const pct = total > 0 ? (count / total) * 100 : 0;
+      const isLead = count > 0 && count === maxCount;
+      const row = rows[i];
+      row.classList.toggle("lead", isLead);
+      row.querySelector(".bar-label").textContent = opt.text;
+      row.querySelector(".bar-pct").textContent = Math.round(pct) + "%";
+      row.querySelector(".bar-fill").style.width = pct + "%";
+      row.querySelector(".bar-count").textContent =
+        count + (count === 1 ? " vote" : " votes");
+    });
+
+    $("totalVotes").textContent = total;
+    $("resultsWrap").classList.remove("hidden");
+  }
+
+  // ── Copy link ────────────────────────────────────────────
+  async function copyLink(link) {
+    let ok = false;
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(link);
+        ok = true;
+      }
+    } catch { /* fall through to legacy path */ }
+    if (!ok) {
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = link;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.focus(); ta.select();
+        ok = document.execCommand("copy");
+        document.body.removeChild(ta);
+      } catch { ok = false; }
+    }
+    toast(ok ? "Link copied!" : "Copy failed — select & copy manually.");
+  }
+
+  // ── Navigation ───────────────────────────────────────────
+  function goCreate() {
+    if (unsub) { try { unsub(); } catch {} unsub = null; }
+    currentPoll = null;
+    history.replaceState(null, "", location.origin + location.pathname);
+    location.hash = "";
+    initCreateForm();
+    showScreen("create");
+    $("qInput").focus();
+  }
+  function showError(msg) {
+    if (msg) $("errMsg").textContent = msg;
+    $("errCreate").onclick = goCreate;
+    showScreen("error");
+  }
+
+  // ── Boot ─────────────────────────────────────────────────
+  (async () => {
+    try {
+      await worlds.ready;
+      me = await worlds.me();
+      const chip = $("meChip");
+      chip.hidden = false;
+      $("meName").textContent = me.name || me.handle || "you";
+      if (me.avatar_url) {
+        const av = $("meAvatar");
+        av.src = me.avatar_url;
+        av.hidden = false;
+      }
+
+      const id = pollIdFromUrl();
+      if (!id) {
+        initCreateForm();
+        showScreen("create");
+        return;
+      }
+
+      try {
+        const doc = await col.get(id);
+        if (!doc || !doc.data) { showError(); return; }
+        openPoll(doc);
+      } catch (e) {
+        console.error("[quick-poll] poll not found", e);
+        showError();
+      }
+    } catch (e) {
+      boot.textContent = "Couldn't connect to Worlds. Refresh to retry.";
+      console.error("[quick-poll] boot failed", e);
+    }
+  })();
+})();
+</script>
+</body>
+</html>
