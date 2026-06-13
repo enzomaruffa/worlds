@@ -662,6 +662,9 @@ function makePlanet(site) {
 const planets = new Map();
 
 function upsertPlanet(site) {
+  // the universe itself is the meta-world — it IS the black hole at the core,
+  // not a planet orbiting inside itself.
+  if (site.name === "universe") return;
   const existing = planets.get(site.name);
   if (existing) {
     existing.userData.site = site;
@@ -1239,7 +1242,7 @@ document.getElementById("hud").appendChild(rosterEl);
 function whereLabel(pos) {
   let best = "deep space", bd = 320;
   for (const [k, s] of Object.entries(SYSTEMS)) { const d = pos.distanceTo(s.pos); if (d < bd) { bd = d; best = k === "misc" ? "home" : s.title; } }
-  if (pos.distanceTo(CORE_POS) < 320) best = "the core";
+  if (pos.distanceTo(CORE_POS) < 320) best = "the universe";
   return best;
 }
 function updateRoster() {
@@ -1265,7 +1268,7 @@ function updateCompass(forward) {
   const arc = Math.PI * 0.6, halfW = compassEl.clientWidth / 2;
   const pts = [];
   for (const [k, sys] of Object.entries(SYSTEMS)) pts.push({ pos: sys.pos, label: k === "misc" ? "HOME" : k.toUpperCase().slice(0, 4), color: `#${new THREE.Color(sys.hot).getHexString()}` });
-  pts.push({ pos: CORE_POS, label: "CORE", color: "#c4b5fd" });
+  pts.push({ pos: CORE_POS, label: "UNIV", color: "#c4b5fd" });
   for (const b of beacons) pts.push({ pos: b.pos, label: "PING", color: "#e5a00d" });
   if (following && pilots.get(following)) pts.push({ pos: pilots.get(following).group.position, label: "@" + pilots.get(following).group.userData.handle, color: "#7dd3fc" });
   let html = '<div class="needle"></div>';
@@ -1316,7 +1319,7 @@ for (const [key, sys] of Object.entries(SYSTEMS)) {
 {
   const btn = document.createElement("button");
   btn.style.color = "#c4b5fd";
-  btn.textContent = "◍ the core · black hole";
+  btn.textContent = "◍ the universe · black hole";
   btn.onclick = () => { initAudio(); warpSound(); flyTarget = { position: CORE_POS.clone(), offset: new THREE.Vector3(0, 70, 200) }; };
   systemsBar.appendChild(btn);
 }
