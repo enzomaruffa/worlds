@@ -157,6 +157,80 @@ main {
 .canvas-overlay p { margin: 0; color: var(--muted); max-width: 420px; line-height: 1.5; }
 .canvas-overlay .big-word { font-size: 30px; font-weight: 700; color: var(--gold-2); letter-spacing: 0.04em; }
 
+/* lobby (rich waiting room inside the canvas overlay) */
+.lobby-box {
+  display: none;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+  max-width: 460px;
+  text-align: left;
+  overflow-y: auto;
+  max-height: 100%;
+}
+.canvas-overlay.lobby .lobby-box { display: flex; }
+.lobby-box .lobby-title { text-align: center; }
+.lobby-box .lobby-title h2 { font-size: 24px; }
+.lobby-box .lobby-title p { margin: 6px auto 0; }
+.lobby-panel {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  padding: 12px 14px;
+}
+.lobby-panel .label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+.lobby-panel .label .ready-count { color: var(--gold-2); font-weight: 700; }
+#lobbyRoster { display: flex; flex-direction: column; gap: 4px; }
+.lobby-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 8px;
+  border-radius: 8px;
+  font-size: 14px;
+}
+.lobby-row.you { background: var(--surface-2); }
+.lobby-row .av {
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 700; color: #09090b;
+  flex: 0 0 auto; overflow: hidden;
+}
+.lobby-row .av img { width: 100%; height: 100%; object-fit: cover; }
+.lobby-row .nm { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+.lobby-row .tag {
+  font-size: 10px; padding: 2px 7px; border-radius: 999px;
+  text-transform: uppercase; letter-spacing: 0.06em; font-weight: 700; white-space: nowrap;
+}
+.tag.host { background: #1a1206; color: var(--gold-2); border: 1px solid #4a3208; }
+.tag.ready { background: #06210f; color: var(--green); border: 1px solid #14532d; }
+.tag.wait { background: var(--surface-2); color: var(--muted); border: 1px solid var(--border); }
+.lobby-howto { color: var(--muted); font-size: 13px; line-height: 1.5; }
+.lobby-howto b { color: var(--text); }
+.invite-row { display: flex; gap: 8px; align-items: center; }
+.invite-row .link {
+  flex: 1; min-width: 0;
+  font-size: 12px; color: var(--muted);
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: 8px; padding: 8px 10px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-family: ui-monospace, monospace;
+}
+.lobby-actions { display: flex; gap: 8px; }
+.lobby-actions .btn { flex: 1; padding: 11px; font-size: 15px; }
+#readyBtn.on { background: #06210f; color: var(--green); border-color: #14532d; }
+#lobbyHint { text-align: center; color: var(--muted); font-size: 12px; }
+
 /* toolbar */
 .toolbar {
   display: flex;
@@ -406,10 +480,50 @@ main {
       <div class="canvas-wrap">
         <canvas id="board"></canvas>
         <div class="canvas-overlay" id="overlay">
+          <!-- reveal / transition state -->
           <h2 id="ovTitle">Draw &amp; Guess</h2>
           <p id="ovText"></p>
           <div class="big-word" id="ovWord" style="display:none"></div>
-          <button class="btn gold" id="startBtn" style="display:none">Start game</button>
+
+          <!-- lobby / waiting room (shown when #overlay has class "lobby") -->
+          <div class="lobby-box" id="lobbyBox">
+            <div class="lobby-title">
+              <h2>Draw &amp; Guess</h2>
+              <p>Waiting room — ready up, then one of you draws while the rest race to guess.</p>
+            </div>
+
+            <div class="lobby-panel">
+              <div class="label">
+                <span>In the room</span>
+                <span class="ready-count" id="readyCount">0 of 0 ready</span>
+              </div>
+              <div id="lobbyRoster"></div>
+            </div>
+
+            <div class="lobby-panel">
+              <div class="label"><span>How to play</span></div>
+              <div class="lobby-howto">
+                Each round one player is the <b>drawer</b> and gets a secret word.
+                Everyone else types <b>guesses</b> in chat — first correct guess
+                scores (+3, drawer +2). The turn rotates every round. Be quick:
+                the timer is ticking.
+              </div>
+            </div>
+
+            <div class="lobby-panel">
+              <div class="label"><span>Invite friends</span></div>
+              <div class="invite-row">
+                <span class="link" id="inviteLink"></span>
+                <button class="btn" id="copyBtn" type="button">Copy</button>
+              </div>
+            </div>
+
+            <div class="lobby-actions">
+              <button class="btn" id="readyBtn" type="button">I'm ready</button>
+              <button class="btn gold" id="startBtn" type="button">Start game</button>
+            </div>
+            <div id="lobbyHint"></div>
+          </div>
         </div>
       </div>
       <div class="toolbar disabled" id="toolbar">
@@ -496,6 +610,8 @@ main {
     connBanner: $("connBanner"),
     board: $("board"), overlay: $("overlay"),
     ovTitle: $("ovTitle"), ovText: $("ovText"), ovWord: $("ovWord"), startBtn: $("startBtn"),
+    lobbyBox: $("lobbyBox"), lobbyRoster: $("lobbyRoster"), readyCount: $("readyCount"),
+    readyBtn: $("readyBtn"), copyBtn: $("copyBtn"), inviteLink: $("inviteLink"), lobbyHint: $("lobbyHint"),
     toolbar: $("toolbar"), swatches: $("swatches"), sizes: $("sizes"),
     clearBtn: $("clearBtn"), toolHint: $("toolHint"),
     roster: $("roster"), playerCount: $("playerCount"),
@@ -516,6 +632,11 @@ main {
   let lastRoundNumSeen = -1;
   let revealTimer = null;
 
+  // lobby ready-state (ephemeral, ws-only)
+  const ready = new Map();   // handle -> bool
+  let myReady = false;
+  let autoStarting = false;  // guard so auto-start only fires once
+
   // ---------------------------------------------------------------------------
   // Helpers
   // ---------------------------------------------------------------------------
@@ -529,6 +650,12 @@ main {
   function presentHandles() {
     return new Set(presence.map((p) => p.handle));
   }
+  // Lobby host = lexicographically-smallest present handle (drives Start + auto-start).
+  function lobbyHostHandle() {
+    const handles = presence.map((p) => p.handle).filter(Boolean).sort();
+    return handles.length ? handles[0] : myHandle;
+  }
+  function amLobbyHost() { return lobbyHostHandle() === myHandle; }
   // Of the present players, am I the one responsible for advancing when the drawer is gone?
   function isFallbackController() {
     if (!game || !game.drawer) return false;
@@ -574,6 +701,7 @@ main {
   // ---------------------------------------------------------------------------
   const strokeChan = worlds.ws.channel("strokes");
   const chatChan = worlds.ws.channel("chat");
+  const lobbyChan = worlds.ws.channel("lobby");   // ephemeral ready-state pings
 
   // ---------------------------------------------------------------------------
   // Canvas
@@ -799,6 +927,66 @@ main {
   els.chatInput.addEventListener("keydown", (e) => { if (e.key === "Enter") sendChat(); });
 
   // ---------------------------------------------------------------------------
+  // Lobby ready-state (ephemeral ws channel "lobby")
+  // ---------------------------------------------------------------------------
+  function inLobby() { return !game || game.phase === "lobby"; }
+
+  function pingReady() {
+    lobbyChan.publish({ cid: clientId, t: "ready", handle: myHandle, name: myName, ready: myReady });
+  }
+  function setReady(v) {
+    myReady = !!v;
+    ready.set(myHandle, myReady);
+    pingReady();
+    renderUI();
+    maybeAutoStart();
+  }
+  lobbyChan.subscribe((msg) => {
+    const p = msg.payload;
+    if (!p || p.cid === clientId) return;
+    if (p.t === "ready" && p.handle) {
+      const known = ready.has(p.handle);
+      ready.set(p.handle, !!p.ready);
+      // Echo our state back only to peers we hadn't seen yet (a newcomer), so we
+      // don't ping-pong forever on every routine ping.
+      if (!known) pingReady();
+      if (inLobby()) { renderRoster(); renderOverlay(); maybeAutoStart(); }
+    }
+  });
+
+  function readyStats() {
+    const present = presentHandles();
+    present.add(myHandle);            // self counts even before the first presence event
+    let r = 0;
+    for (const h of present) if (h === myHandle ? myReady : ready.get(h)) r++;
+    return { ready: r, total: present.size };
+  }
+
+  function maybeAutoStart() {
+    // host-only, ≥2 present, everyone present ready → auto-start the game
+    if (!inLobby() || autoStarting || !amLobbyHost()) return;
+    const s = readyStats();
+    if (s.total >= 2 && s.ready === s.total) {
+      autoStarting = true;
+      startGame().finally(() => { autoStarting = false; });
+    }
+  }
+
+  els.readyBtn.addEventListener("click", () => setReady(!myReady));
+  els.copyBtn.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(location.href);
+      els.copyBtn.textContent = "Copied!";
+      setTimeout(() => { els.copyBtn.textContent = "Copy"; }, 1400);
+    } catch (e) {
+      const r = document.createRange();
+      r.selectNodeContents(els.inviteLink);
+      const sel = window.getSelection();
+      sel.removeAllRanges(); sel.addRange(r);
+    }
+  });
+
+  // ---------------------------------------------------------------------------
   // Authoritative game transitions (controller only)
   // ---------------------------------------------------------------------------
   async function ensureDoc(data) {
@@ -912,7 +1100,10 @@ main {
     }
   }
 
+  let starting = false;     // re-entrancy guard (manual click vs. auto-start)
   async function startGame() {
+    if (starting || (game && game.phase !== "lobby")) return;
+    starting = true;
     const present = presence.length ? presence.slice() : [{ handle: myHandle, name: myName }];
     const players = present.map((p) => ({ handle: p.handle, name: p.name }));
     const word = pickWord(null);
@@ -938,6 +1129,7 @@ main {
       systemMsg("Couldn't start the game — try again.");
     }
     els.startBtn.disabled = false;
+    starting = false;
   }
   els.startBtn.addEventListener("click", startGame);
 
@@ -947,6 +1139,18 @@ main {
   function applyGame(data) {
     const prev = game;
     game = data;
+
+    const prevPhase = prev ? prev.phase : (prev === null ? "lobby" : null);
+    const nowPhase = data ? data.phase : "lobby";
+    // Leaving the lobby into a live game: ready-state has done its job, clear it.
+    if (prevPhase === "lobby" && nowPhase !== "lobby") {
+      ready.clear(); myReady = false; autoStarting = false;
+    }
+    // (Re)entering the lobby: fresh ready-state, re-announce ourselves.
+    if (prevPhase !== "lobby" && nowPhase === "lobby") {
+      ready.clear(); myReady = false; autoStarting = false;
+      pingReady();
+    }
 
     // New round started: reset per-round local state + clear board.
     const newRound = data && data.roundNum !== lastRoundNumSeen && data.phase === "draw";
@@ -1053,21 +1257,20 @@ main {
 
   function renderOverlay() {
     const phase = game ? game.phase : "lobby";
-    const present = presentHandles();
     if (!game || phase === "lobby") {
-      els.overlay.classList.add("show");
-      els.ovTitle.textContent = "Draw & Guess";
-      els.ovText.textContent = presence.length > 1
-        ? "Everyone's here. Hit start — you'll draw first, then it rotates."
-        : "Waiting for players to join. You can start solo to warm up, or wait for the crew.";
+      // rich waiting room
+      els.overlay.classList.add("show", "lobby");
+      els.ovTitle.style.display = "none";
+      els.ovText.style.display = "none";
       els.ovWord.style.display = "none";
-      els.startBtn.style.display = "inline-block";
-      els.startBtn.textContent = presence.length > 1 ? "Start game" : "Start game";
+      renderLobby();
     } else if (phase === "reveal") {
       els.overlay.classList.add("show");
+      els.overlay.classList.remove("lobby");
+      els.ovTitle.style.display = "";
+      els.ovText.style.display = "";
       els.ovWord.style.display = "block";
       els.ovWord.textContent = game.word || "";
-      els.startBtn.style.display = "none";
       if (game.lastWinner) {
         els.ovTitle.textContent = "🎉 " + game.lastWinner.name + " guessed it!";
         els.ovText.textContent = "Next round starting…";
@@ -1077,8 +1280,73 @@ main {
       }
     } else {
       // draw phase — hide overlay
-      els.overlay.classList.remove("show");
+      els.overlay.classList.remove("show", "lobby");
     }
+  }
+
+  function renderLobby() {
+    const host = lobbyHostHandle();
+    // build roster from presence (live), ensure self present
+    const map = new Map();
+    for (const p of presence) map.set(p.handle, { handle: p.handle, name: p.name });
+    if (!map.has(myHandle)) map.set(myHandle, { handle: myHandle, name: myName });
+    const rows = [...map.values()].sort((a, b) => a.handle.localeCompare(b.handle));
+
+    els.lobbyRoster.innerHTML = "";
+    for (const p of rows) {
+      const isYou = p.handle === myHandle;
+      const isReady = isYou ? myReady : !!ready.get(p.handle);
+      const row = document.createElement("div");
+      row.className = "lobby-row" + (isYou ? " you" : "");
+
+      const av = document.createElement("span");
+      av.className = "av";
+      av.style.background = avatarColor(p.handle);
+      av.textContent = initials(p.name);
+      row.appendChild(av);
+
+      const nm = document.createElement("span");
+      nm.className = "nm";
+      nm.textContent = p.name + (isYou ? " (you)" : "");
+      row.appendChild(nm);
+
+      if (p.handle === host) {
+        const t = document.createElement("span");
+        t.className = "tag host";
+        t.textContent = "host";
+        row.appendChild(t);
+      }
+      const rt = document.createElement("span");
+      rt.className = "tag " + (isReady ? "ready" : "wait");
+      rt.textContent = isReady ? "ready" : "…";
+      row.appendChild(rt);
+
+      els.lobbyRoster.appendChild(row);
+    }
+
+    const s = readyStats();
+    els.readyCount.textContent = s.ready + " of " + s.total + " ready";
+
+    els.readyBtn.classList.toggle("on", myReady);
+    els.readyBtn.textContent = myReady ? "✓ Ready" : "I'm ready";
+
+    els.startBtn.style.display = amLobbyHost() ? "inline-block" : "none";
+    els.startBtn.disabled = s.total < 1;          // host can always start (solo OK)
+    if (amLobbyHost()) {
+      els.lobbyHint.textContent = s.total <= 1
+        ? "Solo is fine for testing — hit start whenever."
+        : "Start when ready, or it auto-starts once everyone is.";
+    } else {
+      const h = rows.find((r) => r.handle === host);
+      els.lobbyHint.textContent = "Waiting for " + (h ? h.name : "the host") + " to start…";
+    }
+  }
+
+  function avatarColor(handle) {
+    let h = 0;
+    const str = handle || "?";
+    for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) >>> 0;
+    return "hsl(" + (h % 360) + ", 65%, 60%)";
   }
 
   function renderToolbar() {
@@ -1215,8 +1483,12 @@ main {
     }
     if (!seen.has(myHandle)) seen.set(myHandle, { handle: myHandle, name: myName });
     presence = [...seen.values()];
+    // forget ready-state for handles that left
+    const present = presentHandles();
+    for (const h of [...ready.keys()]) if (h !== myHandle && !present.has(h)) ready.delete(h);
     renderUI();
     scheduleControllerWork();
+    if (inLobby()) { pingReady(); maybeAutoStart(); }
   });
 
   // ---------------------------------------------------------------------------
@@ -1233,6 +1505,7 @@ main {
 
   async function init() {
     buildToolbar();
+    els.inviteLink.textContent = location.href;
     resizeCanvas();
     // give the wrapper a frame to lay out, then size again (mobile flex quirks)
     requestAnimationFrame(resizeCanvas);
@@ -1249,6 +1522,10 @@ main {
     els.app.style.display = "flex";
     requestAnimationFrame(resizeCanvas);
     setTimeout(resizeCanvas, 120);
+
+    // announce our lobby presence/ready, and re-ping periodically so peers stay fresh
+    if (inLobby()) pingReady();
+    setInterval(() => { if (inLobby()) pingReady(); }, 3000);
   }
 
   await init();

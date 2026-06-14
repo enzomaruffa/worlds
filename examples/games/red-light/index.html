@@ -204,6 +204,183 @@
       color: var(--muted);
       font-size: .92em;
     }
+
+    /* ── Lobby ────────────────────────────────────────────── */
+    #lobby {
+      position: absolute;
+      inset: 0;
+      z-index: 10;
+      display: none;
+      flex-direction: column;
+      background: radial-gradient(ellipse at top, rgba(245,158,11,.08), var(--bg) 60%);
+      overflow-y: auto;
+      padding: 1.1rem;
+    }
+    #lobby.show { display: flex; }
+    #lobby .lobby-inner {
+      width: 100%;
+      max-width: 30rem;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: .9rem;
+    }
+    #lobby .lobby-head { text-align: center; }
+    #lobby .lobby-head h1 {
+      margin: .2rem 0 .15rem;
+      font-size: clamp(1.4rem, 6vw, 2rem);
+      font-weight: 800;
+      letter-spacing: .02em;
+    }
+    #lobby .lobby-head .gold { color: var(--gold-bright); }
+    #lobby .lobby-head p { margin: 0; color: var(--muted); font-size: .85rem; }
+    .lobby-card {
+      border: 1px solid var(--border);
+      border-radius: .8rem;
+      background: var(--surface);
+      padding: .85rem .95rem;
+    }
+    .lobby-card .label {
+      font-size: .68rem;
+      text-transform: uppercase;
+      letter-spacing: .12em;
+      color: var(--muted);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: .55rem;
+    }
+    .lobby-card .label .ready-count { color: var(--gold-bright); font-weight: 700; }
+    #lobbyRoster { display: flex; flex-direction: column; gap: .3rem; }
+    .roster-row {
+      display: flex;
+      align-items: center;
+      gap: .6rem;
+      padding: .42rem .5rem;
+      border-radius: .55rem;
+    }
+    .roster-row.you { background: var(--bg); }
+    .roster-row .avi {
+      width: 1.8rem; height: 1.8rem;
+      flex: 0 0 auto;
+      border-radius: 50%;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: .8rem;
+      font-weight: 700;
+      color: #101012;
+    }
+    .roster-row .pname {
+      flex: 1 1 auto;
+      min-width: 0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      font-weight: 600;
+    }
+    .roster-row .badge {
+      font-size: .6rem;
+      padding: .12rem .42rem;
+      border-radius: 999px;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .badge.host { background: #1a1206; color: var(--gold-bright); border: 1px solid #4a3208; }
+    .badge.ready { background: rgba(34,197,94,.14); color: var(--green); border: 1px solid rgba(34,197,94,.4); }
+    .badge.waiting { background: var(--bg); color: var(--muted); border: 1px solid var(--border); }
+    .lobby-howto { color: var(--muted); font-size: .82rem; line-height: 1.5; }
+    .lobby-howto b { color: var(--text); }
+    .lobby-howto .g { color: var(--green); font-weight: 700; }
+    .lobby-howto .r { color: var(--red); font-weight: 700; }
+    .invite-row {
+      display: flex;
+      gap: .5rem;
+      align-items: center;
+    }
+    .invite-row .link {
+      flex: 1 1 auto;
+      min-width: 0;
+      font-size: .76rem;
+      color: var(--muted);
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: .5rem;
+      padding: .45rem .55rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      font-family: ui-monospace, monospace;
+    }
+    .lobby-btn {
+      font-family: inherit;
+      font-weight: 700;
+      font-size: .9rem;
+      letter-spacing: .02em;
+      border-radius: .6rem;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text);
+      padding: .7rem .9rem;
+      cursor: pointer;
+      transition: background .12s, border-color .12s, transform .05s, opacity .15s;
+    }
+    .lobby-btn:active { transform: translateY(1px); }
+    .lobby-btn.copy { flex: 0 0 auto; }
+    #readyBtn {
+      width: 100%;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+    }
+    #readyBtn.on {
+      background: rgba(34,197,94,.16);
+      border-color: rgba(34,197,94,.55);
+      color: var(--green);
+    }
+    #startBtn {
+      width: 100%;
+      font-weight: 800;
+      font-size: 1.05rem;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      color: #101012;
+      background: var(--gold);
+      border: none;
+      border-radius: .7rem;
+      padding: .95rem;
+      cursor: pointer;
+      box-shadow: 0 4px 0 #b45309;
+      transition: transform .05s, box-shadow .05s, background .1s, opacity .15s;
+    }
+    #startBtn:active { transform: translateY(3px); box-shadow: 0 1px 0 #b45309; }
+    #startBtn:disabled {
+      background: #3f3f46;
+      color: #71717a;
+      box-shadow: 0 4px 0 #27272a;
+      cursor: not-allowed;
+    }
+    #lobbyWaitNote { text-align: center; color: #71717a; font-size: .76rem; }
+
+    /* spectator note overlay for mid-round joiners */
+    #spectateNote {
+      position: absolute;
+      top: .7rem; left: 50%;
+      transform: translateX(-50%);
+      z-index: 6;
+      background: rgba(12,12,15,.92);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: .4rem .9rem;
+      font-size: .76rem;
+      color: var(--gold-bright);
+      white-space: nowrap;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity .2s;
+    }
+    #spectateNote.show { opacity: 1; }
   </style>
 </head>
 <body>
@@ -226,6 +403,48 @@
         <div class="sub" id="winSub">next round starting…</div>
       </div>
       <div id="outBadge">OUT<small>you moved on red</small></div>
+      <div id="spectateNote">round in progress — you'll join the next one</div>
+
+      <!-- ░░░ LOBBY ░░░ -->
+      <div id="lobby">
+        <div class="lobby-inner">
+          <div class="lobby-head">
+            <h1>RED&nbsp;LIGHT <span class="gold">·</span> GREEN&nbsp;LIGHT</h1>
+            <p>Waiting room — get ready, then race to the line.</p>
+          </div>
+
+          <div class="lobby-card">
+            <div class="label">
+              <span>In the room</span>
+              <span class="ready-count" id="readyCount">0 of 0 ready</span>
+            </div>
+            <div id="lobbyRoster"></div>
+          </div>
+
+          <div class="lobby-card">
+            <div class="label"><span>How to play</span></div>
+            <div class="lobby-howto">
+              Hold <b>MOVE</b> to run toward the <b>FINISH</b> line — but only on
+              <span class="g">GREEN</span>. The instant the light turns
+              <span class="r">RED</span> you must <b>freeze</b>; move on red and
+              you're <b>out</b> for the round. First to the line wins, then everyone
+              returns here for the next round.
+            </div>
+          </div>
+
+          <div class="lobby-card">
+            <div class="label"><span>Invite friends</span></div>
+            <div class="invite-row">
+              <span class="link" id="inviteLink"></span>
+              <button class="lobby-btn copy" id="copyBtn" type="button">Copy</button>
+            </div>
+          </div>
+
+          <button class="lobby-btn" id="readyBtn" type="button">I'm ready</button>
+          <button id="startBtn" type="button">Start round</button>
+          <div id="lobbyWaitNote"></div>
+        </div>
+      </div>
     </div>
 
     <div id="controls">
@@ -247,9 +466,11 @@
     const STALE_MS   = 6000;     // drop remote players unheard-from this long
     const HEARTBEAT_MS = 1500;   // re-broadcast our pose at least this often so idle players don't go stale & vanish
     const MOVE_WINDOW_MS = 180;  // recent-movement window for red-light elimination
-    const WIN_RESET_MS   = 3500; // host delay before resetting after a win
+    const WIN_RESET_MS   = 3500; // host delay before returning to lobby after a win
     const GREEN_MIN = 1800, GREEN_MAX = 4500;
     const RED_MIN   = 1200, RED_MAX   = 3000;
+    const LOBBY_PING_MS  = 2500; // re-broadcast our lobby presence/ready so peers don't go stale
+    const LOBBY_STALE_MS = 7000; // drop lobby peers unheard-from this long
 
     const clientId = (crypto.randomUUID && crypto.randomUUID()) ||
       (Date.now().toString(36) + Math.random().toString(36).slice(2));
@@ -267,6 +488,15 @@
     const winText    = document.getElementById("winText");
     const winSub     = document.getElementById("winSub");
     const outBadge   = document.getElementById("outBadge");
+    const lobbyEl    = document.getElementById("lobby");
+    const lobbyRosterEl = document.getElementById("lobbyRoster");
+    const readyCountEl  = document.getElementById("readyCount");
+    const readyBtn   = document.getElementById("readyBtn");
+    const startBtn   = document.getElementById("startBtn");
+    const lobbyWaitNote = document.getElementById("lobbyWaitNote");
+    const inviteLink = document.getElementById("inviteLink");
+    const copyBtn    = document.getElementById("copyBtn");
+    const spectateNote = document.getElementById("spectateNote");
 
     // ── State ────────────────────────────────────────────────
     const me = { handle: null, name: "you" };
@@ -293,6 +523,16 @@
     let roster = [];
     let hostHandle = null;
 
+    // ── Phase + lobby ────────────────────────────────────────
+    // "lobby"  → waiting room (no live round); "playing" → a round is live.
+    let phase = "lobby";
+    // ready state per handle (handle -> bool); also tracks last-seen ts via lobbyAt.
+    const ready = new Map();
+    const lobbyAt = new Map();   // handle -> ts of last lobby ping (liveness)
+    let myReady = false;
+    let spectating = false;      // joined while a round was already live
+    let startSeqSeen = -1;       // monotone guard for {t:"start"} frames
+
     let pressed = false;         // move control currently held
     let room = null;
 
@@ -316,10 +556,12 @@
         : (hostMember ? hostMember.name : hostHandle));
       hostPill.classList.toggle("you-host", isHost());
 
-      if (isHost() && prev !== hostHandle) {
-        // we just became host — make sure a light loop is running
-        startHostLoopIfNeeded();
+      if (isHost() && prev !== hostHandle && phase === "playing") {
+        // we just became host mid-round — keep things moving for everyone
+        if (winnerName) hostScheduleReset();   // old host left mid-round-over → drive the return
+        else startHostLoopIfNeeded();           // ...or resume the light loop
       }
+      if (phase === "lobby") renderLobby();
     }
 
     function updatePlayerCount() {
@@ -330,6 +572,178 @@
       playerCountEl.textContent = String(n);
       document.getElementById("playersPill").innerHTML =
         `<b id="playerCount">${n}</b>&nbsp;${n === 1 ? "player" : "players"}`;
+    }
+
+    // ── Lobby ────────────────────────────────────────────────
+    function avatarColor(handle) {
+      // deterministic per-handle hue so dots are stable across renders/peers
+      let h = 0;
+      const s = handle || "?";
+      for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+      return `hsl(${h % 360}, 65%, 58%)`;
+    }
+    function initial(name) { return (name || "?").trim().charAt(0).toUpperCase() || "?"; }
+
+    function lobbyMembers() {
+      // unique present handles (presence ∪ self), name resolved from roster/self
+      const byHandle = new Map();
+      for (const m of roster) if (m.handle) byHandle.set(m.handle, m.name || m.handle);
+      if (me.handle) byHandle.set(me.handle, me.name);
+      return [...byHandle.entries()]
+        .map(([handle, name]) => ({ handle, name }))
+        .sort((a, b) => (a.handle < b.handle ? -1 : a.handle > b.handle ? 1 : 0));
+    }
+
+    function readyStats(members) {
+      const m = members || lobbyMembers();
+      let r = 0;
+      for (const p of m) {
+        const isReady = p.handle === me.handle ? myReady : !!ready.get(p.handle);
+        if (isReady) r++;
+      }
+      return { ready: r, total: m.length };
+    }
+
+    function renderLobby() {
+      if (phase !== "lobby") return;
+      const members = lobbyMembers();
+      lobbyRosterEl.innerHTML = "";
+      for (const p of members) {
+        const isYou = p.handle === me.handle;
+        const isReady = isYou ? myReady : !!ready.get(p.handle);
+        const isTheHost = p.handle === hostHandle;
+        const row = document.createElement("div");
+        row.className = "roster-row" + (isYou ? " you" : "");
+
+        const avi = document.createElement("span");
+        avi.className = "avi";
+        avi.style.background = avatarColor(p.handle);
+        avi.textContent = initial(p.name);
+        row.appendChild(avi);
+
+        const nm = document.createElement("span");
+        nm.className = "pname";
+        nm.textContent = p.name + (isYou ? " (you)" : "");
+        row.appendChild(nm);
+
+        if (isTheHost) {
+          const b = document.createElement("span");
+          b.className = "badge host";
+          b.textContent = "host";
+          row.appendChild(b);
+        }
+        const rb = document.createElement("span");
+        rb.className = "badge " + (isReady ? "ready" : "waiting");
+        rb.textContent = isReady ? "ready" : "…";
+        row.appendChild(rb);
+
+        lobbyRosterEl.appendChild(row);
+      }
+
+      const stats = readyStats(members);
+      readyCountEl.textContent = `${stats.ready} of ${stats.total} ready`;
+
+      readyBtn.classList.toggle("on", myReady);
+      readyBtn.textContent = myReady ? "✓ Ready" : "I'm ready";
+
+      startBtn.style.display = isHost() ? "block" : "none";
+      startBtn.disabled = stats.total < 1;
+      if (isHost()) {
+        lobbyWaitNote.textContent = stats.total <= 1
+          ? "Solo is fine for testing — hit start whenever."
+          : "Start when you're ready, or it auto-starts once everyone is.";
+      } else {
+        const hostMember = members.find(p => p.handle === hostHandle);
+        const hostLabel = hostMember ? hostMember.name : "the host";
+        lobbyWaitNote.textContent = `Waiting for ${hostLabel} to start…`;
+      }
+
+      maybeAutoStart(members, stats);
+    }
+
+    function showLobby() {
+      phase = "lobby";
+      spectating = false;
+      clearHostLoop();
+      if (resetTimer) { clearTimeout(resetTimer); resetTimer = null; }
+      winnerName = null;
+      self.out = false;
+      self.won = false;
+      winOverlay.classList.remove("show");
+      outBadge.classList.remove("show");
+      spectateNote.classList.remove("show");
+      lobbyEl.classList.add("show");
+      light.state = "red"; light.seq = -1; light.at = Date.now();
+      renderLight();
+      updateMoveBtn();
+      pingLobby();
+      renderLobby();
+    }
+
+    function maybeAutoStart(members, stats) {
+      // host-only, ≥2 present, and everyone present is ready → auto-start
+      if (!isHost() || phase !== "lobby") return;
+      const m = members || lobbyMembers();
+      const s = stats || readyStats(m);
+      if (s.total >= 2 && s.ready === s.total) hostStartRound();
+    }
+
+    function setMyReady(v) {
+      myReady = !!v;
+      ready.set(me.handle, myReady);
+      pingLobby();
+      renderLobby();
+    }
+
+    function pingLobby() {
+      if (phase !== "lobby") return;
+      lobbyAt.set(me.handle, Date.now());
+      publish({ t: "lobby", handle: me.handle, name: me.name, ready: myReady });
+    }
+
+    function pruneLobby(now) {
+      if (phase !== "lobby") return;
+      let changed = false;
+      const present = new Set(roster.map(m => m.handle));
+      for (const [h, at] of lobbyAt) {
+        if (h === me.handle) continue;
+        if (!present.has(h) && now - at > LOBBY_STALE_MS) {
+          lobbyAt.delete(h); ready.delete(h); changed = true;
+        }
+      }
+      if (changed) renderLobby();
+    }
+
+    // ── Start / enter the live round ─────────────────────────
+    function hostStartRound() {
+      if (!isHost() || phase !== "lobby") return;
+      startSeqSeen += 1;
+      const seq = startSeqSeen;
+      const at = Date.now();
+      publish({ t: "start", seq, at });
+      beginRound(seq);
+    }
+
+    function beginRound(seq) {
+      if (phase === "playing" && !spectating) return;
+      if (typeof seq === "number") startSeqSeen = Math.max(startSeqSeen, seq);
+      phase = "playing";
+      spectating = false;
+      lobbyEl.classList.remove("show");
+      spectateNote.classList.remove("show");
+      // fresh round for everyone who starts together
+      applyReset(roundSeq + 1);
+      if (isHost()) startHostLoopIfNeeded();
+    }
+
+    function enterAsSpectator() {
+      // a round is already live when we arrive — watch, then join the next lobby
+      phase = "playing";
+      spectating = true;
+      self.out = true;          // not a participant this round
+      lobbyEl.classList.remove("show");
+      spectateNote.classList.add("show");
+      updateMoveBtn();
     }
 
     // ── Light banner render ──────────────────────────────────
@@ -376,7 +790,7 @@
     }
 
     function hostStep() {
-      if (!isHost() || winnerName) return;
+      if (!isHost() || winnerName || phase !== "playing") return;
       checkRoundEnd();              // watchdog: end the round if everyone's out
       if (winnerName) return;
       const next = light.state === "green" ? "red" : "green";
@@ -386,7 +800,7 @@
     }
 
     function startHostLoopIfNeeded() {
-      if (!isHost() || winnerName) return;
+      if (!isHost() || winnerName || phase !== "playing") return;
       clearHostLoop();
       // if we just took over mid-game, keep current state and just schedule next flip
       const elapsed = Date.now() - (light.at || Date.now());
@@ -426,21 +840,29 @@
     }
 
     function hostScheduleReset() {
+      // After a round concludes the host returns everyone to the lobby (rather than
+      // silently looping a fresh round). Ready-state is reset for the new lobby.
       if (!isHost()) return;
       if (resetTimer) clearTimeout(resetTimer);
       clearHostLoop();
       resetTimer = setTimeout(() => {
-        roundSeq += 1;
-        publish({ t: "reset", seq: roundSeq, at: Date.now() });
-        applyReset(roundSeq);
+        publish({ t: "to-lobby" });
+        returnToLobby();
       }, WIN_RESET_MS);
+    }
+
+    function returnToLobby() {
+      // shared "round over → back to the waiting room" transition (host + peers)
+      myReady = false;
+      ready.clear();
+      showLobby();
     }
 
     function concludeRound(text) {
       if (winnerName) return;
       winnerName = text;        // non-null marks the round as over
       winText.textContent = text;
-      winSub.textContent = "next round starting…";
+      winSub.textContent = "back to the lobby…";
       winOverlay.classList.add("show");
       renderLight();
       updateMoveBtn();
@@ -468,12 +890,15 @@
 
     // ── Movement control state ───────────────────────────────
     function canMove() {
-      return !self.out && !self.won && !winnerName && light.state === "green";
+      return phase === "playing" && !spectating &&
+        !self.out && !self.won && !winnerName && light.state === "green";
     }
     function updateMoveBtn() {
       const ok = canMove();
       moveBtn.disabled = !ok;
-      if (self.out)        moveBtn.textContent = "OUT — wait for reset";
+      if (phase === "lobby") moveBtn.textContent = "in lobby…";
+      else if (spectating) moveBtn.textContent = "spectating — next round";
+      else if (self.out)   moveBtn.textContent = "OUT — wait for next round";
       else if (winnerName) moveBtn.textContent = "round over…";
       else if (light.state === "red") moveBtn.textContent = "FREEZE — don't move!";
       else                 moveBtn.textContent = "MOVE (hold)";
@@ -559,8 +984,9 @@
         }
       }
 
-      maybeSendPosition(now);
+      if (phase === "playing" && !spectating) maybeSendPosition(now);
       pruneStale(now);
+      pruneLobby(now);
       draw();
       requestAnimationFrame(tick);
     }
@@ -734,8 +1160,36 @@
       if (p.cid === clientId) return;     // ignore our own echoes (and our own tabs share handle, dedupe on cid)
 
       switch (p.t) {
+        case "lobby": {
+          // a peer announced their lobby presence + ready state
+          if (!p.handle || p.handle === me.handle) return;
+          ready.set(p.handle, !!p.ready);
+          lobbyAt.set(p.handle, Date.now());
+          if (phase === "lobby") renderLobby();
+          break;
+        }
+        case "to-lobby": {
+          // host signalled the round is over — everyone returns to the waiting room
+          if (phase === "playing") returnToLobby();
+          break;
+        }
+        case "start": {
+          // host kicked off a round — everyone transitions together (monotone).
+          // Also upgrades a just-spectating tab into a participant if a stray light/p
+          // frame raced ahead of this start (same channel, possible on reconnect replay).
+          const seq = typeof p.seq === "number" ? p.seq : startSeqSeen + 1;
+          if (seq < startSeqSeen) return;             // stale start, ignore
+          if (phase === "lobby" || (spectating && seq > startSeqSeen)) {
+            beginRound(seq);
+          } else {
+            startSeqSeen = Math.max(startSeqSeen, seq);
+          }
+          break;
+        }
         case "p": {
           if (!p.handle || p.handle === me.handle) return; // never render our own handle from the wire
+          // hearing live position frames means a round is running — late joiners spectate
+          if (phase === "lobby") enterAsSpectator();
           const prev = remotes.get(p.handle) || {};
           remotes.set(p.handle, {
             name: typeof p.name === "string" ? p.name : (prev.name || p.handle),
@@ -751,16 +1205,19 @@
           if (isHost()) return;           // host trusts only its own loop
           if (p.state !== "green" && p.state !== "red") return;
           if (winnerName) return;         // ignore stray light frames during round-over
+          if (phase === "lobby") enterAsSpectator();
           setLight(p.state, p.seq, p.at);
           break;
         }
         case "win": {
+          if (phase !== "playing") return;
           if (typeof p.name === "string") showWinner(p.name);
           break;
         }
         case "reset": {
           // apply when newer than our round, or whenever we're waiting on a
           // round-over screen. Drops stale/duplicate resets (monotone).
+          if (phase !== "playing") return;
           const seq = typeof p.seq === "number" ? p.seq : roundSeq + 1;
           if (seq > roundSeq || winnerName) applyReset(seq);
           break;
@@ -778,8 +1235,13 @@
       for (const h of [...remotes.keys()]) {
         if (!present.has(h)) remotes.delete(h);
       }
+      // forget ready-state for handles that left the room
+      for (const h of [...ready.keys()]) {
+        if (h !== me.handle && !present.has(h)) { ready.delete(h); lobbyAt.delete(h); }
+      }
       recomputeHost();
       updatePlayerCount();
+      if (phase === "lobby") renderLobby();
     }
 
     // ── Boot ─────────────────────────────────────────────────
@@ -801,6 +1263,27 @@
     window.addEventListener("blur", () => release());
     document.addEventListener("visibilitychange", () => { if (document.hidden) release(); });
 
+    // lobby controls
+    readyBtn.addEventListener("click", () => setMyReady(!myReady));
+    startBtn.addEventListener("click", () => hostStartRound());
+    inviteLink.textContent = location.href;
+    copyBtn.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(location.href);
+        copyBtn.textContent = "Copied!";
+        setTimeout(() => { copyBtn.textContent = "Copy"; }, 1400);
+      } catch (_) {
+        // clipboard unavailable — select the text as a fallback
+        const r = document.createRange();
+        r.selectNodeContents(inviteLink);
+        const sel = window.getSelection();
+        sel.removeAllRanges(); sel.addRange(r);
+      }
+    });
+
+    // keep our lobby presence/ready fresh so peers never see us go stale
+    setInterval(() => { if (phase === "lobby") pingLobby(); }, LOBBY_PING_MS);
+
     resize();
     requestAnimationFrame(tick);
 
@@ -817,15 +1300,13 @@
 
       recomputeHost();
       updatePlayerCount();
-      updateMoveBtn();
-      renderLight();
 
       room = worlds.ws.channel(CHANNEL);
       room.subscribe(onMessage);
       room.presence(onPresence);
 
-      // announce ourselves so peers see us before our first move
-      publish({ t: "p", handle: me.handle, name: me.name, y: 0, frozen: false, out: false });
+      // land in the waiting room, not a live round
+      showLobby();
     })();
   })();
   </script>
