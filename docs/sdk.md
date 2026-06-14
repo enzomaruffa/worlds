@@ -7,8 +7,26 @@ promises; every rejection is a `WorldsError` with `{code, message, status}`.
 
 ```js
 const me = await worlds.me();   // {email, name, handle, avatar_url}
-worlds.site                     // {name, url} after worlds.ready()
+await worlds.ready;             // resolves once the site context is loaded
+worlds.site;                    // {name, url} — populated after `await worlds.ready`
 ```
+
+## Errors
+
+Every rejected promise is a `WorldsError` — `{ code, message, status, retry_after? }`.
+`code` comes from a frozen registry, so you can branch on it reliably:
+
+`unauthorized` · `invalid_request` · `not_found` · `conflict` · `payload_too_large` ·
+`rate_limited` (carries `retry_after` seconds) · `quota_exceeded` · `upstream_error`
+(AI provider) · `maintenance` · `internal`.
+
+```js
+try { await c.create(doc); }
+catch (e) { if (e.code === "quota_exceeded") toast("easy there!"); else throw e; }
+```
+
+The SDK redirects to sign-in on session expiry and retries idempotent GETs on transient
+errors — you never handle auth or flaky networks yourself.
 
 ## Database — `worlds.db`
 
@@ -44,9 +62,12 @@ sites.subscribe(ev => addPlanet(ev.doc));                  // this is how the un
 
 ```js
 const { text } = await worlds.ai.complete("one-line haiku about plex");
-const { text: t2 } = await worlds.ai.complete({ messages, system, model: "smart" });
+const { text: t2 } = await worlds.ai.complete({ messages, system, model: "smart", max_tokens: 500 });
+// stream tokens as they arrive (still resolves with the full {text, model} at the end):
+await worlds.ai.complete({ prompt, stream: true, onToken: (chunk) => append(chunk) });
 const { vector } = await worlds.ai.embed("some text");
-const { url } = await worlds.ai.image("a tiny planet");
+const { url } = await worlds.ai.image("a tiny planet", { size: "1024" });
+await worlds.ai.models();   // discover the available model aliases
 ```
 
 Models are aliases (`fast`, `smart`) — never raw provider ids. Daily per-user caps apply.
