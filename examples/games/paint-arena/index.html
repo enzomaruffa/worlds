@@ -272,6 +272,8 @@
   (() => {
     "use strict";
 
+    const { id, esc } = worlds;
+
     // ── Config ───────────────────────────────────────────────
     const CHANNEL = "paint-arena";
     const ARENA = 1600;            // world units (square, [0..ARENA])
@@ -325,8 +327,7 @@
     const stickKnob = document.getElementById("stickKnob");
 
     // ── Identity ─────────────────────────────────────────────
-    const clientId = (crypto.randomUUID && crypto.randomUUID()) ||
-      ("c-" + Math.random().toString(36).slice(2) + Date.now().toString(36));
+    const clientId = id();
     const me = { handle: null, name: "you", color: PALETTE[0] };
 
     // ── State ────────────────────────────────────────────────
@@ -662,7 +663,7 @@
       resultsCrown.textContent = anyPaint ? "🏆" : "🎨";
       resultsTitle.innerHTML = !anyPaint ? "Nobody painted!"
         : iWon ? "You <b>win!</b>"
-        : `<b>${escapeHtml(top.name)}</b> wins!`;
+        : `<b>${esc(top.name)}</b> wins!`;
       (scores || []).forEach((r, i) => {
         const li = document.createElement("li");
         if (i === 0 && r.cells > 0) li.className = "win";
@@ -674,10 +675,6 @@
       });
       resultsNote.textContent = "Back to the lobby…";
       resultsEl.classList.add("show");
-    }
-
-    function escapeHtml(s) {
-      return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
     }
 
     function clearHostTimers() {
@@ -1134,7 +1131,7 @@
         me.name = "guest";
       }
       me.color = colorFor(me.handle);
-      loaderWho.innerHTML = "painting as <b>" + escapeHtml(me.name) + "</b>";
+      loaderWho.innerHTML = "painting as <b>" + esc(me.name) + "</b>";
 
       recomputeHost();
       updatePlayerCount();

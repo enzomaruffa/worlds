@@ -100,6 +100,42 @@ For db-driven games (authoritative phase in a shared doc), pass `autoStart:false
 and trigger your own start from `onUpdate` when `s.allReady` — the lobby still
 gives you the self-inclusive roster, host election, and ready sync.
 
+## Shared room state — `worlds.room`
+
+ONE shared, authoritative document for the whole site, kept live for everyone —
+the turn-based / single-board / single-quiz pattern. It load-or-creates the doc,
+subscribes, and guards ordering for you (a hidden `_rev` drops stale/out-of-order
+writes), so you just describe state transitions. Use `worlds.lobby` for the
+pre-game waiting room, `worlds.ws` for ephemeral per-frame data, and `worlds.room`
+when there's a single source of truth that must survive reloads.
+
+```js
+const board = worlds.room("connect4", { initial: () => ({ cells: [], turn: "x" }) });
+await board.ready;                 // loaded or freshly created
+board.get();                       // current state
+board.onChange((s) => render(s));  // fires on load + every change (incl. your own writes)
+await board.set(next);             // full replace, monotonic
+await board.merge({ turn: "o" });  // shallow-merge onto current, then write
+await board.reset();               // back to initial (+ optional overrides)
+```
+
+Returns `false` from `set`/`merge` on a write conflict — call `board.refetch()`
+and retry. Two clients writing the newest `_rev` is last-write-wins (fine for toys;
+add your own turn/seat gating for stricter games — see the connect4 example).
+
+## Utility building blocks
+
+Small things every multiplayer/collab site re-implements — included so you don't:
+
+```js
+worlds.toast("saved!");                 // self-contained transient toast (injects its own element)
+worlds.id();                            // stable per-tab id — attach as `cid` to ws msgs to skip your own echo
+worlds.colorFor(handle);                // deterministic "hsl(…)" color — same handle → same color everywhere
+worlds.uniqByHandle(members);           // dedupe a presence list by handle → [{handle, name}]
+worlds.esc(userText);                   // HTML-escape before innerHTML
+const t = worlds.countdown(endsAt, { onTick: (ms) => …, onEnd: () => … }); // t.stop() to cancel
+```
+
 ## Notify — `worlds.notify`
 
 ```js

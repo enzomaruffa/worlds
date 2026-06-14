@@ -472,8 +472,8 @@
     const LOBBY_PING_MS  = 2500; // re-broadcast our lobby presence/ready so peers don't go stale
     const LOBBY_STALE_MS = 7000; // drop lobby peers unheard-from this long
 
-    const clientId = (crypto.randomUUID && crypto.randomUUID()) ||
-      (Date.now().toString(36) + Math.random().toString(36).slice(2));
+    const { colorFor } = worlds;
+    const clientId = worlds.id();
 
     // ── DOM ──────────────────────────────────────────────────
     const headerEl   = document.getElementById("header");
@@ -575,13 +575,6 @@
     }
 
     // ── Lobby ────────────────────────────────────────────────
-    function avatarColor(handle) {
-      // deterministic per-handle hue so dots are stable across renders/peers
-      let h = 0;
-      const s = handle || "?";
-      for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
-      return `hsl(${h % 360}, 65%, 58%)`;
-    }
     function initial(name) { return (name || "?").trim().charAt(0).toUpperCase() || "?"; }
 
     function lobbyMembers() {
@@ -617,7 +610,7 @@
 
         const avi = document.createElement("span");
         avi.className = "avi";
-        avi.style.background = avatarColor(p.handle);
+        avi.style.background = colorFor(p.handle);
         avi.textContent = initial(p.name);
         row.appendChild(avi);
 

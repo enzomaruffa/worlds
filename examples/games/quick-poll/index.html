@@ -358,12 +358,12 @@
     </section>
   </div>
 
-  <div id="toast" class="toast"></div>
-
 <script src="/worlds.js"></script>
 <script>
 (() => {
   "use strict";
+
+  const { toast } = worlds;
 
   // ── Constants ────────────────────────────────────────────
   const COLLECTION = "polls";
@@ -380,7 +380,6 @@
     poll: $("screenPoll"),
     error: $("screenError"),
   };
-  const toastEl = $("toast");
 
   // ── Worlds handle ────────────────────────────────────────
   const col = worlds.db.collection(COLLECTION);
@@ -396,12 +395,6 @@
     boot.classList.add("hidden");
     for (const k in screens) screens[k].classList.toggle("hidden", k !== name);
   }
-  function toast(text) {
-    toastEl.textContent = text;
-    toastEl.classList.add("show");
-    clearTimeout(toast._t);
-    toast._t = setTimeout(() => toastEl.classList.remove("show"), 2400);
-  }
   function pollIdFromUrl() {
     const p = new URLSearchParams(location.search).get("p");
     if (p) return p.trim();
@@ -411,12 +404,6 @@
   function shareUrlFor(id) {
     return location.origin + location.pathname + "?p=" + encodeURIComponent(id);
   }
-  function escapeHtml(s) {
-    return String(s).replace(/[&<>"']/g, (c) => (
-      { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
-    ));
-  }
-
   // counts is an object keyed by option index: { "0": n, "1": n, ... }
   function countFor(data, i) {
     const c = data && data.counts;

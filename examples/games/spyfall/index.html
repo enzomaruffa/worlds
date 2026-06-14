@@ -272,7 +272,7 @@
       <div>
         <div class="card timer" id="timerCard">
           <div class="clock" id="clock">6:00</div>
-          <div class="sub">Round <span id="roundNum">1</span> · time remaining</div>
+          <div class="sub">time remaining</div>
           <div class="bar"><i id="timerBar" style="width:100%"></i></div>
         </div>
         <div class="card" style="margin-top:1rem">
@@ -307,7 +307,7 @@
       </div>
     </div>
     <div class="card">
-      <p class="section-label">Round <span id="overRound"></span> · who played</p>
+      <p class="section-label">Who played</p>
       <ul class="roster" id="overRoster"></ul>
     </div>
     <div class="card">
@@ -321,8 +321,6 @@
   <footer class="foot">SPYFALL · a Worlds party game · ephemeral chat, shared round state</footer>
 </div>
 
-<div class="toast" id="toast"></div>
-
 <script src="/worlds.js"></script>
 <script>
 (() => {
@@ -330,11 +328,8 @@
 
   // ── Constants / identity ─────────────────────────────────
   const ROUND_MS = 360000;            // 6 minutes
-  const DOC_KEY = "spyfall-main";     // logical key stored on the doc itself
-  const COLLECTION = "spyfall";       // db collection name
-  const ROOM = "room";                // ws channel name
   const CHAT_LIMIT = 120;             // rendered chat lines kept in DOM
-  const clientId = crypto.randomUUID();
+  const clientId = worlds.id();
 
   const LOCATIONS = [
     { name: "Casino", roles: ["Dealer", "High Roller", "Bartender", "Security Guard", "Cocktail Waiter", "Pit Boss", "Compulsive Gambler"] },
@@ -359,82 +354,40 @@
   const $ = (id) => document.getElementById(id);
   const boot = $("boot");
   const screens = { lobby: $("screenLobby"), playing: $("screenPlay"), over: $("screenOver") };
-  const toastEl = $("toast");
 
   // ── Worlds handles ───────────────────────────────────────
-  const col = worlds.db.collection(COLLECTION);
-  const room = worlds.ws.channel(ROOM);
+  // The round is one shared, authoritative doc (worlds.room handles load-or-
+  // create, live sync, and monotonic ordering); presence + chat ride a ws channel.
+  const ROOM = worlds.room("spyfall", { initial: blankGame });
+  const chan = worlds.ws.channel("room");
 
   // ── Runtime state ────────────────────────────────────────
   let me = null;                 // {handle,name,...}
-  let docId = null;              // db doc id once known
-  let docVersion = null;         // updated_at for optimistic concurrency
-  let game = null;               // doc.data
+  let game = null;               // ROOM state
   let presence = [];             // [{handle,name}] live roster
   let cardRevealed = false;
   let tickHandle = null;
   let starting = false;          // local re-entrancy guard
 
   // ── Helpers ──────────────────────────────────────────────
-  function toast(text) {
-    toastEl.textContent = text;
-    toastEl.classList.add("show");
-    clearTimeout(toast._t);
-    toast._t = setTimeout(() => toastEl.classList.remove("show"), 2600);
-  }
+  const { toast, esc, uniqByHandle } = worlds;   // shared SDK building blocks
   function showScreen(name) {
     boot.classList.add("hidden");
     for (const k in screens) screens[k].classList.toggle("hidden", k !== name);
   }
-  function esc(s) { const d = document.createElement("div"); d.textContent = s == null ? "" : String(s); return d.innerHTML; }
   function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
   function shuffle(arr) {
     const a = arr.slice();
     for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
     return a;
   }
-  function uniqByHandle(list) {
-    const seen = new Set(), out = [];
-    for (const m of list) { if (m && m.handle && !seen.has(m.handle)) { seen.add(m.handle); out.push({ handle: m.handle, name: m.name || m.handle }); } }
-    return out;
-  }
-  function blankGame() { return { key: DOC_KEY, phase: "lobby", location: null, roles: {}, spy: null, players: [], endsAt: 0, startedBy: null, roundNum: 0 }; }
+  function blankGame() { return { phase: "lobby", location: null, roles: {}, spy: null, players: [], endsAt: 0, startedBy: null }; }
   // Live roster — self ALWAYS included, even before presence echoes back.
   function lobbyMembers() { return uniqByHandle([...(me ? [{ handle: me.handle, name: me.name }] : []), ...presence]); }
 
-  // ── DB doc bootstrap (single shared doc) ────────────────
-  async function loadDoc() {
-    const page = await col.list({ sort: "-created_at", limit: 100 });
-    const found = page.items.find((d) => d.data && d.data.key === DOC_KEY) || page.items[0];
-    if (found) { docId = found.id; docVersion = found.updated_at; return found.data; }
-    // none yet → create the lobby doc (race-safe: if two create, we converge on subscribe)
-    const created = await col.create(blankGame());
-    docId = created.id; docVersion = created.updated_at;
-    return created.data;
-  }
+  async function writeDoc(next) { return ROOM.set(next); }
 
-  // Write the doc with optimistic concurrency; on conflict, reload & let caller decide.
-  async function writeDoc(next) {
-    try {
-      const res = await col.replace(docId, next);
-      docVersion = res.updated_at;
-      adoptDoc(res);
-      return true;
-    } catch (e) {
-      return false;
-    }
-  }
-
-  function adoptDoc(doc) {
-    if (!doc) return;
-    const incoming = doc.data || blankGame();
-    // Drop stale/out-of-order writes: never regress to an earlier round.
-    if (game && (incoming.roundNum || 0) < (game.roundNum || 0)) return;
-    docId = doc.id;
-    if (doc.updated_at) docVersion = doc.updated_at;
-    game = incoming;
-    renderGame();
-  }
+  async function refetch() { await ROOM.refetch(); }
 
   // ── Start a round (anyone in lobby) ──────────────────────
   async function startRound() {
@@ -450,15 +403,13 @@
       players.forEach((p, i) => { roles[p.handle] = shuffledRoles[i % shuffledRoles.length]; });
       const spy = pick(players).handle;
       const next = {
-        key: DOC_KEY,
         phase: "playing",
         location: loc.name,
         roles,
         spy,
         players,
         endsAt: Date.now() + ROUND_MS,
-        startedBy: { handle: me.handle, name: me.name },
-        roundNum: (game?.roundNum || 0) + 1
+        startedBy: { handle: me.handle, name: me.name }
       };
       const ok = await writeDoc(next);
       if (!ok) { toast("Someone else started — syncing…"); await refetch(); }
@@ -480,13 +431,8 @@
   async function newRound() { await startRound(); }
 
   async function backToLobby() {
-    const next = { ...blankGame(), roundNum: game?.roundNum || 0 };
-    const ok = await writeDoc(next);
+    const ok = await writeDoc(blankGame());
     if (!ok) await refetch();
-  }
-
-  async function refetch() {
-    try { const doc = await col.get(docId); adoptDoc(doc); } catch (e) {}
   }
 
   // ── Rendering ────────────────────────────────────────────
@@ -529,7 +475,6 @@
 
   function renderPlaying() {
     showScreen("playing");
-    $("roundNum").textContent = game.roundNum || 1;
     renderRoster($("playRoster"), game.players);
     $("playCount").textContent = `${uniqByHandle(game.players).length}`;
     renderSecret();
@@ -565,7 +510,6 @@
     const spyP = uniqByHandle(game.players).find((p) => p.handle === game.spy);
     $("overSpy").textContent = spyP ? spyP.name : (game.spy || "Unknown");
     $("overLoc").textContent = game.location || "—";
-    $("overRound").textContent = game.roundNum || "";
     $("overFlourish").textContent = pick(["🎭", "🕵️", "🔍", "🎩"]);
     renderRoster($("overRoster"), game.players, { revealSpy: true, spy: game.spy });
   }
@@ -628,7 +572,7 @@
     if (!text) return;
     input.value = "";
     pushChat({ name: me.name, text, mine: true });   // optimistic local echo; our broadcast is ignored on return
-    room.publish({ cid: clientId, t: "msg", handle: me.handle, name: me.name, text });
+    chan.publish({ cid: clientId, t: "msg", handle: me.handle, name: me.name, text });
   }
   $("chatSend").addEventListener("click", sendChat);
   $("chatInput").addEventListener("keydown", (e) => { if (e.key === "Enter") sendChat(); });
@@ -646,29 +590,22 @@
       me = await worlds.me();
       $("meName").textContent = me.name || me.handle;
 
-      game = await loadDoc();
-
-      // Live shared round state
-      col.subscribe((ev) => {
-        if (!ev || !ev.doc) return;
-        const d = ev.doc;
-        const k = d.data && d.data.key;
-        // accept the doc we're tracking, or any doc carrying our logical key
-        if (d.id === docId || k === DOC_KEY) {
-          if (ev.type === "delete") { game = blankGame(); renderGame(); return; }
-          adoptDoc(d);
-        }
+      // shared round state: worlds.room delivers load + every live change (own + remote)
+      await ROOM.ready;
+      ROOM.onChange((s) => {
+        game = s;
+        renderGame();
       });
 
       // Live roster via presence
-      room.presence((members) => {
+      chan.presence((members) => {
         presence = uniqByHandle(members || []);
         // refresh lobby/over rosters that depend on live presence
         if (game && game.phase === "lobby") renderLobby();
       });
 
       // Ephemeral chat + presence join/leave hints
-      room.subscribe((msg) => {
+      chan.subscribe((msg) => {
         const p = msg && msg.payload;
         if (!p || p.cid === clientId) return;        // ignore our own echo
         if (p.t === "msg" && typeof p.text === "string") {
@@ -677,7 +614,6 @@
       });
 
       setChatEmptyState();
-      renderGame();
     } catch (e) {
       boot.textContent = "Couldn't connect to Worlds. Refresh to retry.";
       console.error("[spyfall] boot failed", e);

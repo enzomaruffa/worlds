@@ -427,12 +427,12 @@
     </section>
   </div>
 
-  <div id="toast" class="toast"></div>
-
 <script src="/worlds.js"></script>
 <script>
 (() => {
   "use strict";
+
+  const { toast, esc } = worlds;
 
   // ── Constants ────────────────────────────────────────────
   const COLLECTION = "hangouts";
@@ -447,7 +447,6 @@
   const $ = (id) => document.getElementById(id);
   const boot = $("boot");
   const screens = { create: $("screenCreate"), hangout: $("screenHangout"), error: $("screenError") };
-  const toastEl = $("toast");
 
   // ── Worlds handle ────────────────────────────────────────
   const col = worlds.db.collection(COLLECTION);
@@ -463,12 +462,6 @@
     boot.classList.add("hidden");
     for (const k in screens) screens[k].classList.toggle("hidden", k !== name);
   }
-  function toast(text) {
-    toastEl.textContent = text;
-    toastEl.classList.add("show");
-    clearTimeout(toast._t);
-    toast._t = setTimeout(() => toastEl.classList.remove("show"), 2400);
-  }
   function idFromUrl() {
     const h = new URLSearchParams(location.search).get("h");
     return h ? h.trim() : null;
@@ -478,11 +471,6 @@
   }
   function uid() {
     return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-  }
-  function escapeHtml(s) {
-    return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => (
-      { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
-    ));
   }
   function initials(name) {
     const parts = String(name || "?").trim().split(/\s+/).filter(Boolean);
@@ -588,7 +576,7 @@
       a.className = "pers";
       a.style.textDecoration = "none";
       a.style.color = "inherit";
-      a.innerHTML = '<span class="nm">' + escapeHtml(r.title || "(untitled hangout)") + "</span>";
+      a.innerHTML = '<span class="nm">' + esc(r.title || "(untitled hangout)") + "</span>";
       host.appendChild(a);
     }
   }
@@ -1121,13 +1109,13 @@
       } catch {}
       const mi = document.createElement("span");
       mi.className = "mi";
-      mi.innerHTML = "🗓️ <b>" + escapeHtml(pretty) + "</b>";
+      mi.innerHTML = "🗓️ <b>" + esc(pretty) + "</b>";
       meta.appendChild(mi);
     }
     if (d.place) {
       const mi = document.createElement("span");
       mi.className = "mi";
-      mi.innerHTML = "📍 <b>" + escapeHtml(d.place) + "</b>";
+      mi.innerHTML = "📍 <b>" + esc(d.place) + "</b>";
       meta.appendChild(mi);
     }
     const going = goingHandles().length;

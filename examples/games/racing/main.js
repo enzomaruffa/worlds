@@ -16,9 +16,8 @@ const STALE_MS = 4000; // drop a remote kart unheard-from this long (aggressive 
 const POSE_LERP = 12; // remote position smoothing rate
 const HEAD_LERP = 10; // remote heading smoothing rate
 
-const clientId =
-  (crypto.randomUUID && crypto.randomUUID()) ||
-  Date.now().toString(36) + Math.random().toString(36).slice(2);
+const { id, esc, toast } = worlds;
+const clientId = id();
 
 // ── Player identity (filled from worlds.me, with anonymous fallback) ────────
 const me = { handle: null, name: "you", color: 0xfbbf24 };
@@ -49,7 +48,6 @@ const dom = {
   racerS: $("racerS"),
   wrongWay: $("wrongWay"),
   boardList: $("boardList"),
-  toast: $("toast"),
   countdown: $("countdown"),
   cdNum: $("cdNum"),
   lobby: $("lobby"),
@@ -1127,14 +1125,14 @@ function startTimerNow(now) {
 function onCrossFinish(forward, now) {
   if (!raceStarted) return;
   if (!forward) {
-    flashToast("↺ turn around");
+    toast("↺ turn around");
     return;
   }
   // Anti-shortcut: a lap is only valid once every checkpoint was cleared in
   // order since the last finish crossing.
   const allChecked = lap.nextCheckpoint >= checkpoints.length;
   if (lap.count > 0 && !allChecked) {
-    flashToast("⚑ missed checkpoints · lap not counted");
+    toast("⚑ missed checkpoints · lap not counted");
     return; // do NOT count the lap, do NOT reset the timer
   }
   if (lap.count > 0) {
@@ -1146,11 +1144,11 @@ function onCrossFinish(forward, now) {
       dom.last.textContent = "last " + fmtTime(ms) + "  ★ best!";
       dom.last.classList.add("good");
       saveBest(ms);
-      flashToast("🏁 new best · " + fmtTime(ms));
+      toast("🏁 new best · " + fmtTime(ms));
     } else {
       dom.last.textContent = "last " + fmtTime(ms);
       dom.last.classList.remove("good");
-      flashToast("lap " + lap.count + " · " + fmtTime(ms));
+      toast("lap " + lap.count + " · " + fmtTime(ms));
     }
   }
   lap.count++;
@@ -1653,7 +1651,7 @@ function renderBoard() {
 }
 function rowHtml(r, pos) {
   const mine = r.handle === me.handle;
-  const name = escapeHtml((r.name || "racer").slice(0, 16));
+  const name = esc((r.name || "racer").slice(0, 16));
   return `<li class="${mine ? "me" : ""}"><span class="pos">${pos}</span><span class="who">${name}${mine ? " (you)" : ""}</span><span class="ms">${fmtTime(r.best_ms)}</span></li>`;
 }
 
@@ -1672,14 +1670,6 @@ function updateLiveTimer(now) {
   const ms = now - lap.startMs;
   dom.timer.textContent = fmtTime(ms);
 }
-let toastTimer = null;
-function flashToast(text) {
-  dom.toast.textContent = text;
-  dom.toast.classList.add("show");
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => dom.toast.classList.remove("show"), 2200);
-}
-
 function fmtTime(ms) {
   if (ms == null || !isFinite(ms)) return "—";
   const total = Math.max(0, ms);
@@ -1694,12 +1684,6 @@ function round3(n) {
 function num(v, fallback) {
   return typeof v === "number" && isFinite(v) ? v : fallback;
 }
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, (c) =>
-    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c],
-  );
-}
-
 // ───────────────────────────────────────────────────────────────────────────
 // LOBBY — waiting room with live roster + per-player Ready, host start, and
 // auto-start when everyone present is ready (min 1, so solo still works).
@@ -1745,13 +1729,13 @@ function renderLobby() {
   const host = hostHandle();
   const readyN = all.filter((h) => isReady(h)).length;
   dom.lobbySub.innerHTML =
-    `${all.length} racer${all.length === 1 ? "" : "s"} here · ${readyN}/${all.length} ready · host <span class="host">${escapeHtml(nameFor(host))}</span>`;
+    `${all.length} racer${all.length === 1 ? "" : "s"} here · ${readyN}/${all.length} ready · host <span class="host">${esc(nameFor(host))}</span>`;
 
   dom.lobbyRoster.innerHTML = all
     .map((h) => {
       const mine = h === me.handle;
       const rdy = isReady(h);
-      const nm = escapeHtml(nameFor(h).slice(0, 18));
+      const nm = esc(nameFor(h).slice(0, 18));
       const tags = [];
       if (mine) tags.push("you");
       if (h === host) tags.push("host");
@@ -1770,7 +1754,7 @@ function renderLobby() {
   } else if (isHost()) {
     dom.lobbyHint.textContent = "You're the host — start any time, or wait for all ready.";
   } else {
-    dom.lobbyHint.textContent = `Waiting for ${escapeHtml(nameFor(host))} to start (or all ready).`;
+    dom.lobbyHint.textContent = `Waiting for ${esc(nameFor(host))} to start (or all ready).`;
   }
 }
 
@@ -1855,7 +1839,7 @@ function runCountdown() {
       lap.prevCpSide = signedCheckpointDist(checkpoints[0], player.pos.x, player.pos.z);
       refreshCheckpointVisuals();
       updateHud();
-      flashToast("go! cross the line to set a lap");
+      toast("go! cross the line to set a lap");
       return;
     }
     const isGo = i === seq.length - 1;
@@ -1908,7 +1892,7 @@ resize();
   }
   me.color = colorForHandle(me.handle);
 
-  dom.loaderWho.innerHTML = "ready · <b>" + escapeHtml(me.name) + "</b>";
+  dom.loaderWho.innerHTML = "ready · <b>" + esc(me.name) + "</b>";
 
   // build self kart now that we have a color/name
   makeSelfKart();

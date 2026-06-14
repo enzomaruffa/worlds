@@ -408,7 +408,6 @@
   <footer class="foot">TRIVIA ROYALE · a Worlds party game · AI-written quizzes, live buzz-in scoring</footer>
 </div>
 
-<div class="toast" id="toast"></div>
 <div id="confetti" class="hidden"></div>
 
 <script src="/worlds.js"></script>
@@ -428,7 +427,7 @@
   const TOPIC_SUGGEST = ["90s movies", "Space", "Plex trivia", "World geography", "Video games", "Science", "Music", "Animals"];
   const COLOR_CLASS = ["c0", "c1", "c2", "c3"];
   const GLYPHS = ["▲", "◆", "●", "■"];
-  const clientId = crypto.randomUUID();
+  const clientId = worlds.id();
 
   const FALLBACK_QUESTIONS = [
     { q: "Which planet is known as the Red Planet?", choices: ["Venus", "Mars", "Jupiter", "Saturn"], answer: 1 },
@@ -450,11 +449,11 @@
     lobby: $("screenLobby"), loading: $("screenLoading"), question: $("screenQuestion"),
     reveal: $("screenReveal"), over: $("screenOver")
   };
-  const toastEl = $("toast");
 
   // ── Worlds handles ───────────────────────────────────────
   const col = worlds.db.collection(COLLECTION);
   const room = worlds.ws.channel(ROOM);
+  const { toast, esc, uniqByHandle } = worlds;   // shared SDK building blocks
 
   // ── Runtime state ────────────────────────────────────────
   let me = null;                 // {handle,name,...}
@@ -475,23 +474,9 @@
   let advanceTimer = null;       // host-only scheduled advance
 
   // ── Helpers ──────────────────────────────────────────────
-  function toast(text) {
-    toastEl.textContent = text;
-    toastEl.classList.add("show");
-    clearTimeout(toast._t);
-    toast._t = setTimeout(() => toastEl.classList.remove("show"), 2600);
-  }
   function showScreen(name) {
     boot.classList.add("hidden");
     for (const k in screens) screens[k].classList.toggle("hidden", k !== name);
-  }
-  function esc(s) { const d = document.createElement("div"); d.textContent = s == null ? "" : String(s); return d.innerHTML; }
-  function uniqByHandle(list) {
-    const seen = new Set(), out = [];
-    for (const m of list || []) {
-      if (m && m.handle && !seen.has(m.handle)) { seen.add(m.handle); out.push({ handle: m.handle, name: m.name || m.handle }); }
-    }
-    return out;
   }
   // Roster/host/ready are owned by worlds.lobby() (self-inclusive: the caller is
   // always counted, even before presence echoes back — fixes host flicker).
