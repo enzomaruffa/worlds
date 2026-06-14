@@ -460,8 +460,8 @@
   let me = null;                 // {handle,name,...}
   let docId = null;
   let game = null;               // doc.data (authoritative)
-  let presence = [];             // [{handle,name}] live roster
-  let ready = {};                // handle -> bool (lobby readiness, ws-synced)
+  let L = null;                  // worlds.lobby() — robust roster/host/ready
+  let lob = null;                // latest lobby snapshot
   // host-chosen setup (local until start)
   let topic = "";
   let qCount = COUNT_OPTIONS[0];
@@ -493,13 +493,14 @@
     }
     return out;
   }
-  function roster() { return uniqByHandle(presence); }
-  function hostHandle() {
-    const r = roster().map((p) => p.handle);
-    if (!r.length) return null;
-    return r.slice().sort()[0];           // smallest handle is host
+  // Roster/host/ready are owned by worlds.lobby() (self-inclusive: the caller is
+  // always counted, even before presence echoes back — fixes host flicker).
+  function roster() {
+    if (lob) return lob.members.map((m) => ({ handle: m.handle, name: m.name }));
+    return me ? [{ handle: me.handle, name: me.name }] : [];
   }
-  function isHost() { return me && hostHandle() === me.handle; }
+  function hostHandle() { return lob && lob.host ? lob.host.handle : (me ? me.handle : null); }
+  function isHost() { return L ? L.isHost : false; }
   function nameFor(handle) {
     const p = roster().find((x) => x.handle === handle);
     if (p) return p.name;
@@ -561,18 +562,11 @@
     onGameChange(prevPhase, prevCurrent);
   }
 
-  // ── Lobby: readiness over ws (ephemeral, presence-scoped) ─
-  function setReady(val) {
-    ready[me.handle] = val;
-    room.publish({ cid: clientId, t: "ready", handle: me.handle, name: me.name, ready: val });
-    renderLobby();
-    maybeAutoStart();
-  }
-  function readyCount() { return roster().filter((p) => ready[p.handle]).length; }
-  function allReady() {
-    const r = roster();
-    return r.length >= 1 && r.every((p) => ready[p.handle]);
-  }
+  // ── Lobby: readiness (delegated to worlds.lobby over ws) ──
+  function setReady(val) { if (L) L.setReady(val); }
+  function readyCount() { return lob ? lob.readyCount : 0; }
+  function allReady() { return lob ? lob.allReady : false; }
+  function myReady() { return lob ? lob.ready : false; }
   function maybeAutoStart() {
     if (!game || game.phase !== "lobby") return;
     if (isHost() && allReady() && !starting && !generating) {
@@ -746,6 +740,8 @@ Respond with ONLY a JSON array, no prose, no markdown fences. Schema:
   // ── Phase change orchestration ───────────────────────────
   function onGameChange(prevPhase, prevCurrent) {
     if (!game) return;
+    // returning to the lobby → un-ready everyone for the next round
+    if (game.phase === "lobby" && prevPhase && prevPhase !== "lobby" && L) L.setReady(false);
     // entering a new question → reset local pick + capture prev scores for deltas
     if (game.phase === "question" && (prevPhase !== "question" || prevCurrent !== game.current)) {
       myChoice = null;
@@ -799,26 +795,23 @@ Respond with ONLY a JSON array, no prose, no markdown fences. Schema:
 
   function renderLobby() {
     showScreen("lobby");
-    const list = roster();
-    $("lobbyCount").textContent = `${list.length} online`;
-    const host = hostHandle();
+    const members = lob ? lob.members : (me ? [{ handle: me.handle, name: me.name, ready: false, isMe: true, isHost: true }] : []);
+    $("lobbyCount").textContent = `${members.length} online`;
     const el = $("lobbyRoster"); el.innerHTML = "";
-    if (!list.length) { el.innerHTML = '<li class="muted" style="border:none;background:transparent">No one here yet…</li>'; }
-    for (const p of list) {
+    if (!members.length) { el.innerHTML = '<li class="muted" style="border:none;background:transparent">No one here yet…</li>'; }
+    for (const p of members) {
       const li = document.createElement("li");
-      const isMe = p.handle === me.handle;
-      const isReady = !!ready[p.handle];
-      if (isMe) li.classList.add("me-row");
-      if (isReady) li.classList.add("ready");
+      if (p.isMe) li.classList.add("me-row");
+      if (p.ready) li.classList.add("ready");
       const tags = [];
-      if (p.handle === host) tags.push('<span class="tag host">host</span>');
-      if (isMe) tags.push('<span class="tag you">you</span>');
-      tags.push(isReady ? '<span class="tag ready">ready</span>' : '<span class="tag wait">waiting</span>');
+      if (p.isHost) tags.push('<span class="tag host">host</span>');
+      if (p.isMe) tags.push('<span class="tag you">you</span>');
+      tags.push(p.ready ? '<span class="tag ready">ready</span>' : '<span class="tag wait">waiting</span>');
       li.innerHTML = `<span class="pdot"></span><span class="names"><span>${esc(p.name)}</span><span class="h">@${esc(p.handle)}</span></span>${tags.join("")}`;
       el.appendChild(li);
     }
     // ready button reflects my state
-    const mineReady = !!ready[me.handle];
+    const mineReady = myReady();
     const rb = $("btnReady");
     rb.textContent = mineReady ? "✓ Ready — tap to unready" : "I'm ready";
     rb.className = mineReady ? "btn-ghost btn-block" : "btn-primary btn-block";
@@ -830,7 +823,7 @@ Respond with ONLY a JSON array, no prose, no markdown fences. Schema:
     $("setupLabel").textContent = host_ ? "Host setup" : "Lobby";
     if (host_) {
       $("btnStart").disabled = starting || generating;
-      $("btnStart").textContent = `Start game · ${readyCount()}/${list.length} ready`;
+      $("btnStart").textContent = `Start game · ${readyCount()}/${members.length} ready`;
     }
   }
 
@@ -1078,11 +1071,11 @@ Respond with ONLY a JSON array, no prose, no markdown fences. Schema:
   async function backToLobby() {
     clearTimeout(advanceTimer);
     if (isHost()) {
-      ready = {};                          // clear readiness for the new round
+      if (L) L.setReady(false);            // clear readiness for the new round
       await writeDoc({ ...blankGame(), gameNum: game.gameNum || 0, players: roster(), scores: {} });
     } else {
       // a guest can locally hop back; host's lobby doc is authoritative anyway
-      ready[me.handle] = false;
+      if (L) L.setReady(false);
       renderLobby(); showScreen("lobby");
     }
   }
@@ -1093,7 +1086,6 @@ Respond with ONLY a JSON array, no prose, no markdown fences. Schema:
       await worlds.ready;
       me = await worlds.me();
       $("meName").textContent = me.name || me.handle;
-      ready[me.handle] = false;
 
       buildCountSeg();
       buildTopicChips();
@@ -1111,24 +1103,23 @@ Respond with ONLY a JSON array, no prose, no markdown fences. Schema:
         }
       });
 
-      // Presence → live roster (and host election)
-      room.presence((members) => {
-        presence = uniqByHandle(members || []);
-        // prune readiness for departed players
-        const live = new Set(presence.map((p) => p.handle));
-        for (const h of Object.keys(ready)) if (!live.has(h)) delete ready[h];
-        if (game && game.phase === "lobby") { renderLobby(); maybeAutoStart(); }
+      // Robust roster / host / readiness (self-inclusive). The host auto-starts
+      // via maybeAutoStart() once everyone is ready — driven off lobby updates so
+      // the db phase stays authoritative (no double-start over a live game).
+      L = worlds.lobby(ROOM, {
+        me: { handle: me.handle, name: me.name },
+        autoStart: false,
+        onUpdate: (s) => {
+          lob = s;
+          if (game && game.phase === "lobby") { renderLobby(); maybeAutoStart(); }
+        },
       });
 
-      // Ephemeral ws: readiness + buzzes
+      // Ephemeral ws: buzzes (lobby messages carry _lobby and are handled by L)
       room.subscribe((msg) => {
         const p = msg && msg.payload;
-        if (!p || p.cid === clientId) return;     // ignore our own echo
-        if (p.t === "ready" && p.handle) {
-          ready[p.handle] = !!p.ready;
-          if (game && game.phase === "lobby") { renderLobby(); maybeAutoStart(); }
-        } else if (p.t === "buzz") {
-          // mirror for live pips even on non-host
+        if (!p || p._lobby || p.cid === clientId) return;  // ignore lobby + our own echo
+        if (p.t === "buzz") {
           if (game && game.phase === "question" && p.qi === game.current && typeof p.choice === "number") {
             answersByQ[game.current] = answersByQ[game.current] || {};
             if (!answersByQ[game.current][p.handle]) {
@@ -1137,16 +1128,8 @@ Respond with ONLY a JSON array, no prose, no markdown fences. Schema:
             }
             if (isHost()) ingestBuzz(p);
           }
-        } else if (p.t === "hello") {
-          // a late joiner asked for state; re-announce my readiness
-          if (game && game.phase === "lobby") {
-            room.publish({ cid: clientId, t: "ready", handle: me.handle, name: me.name, ready: !!ready[me.handle] });
-          }
         }
       });
-
-      // announce ourselves so existing players re-broadcast readiness
-      room.publish({ cid: clientId, t: "hello", handle: me.handle, name: me.name });
 
       render();
     } catch (e) {

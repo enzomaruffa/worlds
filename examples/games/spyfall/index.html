@@ -399,6 +399,8 @@
     return out;
   }
   function blankGame() { return { key: DOC_KEY, phase: "lobby", location: null, roles: {}, spy: null, players: [], endsAt: 0, startedBy: null, roundNum: 0 }; }
+  // Live roster — self ALWAYS included, even before presence echoes back.
+  function lobbyMembers() { return uniqByHandle([...(me ? [{ handle: me.handle, name: me.name }] : []), ...presence]); }
 
   // ── DB doc bootstrap (single shared doc) ────────────────
   async function loadDoc() {
@@ -437,7 +439,7 @@
   // ── Start a round (anyone in lobby) ──────────────────────
   async function startRound() {
     if (starting) return;
-    const players = uniqByHandle(presence);
+    const players = lobbyMembers();
     if (players.length < 3) { toast("Need at least 3 players in the room."); return; }
     starting = true;
     $("btnStart").disabled = true;
@@ -518,8 +520,9 @@
   function renderLobby() {
     stopTick();
     showScreen("lobby");
-    renderRoster($("lobbyRoster"), presence);
-    const n = uniqByHandle(presence).length;
+    const members = lobbyMembers();
+    renderRoster($("lobbyRoster"), members);
+    const n = members.length;
     $("lobbyCount").textContent = `${n} online`;
     $("btnStart").disabled = starting || n < 3;
   }

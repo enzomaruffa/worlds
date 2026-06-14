@@ -332,6 +332,7 @@
     let docVersion = null;
     let game = null;               // doc.data
     let presence = [];             // [{handle,name}]
+    let presenceLoaded = false;    // has the presence roster reported at least once?
     let busy = false;              // re-entrancy guard for writes
     let lastRenderSig = "";        // dedupe identical renders (for drop animation control)
 
@@ -356,6 +357,14 @@
     }
     function emptyBoard() { return new Array(COLS * ROWS).fill(0); } // 0 empty, 1 p1(red), 2 p2(yellow)
     function idx(r, c) { return r * COLS + c; }
+    // Who's online right now — self ALWAYS included, even before presence echoes
+    // back (otherwise a fresh load reads an empty roster and wrongly concludes the
+    // opponent left / the room is dead).
+    function liveHandles() {
+      const set = new Set(presence.map((p) => p.handle));
+      if (me && me.handle) set.add(me.handle);
+      return set;
+    }
 
     function blankGame() {
       return {
@@ -455,6 +464,45 @@
     }
 
     async function refetch() { try { adoptDoc(await col.get(docId), { force: true }); } catch (e) {} }
+
+    // The shared doc can be left behind by players who closed the tab. Recycle
+    // abandoned state so newcomers can actually sit + play: a mid-game with both
+    // seats gone resets to a fresh board; a lobby still holding departed players
+    // frees those seats. Only the smallest online handle writes, to avoid every
+    // client racing. One seat still online (incl. a brief reload) is left alone.
+    async function maybeResetAbandoned() {
+      if (busy || !game || !presenceLoaded) return;
+      const live = liveHandles();
+      const onlineSorted = [...live].sort();
+      const iAmJanitor = onlineSorted.length > 0 && onlineSorted[0] === (me && me.handle);
+      if (!iAmJanitor) return;
+      const p1 = game.players.p1, p2 = game.players.p2;
+
+      if (game.phase === "playing" || game.phase === "over") {
+        if (!p1 && !p2) return;
+        if (mySeat()) return;                                       // I'm playing — not abandoned
+        if ((p1 && live.has(p1.handle)) || (p2 && live.has(p2.handle))) return; // someone's still here
+        const next = blankGame();
+        next.firstSeat = game.firstSeat || "p1";
+        next.moveNum = (game.moveNum || 0) + 1;
+        busy = true;
+        try { await writeDoc(next); } finally { busy = false; }
+        return;
+      }
+
+      if (game.phase === "lobby") {
+        const p1Off = p1 && !live.has(p1.handle);
+        const p2Off = p2 && !live.has(p2.handle);
+        if (!p1Off && !p2Off) return;
+        const next = JSON.parse(JSON.stringify(game));
+        if (p1Off) next.players.p1 = null;
+        if (p2Off) next.players.p2 = null;
+        orderSeats(next);
+        next.moveNum = (game.moveNum || 0) + 1;
+        busy = true;
+        try { await writeDoc(next); } finally { busy = false; }
+      }
+    }
 
     // ── Seat / matchmaking actions ───────────────────────────
     function seatsTaken() {
@@ -623,9 +671,9 @@
       setSeat("p1Name", p1);
       setSeat("p2Name", p2);
 
-      // roster: who's online, marking players vs spectators
+      // roster: who's online, marking players vs spectators (self always shown)
       const seated = new Set(seatsTaken());
-      const list = uniqByHandle(presence);
+      const list = uniqByHandle([...(me ? [{ handle: me.handle, name: me.name || me.handle }] : []), ...presence]);
       const ul = $("rosterList");
       ul.innerHTML = "";
       $("onlineCount").textContent = String(list.length);
@@ -677,12 +725,13 @@
       $("btnRematch").classList.toggle("hidden", !canRematch);
       $("btnToLobby").textContent = seat ? "End & back to lobby" : "Back to lobby";
 
-      // mid-game opponent-left detection (presence-based)
+      // mid-game opponent-left detection (presence-based). Suppressed until the
+      // roster has loaded at least once — otherwise it false-fires on page load.
       const note = $("gameNote");
       note.className = "note";
       note.textContent = "";
-      if (game.phase === "playing") {
-        const onlineHandles = new Set(uniqByHandle(presence).map((p) => p.handle));
+      if (game.phase === "playing" && presenceLoaded) {
+        const onlineHandles = liveHandles();
         const oppSeat = seat === "p1" ? "p2" : (seat === "p2" ? "p1" : null);
         const opp = oppSeat ? game.players[oppSeat] : null;
         const missing = [];
@@ -808,7 +857,9 @@
         // live roster via presence
         room.presence((members) => {
           presence = uniqByHandle(members || []);
+          presenceLoaded = true;
           render();
+          maybeResetAbandoned();
         });
 
         // snappy move echo (db remains source of truth; this just nudges a refetch if we're behind)
