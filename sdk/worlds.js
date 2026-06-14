@@ -437,6 +437,191 @@
     };
   }
 
+  // sdk/src/room.ts
+  function room(name, opts = {}) {
+    const col = collection(name);
+    const key = opts.key || `${name}-main`;
+    let docId = null;
+    let state = null;
+    let rev = 0;
+    const listeners = new Set;
+    function seed() {
+      const init = typeof opts.initial === "function" ? opts.initial() : opts.initial ?? {};
+      return { ...init };
+    }
+    function emit() {
+      for (const fn of listeners) {
+        try {
+          fn(state);
+        } catch {}
+      }
+    }
+    function adopt(doc, own) {
+      if (!doc || !doc.data)
+        return;
+      const incoming = doc.data;
+      if (incoming._room !== key && doc.id !== docId)
+        return;
+      if (!own && state && (incoming._rev || 0) < rev)
+        return;
+      docId = doc.id;
+      state = incoming;
+      rev = incoming._rev || 0;
+      emit();
+    }
+    async function load() {
+      const page = await col.list({ sort: "-created_at", limit: 100 });
+      const found = page.items.find((d) => d.data && d.data._room === key);
+      if (found) {
+        docId = found.id;
+        state = found.data;
+        rev = state._rev || 0;
+      } else {
+        const created = await col.create({ ...seed(), _room: key, _rev: 0 });
+        docId = created.id;
+        state = created.data;
+        rev = 0;
+      }
+      col.subscribe((ev) => {
+        if (!ev || !ev.doc)
+          return;
+        const d = ev.doc;
+        if (d.id === docId || d.data && d.data._room === key) {
+          if (ev.type === "delete") {
+            state = { ...seed(), _room: key, _rev: rev };
+            emit();
+            return;
+          }
+          adopt(d, false);
+        }
+      });
+      emit();
+      return state;
+    }
+    const ready = load();
+    async function write(next) {
+      if (!docId) {
+        try {
+          await ready;
+        } catch {}
+      }
+      if (!docId)
+        return false;
+      const payload = { ...next, _room: key, _rev: rev + 1 };
+      try {
+        const res = await col.replace(docId, payload);
+        adopt(res, true);
+        return true;
+      } catch {
+        return false;
+      }
+    }
+    return {
+      ready,
+      get: () => state,
+      onChange(fn) {
+        listeners.add(fn);
+        if (state) {
+          try {
+            fn(state);
+          } catch {}
+        }
+        return () => listeners.delete(fn);
+      },
+      set: (next) => write(next),
+      merge: (patch) => write({ ...state || {}, ...patch }),
+      reset: (next) => write({ ...seed(), ...next || {} }),
+      refetch: async () => {
+        try {
+          if (docId)
+            adopt(await col.get(docId), true);
+        } catch {}
+      }
+    };
+  }
+
+  // sdk/src/util.ts
+  var _id = null;
+  function id() {
+    if (!_id) {
+      _id = globalThis.crypto && typeof globalThis.crypto.randomUUID === "function" ? globalThis.crypto.randomUUID() : `c-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;
+    }
+    return _id;
+  }
+  function colorFor(seed) {
+    let h = 0;
+    const s = String(seed ?? "");
+    for (let i = 0;i < s.length; i++)
+      h = h * 31 + s.charCodeAt(i) >>> 0;
+    return `hsl(${h % 360} 68% 56%)`;
+  }
+  function uniqByHandle(list) {
+    const seen = new Set;
+    const out = [];
+    for (const m of list || []) {
+      if (m && m.handle && !seen.has(m.handle)) {
+        seen.add(m.handle);
+        out.push({ handle: m.handle, name: m.name || m.handle });
+      }
+    }
+    return out;
+  }
+  function esc(s) {
+    const d = document.createElement("div");
+    d.textContent = s == null ? "" : String(s);
+    return d.innerHTML;
+  }
+  function countdown(endsAt, opts) {
+    const interval = opts.interval ?? 250;
+    let h = null;
+    let ended = false;
+    function stop() {
+      if (h) {
+        clearInterval(h);
+        h = null;
+      }
+    }
+    function tick() {
+      const left = Math.max(0, endsAt - Date.now());
+      opts.onTick(left);
+      if (left <= 0 && !ended) {
+        ended = true;
+        stop();
+        opts.onEnd?.();
+      }
+    }
+    h = setInterval(tick, interval);
+    tick();
+    return { stop };
+  }
+
+  // sdk/src/toast.ts
+  var el = null;
+  var timer = null;
+  function ensure() {
+    if (el)
+      return el;
+    if (typeof document === "undefined" || !document.body)
+      return null;
+    const style = document.createElement("style");
+    style.textContent = ".worlds-toast{position:fixed;left:50%;bottom:1.2rem;transform:translateX(-50%) translateY(8px);" + "background:#0c0c0f;border:1px solid #27272a;color:#e4e4e7;padding:.6rem 1rem;border-radius:10px;" + "font:500 .85rem/1.4 ui-sans-serif,system-ui,sans-serif;z-index:2147483647;box-shadow:0 10px 30px rgba(0,0,0,.5);" + "opacity:0;pointer-events:none;transition:opacity .2s ease,transform .2s ease;max-width:min(92vw,420px);text-align:center}" + ".worlds-toast.show{opacity:1;transform:translateX(-50%) translateY(0)}";
+    document.head.appendChild(style);
+    el = document.createElement("div");
+    el.className = "worlds-toast";
+    document.body.appendChild(el);
+    return el;
+  }
+  function toast(text, ms = 2400) {
+    const t = ensure();
+    if (!t)
+      return;
+    t.textContent = String(text ?? "");
+    t.classList.add("show");
+    if (timer)
+      clearTimeout(timer);
+    timer = setTimeout(() => t.classList.remove("show"), ms);
+  }
+
   // sdk/src/index.ts
   var worlds = {
     WorldsError,
@@ -450,7 +635,14 @@
     uploads,
     ws,
     notify,
-    lobby
+    lobby,
+    room,
+    id,
+    colorFor,
+    uniqByHandle,
+    esc,
+    countdown,
+    toast
   };
   worlds.ready = call("GET", "/api/v1/site").then((s) => {
     worlds.site = s;

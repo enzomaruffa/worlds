@@ -8,6 +8,9 @@ import { uploads } from "./uploads";
 import { ws } from "./channels";
 import { notify } from "./notify";
 import { lobby } from "./lobby";
+import { room } from "./room";
+import { id, colorFor, uniqByHandle, esc, countdown } from "./util";
+import { toast } from "./toast";
 
 const worlds: any = {
   WorldsError,
@@ -22,6 +25,14 @@ const worlds: any = {
   ws,
   notify,
   lobby,
+  room,
+  // batteries: small building blocks every multiplayer/collab site needs
+  id,
+  colorFor,
+  uniqByHandle,
+  esc,
+  countdown,
+  toast,
 };
 
 // Resolve this site's context once; sites can `await worlds.ready`.
