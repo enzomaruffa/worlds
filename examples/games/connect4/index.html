@@ -1,0 +1,833 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Connect 4 · Worlds</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #0b0d12;
+    --panel: #12151d;
+    --panel-2: #171b25;
+    --line: #242a38;
+    --ink: #e9ecf3;
+    --muted: #8b93a7;
+    --gold: #e7b53c;
+    --gold-soft: #c9991f;
+    --board: #16306b;
+    --board-2: #0f2350;
+    --hole: #0b0d12;
+    --red: #ef4d52;
+    --red-2: #b8252b;
+    --yellow: #f3c63a;
+    --yellow-2: #c79610;
+    --win: #6ee7a5;
+    --shadow: 0 10px 40px rgba(0,0,0,.45);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background:
+      radial-gradient(1200px 600px at 80% -10%, rgba(231,181,60,.06), transparent 60%),
+      radial-gradient(900px 500px at -10% 110%, rgba(22,48,107,.25), transparent 55%),
+      var(--bg);
+    color: var(--ink);
+    font-family: "Space Grotesk", system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    display: flex;
+    flex-direction: column;
+    min-height: 100%;
+  }
+  .wrap {
+    width: 100%;
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 18px 16px 40px;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+  }
+  header.top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .logo {
+    width: 38px; height: 38px; border-radius: 11px;
+    background: linear-gradient(160deg, var(--board), var(--board-2));
+    border: 1px solid var(--line);
+    display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(2, 1fr);
+    gap: 3px; padding: 5px;
+  }
+  .logo i { border-radius: 50%; background: var(--hole); display: block; }
+  .logo i.r { background: radial-gradient(circle at 35% 30%, #ff7a7e, var(--red-2)); }
+  .logo i.y { background: radial-gradient(circle at 35% 30%, #ffe27a, var(--yellow-2)); }
+  .brand h1 { font-size: 18px; margin: 0; letter-spacing: .3px; font-weight: 700; }
+  .brand .sub { font-size: 11px; color: var(--muted); margin-top: 1px; letter-spacing: .4px; text-transform: uppercase; }
+  .me { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 7px; }
+  .me .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--win); box-shadow: 0 0 8px var(--win); }
+  .me b { color: var(--ink); font-weight: 600; }
+
+  .card {
+    background: linear-gradient(180deg, var(--panel), var(--panel-2));
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    box-shadow: var(--shadow);
+  }
+
+  .hidden { display: none !important; }
+
+  #boot { padding: 40px 18px; text-align: center; color: var(--muted); }
+
+  /* ── Lobby ── */
+  .lobby { padding: 18px; }
+  .lobby h2 { margin: 2px 0 4px; font-size: 19px; }
+  .lobby .hint { color: var(--muted); font-size: 13px; margin: 0 0 16px; line-height: 1.5; }
+  .seats { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; }
+  @media (max-width: 520px) { .seats { grid-template-columns: 1fr; } }
+  .seat {
+    border: 1px solid var(--line); border-radius: 13px; padding: 14px;
+    background: var(--panel-2); position: relative; min-height: 78px;
+    display: flex; align-items: center; gap: 12px;
+  }
+  .seat.p1 { border-color: rgba(239,77,82,.4); }
+  .seat.p2 { border-color: rgba(243,198,58,.4); }
+  .seat .disc { width: 30px; height: 30px; border-radius: 50%; flex: none; }
+  .seat.p1 .disc { background: radial-gradient(circle at 35% 30%, #ff7a7e, var(--red-2)); }
+  .seat.p2 .disc { background: radial-gradient(circle at 35% 30%, #ffe27a, var(--yellow-2)); }
+  .seat .who { min-width: 0; }
+  .seat .role { font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); }
+  .seat .nm { font-weight: 600; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .seat .nm.empty { color: var(--muted); font-weight: 500; font-style: italic; }
+  .seat .tag-you { font-size: 10px; color: var(--gold); border: 1px solid var(--gold-soft); border-radius: 999px; padding: 1px 7px; margin-left: 6px; vertical-align: middle; }
+  .seat .first { position: absolute; top: 8px; right: 10px; font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; }
+
+  .roster { margin-top: 6px; }
+  .roster .label { font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); margin-bottom: 8px; }
+  .roster ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+  .roster li {
+    display: flex; align-items: center; gap: 7px;
+    background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: 999px; padding: 5px 11px 5px 9px; font-size: 13px;
+  }
+  .roster li .pdot { width: 7px; height: 7px; border-radius: 50%; background: var(--win); }
+  .roster li.spec { color: var(--muted); }
+  .roster li.spec .pdot { background: var(--muted); }
+  .roster li .mini { font-size: 9px; text-transform: uppercase; letter-spacing: .4px; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 0 5px; }
+
+  .actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 18px; }
+  button {
+    font-family: inherit; font-size: 14px; font-weight: 600; cursor: pointer;
+    border-radius: 11px; padding: 11px 18px; border: 1px solid var(--line);
+    background: var(--panel-2); color: var(--ink); transition: transform .06s ease, background .15s ease, border-color .15s ease;
+  }
+  button:hover:not(:disabled) { border-color: #36405a; }
+  button:active:not(:disabled) { transform: translateY(1px); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  button.primary {
+    background: linear-gradient(180deg, var(--gold), var(--gold-soft));
+    border-color: var(--gold-soft); color: #1c1505;
+  }
+  button.primary:hover:not(:disabled) { filter: brightness(1.05); }
+  button.ghost { background: transparent; }
+
+  .invite { display: flex; gap: 8px; align-items: center; margin-top: 14px; }
+  .invite input {
+    flex: 1; min-width: 0; font-family: inherit; font-size: 12px; color: var(--muted);
+    background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px;
+  }
+
+  /* ── Game ── */
+  .game { padding: 16px; }
+  .statusbar {
+    display: flex; align-items: center; justify-content: center; gap: 10px;
+    margin-bottom: 14px; min-height: 30px; text-align: center;
+  }
+  .turnpill {
+    display: inline-flex; align-items: center; gap: 9px;
+    border: 1px solid var(--line); border-radius: 999px; padding: 7px 15px;
+    font-size: 14px; font-weight: 600; background: var(--panel-2);
+  }
+  .turnpill .disc { width: 16px; height: 16px; border-radius: 50%; }
+  .turnpill.p1 .disc { background: radial-gradient(circle at 35% 30%, #ff7a7e, var(--red-2)); }
+  .turnpill.p2 .disc { background: radial-gradient(circle at 35% 30%, #ffe27a, var(--yellow-2)); }
+  .turnpill.your { border-color: var(--gold-soft); box-shadow: 0 0 0 1px rgba(231,181,60,.25), 0 0 22px rgba(231,181,60,.12); }
+  .turnpill.win { border-color: var(--win); color: var(--win); }
+  .turnpill.win .disc { background: var(--win); }
+
+  .boardwrap { position: relative; max-width: 560px; margin: 0 auto; }
+  .colbtns { display: grid; grid-template-columns: repeat(7, 1fr); gap: 0; }
+  .colbtn {
+    background: transparent; border: none; padding: 0; height: 26px; cursor: pointer;
+    color: var(--muted); font-size: 16px; line-height: 26px; border-radius: 8px 8px 0 0;
+    opacity: 0; transition: opacity .12s ease, color .12s ease;
+  }
+  .boardwrap.playable .colbtn.ok { opacity: .5; }
+  .boardwrap.playable .colbtn.ok:hover { opacity: 1; color: var(--gold); background: rgba(231,181,60,.08); }
+  .colbtn:disabled { cursor: default; }
+
+  .board {
+    background: linear-gradient(160deg, var(--board), var(--board-2));
+    border: 1px solid #2a4a92; border-radius: 16px;
+    padding: 2.4%; box-shadow: inset 0 2px 10px rgba(0,0,0,.35), var(--shadow);
+    display: grid; grid-template-columns: repeat(7, 1fr); gap: 2.2%;
+    aspect-ratio: 7 / 6; width: 100%;
+  }
+  .cell {
+    position: relative; border-radius: 50%; background: var(--hole);
+    box-shadow: inset 0 3px 6px rgba(0,0,0,.55);
+    aspect-ratio: 1 / 1;
+  }
+  .disc-fill {
+    position: absolute; inset: 6%; border-radius: 50%;
+    box-shadow: inset 0 2px 4px rgba(255,255,255,.25), inset 0 -3px 6px rgba(0,0,0,.4);
+  }
+  .cell.r .disc-fill { background: radial-gradient(circle at 35% 30%, #ff7a7e, var(--red-2)); }
+  .cell.y .disc-fill { background: radial-gradient(circle at 35% 30%, #ffe27a, var(--yellow-2)); }
+  .cell .disc-fill { animation: drop .26s cubic-bezier(.34,1.2,.64,1); }
+  @keyframes drop {
+    0% { transform: translateY(-560%); }
+    80% { transform: translateY(4%); }
+    100% { transform: translateY(0); }
+  }
+  .cell.win .disc-fill {
+    box-shadow: 0 0 0 3px var(--win), 0 0 16px rgba(110,231,165,.7), inset 0 2px 4px rgba(255,255,255,.25);
+    animation: pulse 1.1s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.08); } }
+
+  .gamefoot { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin-top: 16px; }
+  .note { text-align: center; color: var(--muted); font-size: 13px; margin: 12px 0 0; min-height: 18px; }
+  .note.warn { color: var(--gold); }
+
+  .spectate-tag {
+    display: inline-block; font-size: 11px; text-transform: uppercase; letter-spacing: .5px;
+    color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; margin-bottom: 10px;
+  }
+
+  /* toast */
+  #toast {
+    position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(20px);
+    background: #1d2230; border: 1px solid var(--line); color: var(--ink);
+    padding: 10px 16px; border-radius: 12px; font-size: 13px; box-shadow: var(--shadow);
+    opacity: 0; pointer-events: none; transition: opacity .2s ease, transform .2s ease; z-index: 50;
+  }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  footer.foot { text-align: center; color: var(--muted); font-size: 11px; margin-top: 22px; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="top">
+      <div class="brand">
+        <div class="logo"><i class="r"></i><i></i><i class="y"></i><i class="y"></i><i class="r"></i><i></i></div>
+        <div>
+          <h1>Connect 4</h1>
+          <div class="sub">Worlds · turn-based 1v1</div>
+        </div>
+      </div>
+      <div class="me"><span class="dot"></span><span>you are <b id="meName">…</b></span></div>
+    </header>
+
+    <div id="boot" class="card">Connecting to Worlds…</div>
+
+    <!-- ── LOBBY ── -->
+    <section id="screenLobby" class="card lobby hidden">
+      <h2>Lobby</h2>
+      <p class="hint">First two players to take a seat play. Smaller handle is <b>Red</b> and moves first. Anyone else watches live and is up next. Drop a disc into a column — get <b>four in a row</b> (across, down, or diagonal) to win.</p>
+
+      <div class="seats">
+        <div class="seat p1" id="seatP1">
+          <div class="disc"></div>
+          <div class="who">
+            <div class="role">Player 1 · Red · moves first</div>
+            <div class="nm empty" id="p1Name">open seat</div>
+          </div>
+          <div class="first">1st</div>
+        </div>
+        <div class="seat p2" id="seatP2">
+          <div class="disc"></div>
+          <div class="who">
+            <div class="role">Player 2 · Yellow</div>
+            <div class="nm empty" id="p2Name">open seat</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="roster">
+        <div class="label"><span id="onlineCount">0</span> online</div>
+        <ul id="rosterList"></ul>
+      </div>
+
+      <div class="actions">
+        <button class="primary" id="btnSit">Take a seat</button>
+        <button class="ghost" id="btnLeaveSeat">Leave seat</button>
+        <button class="ghost" id="btnSpectate">Just watch</button>
+      </div>
+
+      <div class="invite">
+        <input id="inviteLink" readonly />
+        <button id="btnCopy">Copy invite</button>
+      </div>
+    </section>
+
+    <!-- ── GAME ── -->
+    <section id="screenGame" class="card game hidden">
+      <div style="text-align:center"><span class="spectate-tag hidden" id="specTag">spectating</span></div>
+      <div class="statusbar"><div class="turnpill" id="turnPill"><span class="disc"></span><span id="turnText">…</span></div></div>
+
+      <div class="boardwrap" id="boardWrap">
+        <div class="colbtns" id="colBtns"></div>
+        <div class="board" id="board"></div>
+      </div>
+
+      <p class="note" id="gameNote"></p>
+
+      <div class="gamefoot">
+        <button class="primary hidden" id="btnRematch">Rematch</button>
+        <button class="ghost" id="btnToLobby">Back to lobby</button>
+      </div>
+    </section>
+
+    <footer class="foot">Built on Worlds · board state is shared &amp; survives reload</footer>
+  </div>
+
+  <div id="toast"></div>
+
+  <script src="/worlds.js"></script>
+  <script>
+  (() => {
+    "use strict";
+
+    // ── Constants / identity ─────────────────────────────────
+    const COLLECTION = "connect4";
+    const ROOM = "room";
+    const DOC_KEY = "connect4-main";
+    const COLS = 7, ROWS = 6;
+    const clientId = crypto.randomUUID();
+
+    // ── DOM ──────────────────────────────────────────────────
+    const $ = (id) => document.getElementById(id);
+    const boot = $("boot");
+    const screens = { lobby: $("screenLobby"), game: $("screenGame") };
+    const toastEl = $("toast");
+    const boardEl = $("board");
+    const colBtnsEl = $("colBtns");
+    const boardWrap = $("boardWrap");
+
+    // ── Worlds handles ───────────────────────────────────────
+    const col = worlds.db.collection(COLLECTION);
+    const room = worlds.ws.channel(ROOM);
+
+    // ── Runtime state ────────────────────────────────────────
+    let me = null;                 // {handle,name}
+    let docId = null;
+    let docVersion = null;
+    let game = null;               // doc.data
+    let presence = [];             // [{handle,name}]
+    let busy = false;              // re-entrancy guard for writes
+    let lastRenderSig = "";        // dedupe identical renders (for drop animation control)
+
+    // ── Helpers ──────────────────────────────────────────────
+    function toast(text) {
+      toastEl.textContent = text;
+      toastEl.classList.add("show");
+      clearTimeout(toast._t);
+      toast._t = setTimeout(() => toastEl.classList.remove("show"), 2400);
+    }
+    function showScreen(name) {
+      boot.classList.add("hidden");
+      for (const k in screens) screens[k].classList.toggle("hidden", k !== name);
+    }
+    function esc(s) { const d = document.createElement("div"); d.textContent = s == null ? "" : String(s); return d.innerHTML; }
+    function uniqByHandle(list) {
+      const seen = new Set(), out = [];
+      for (const m of (list || [])) {
+        if (m && m.handle && !seen.has(m.handle)) { seen.add(m.handle); out.push({ handle: m.handle, name: m.name || m.handle }); }
+      }
+      return out;
+    }
+    function emptyBoard() { return new Array(COLS * ROWS).fill(0); } // 0 empty, 1 p1(red), 2 p2(yellow)
+    function idx(r, c) { return r * COLS + c; }
+
+    function blankGame() {
+      return {
+        key: DOC_KEY,
+        phase: "lobby",             // lobby | playing | over
+        board: emptyBoard(),
+        players: { p1: null, p2: null }, // each {handle,name} or null
+        turn: null,                 // handle whose move it is
+        winner: null,               // handle | "draw" | null
+        line: null,                 // [cellIndex,...] | null
+        firstSeat: "p1",            // which seat moves first this game (rematch flips)
+        moveNum: 0,                 // monotonic — drops stale writes
+        startedBy: null
+      };
+    }
+
+    // role of a handle in the current game: "p1" | "p2" | null
+    function seatOf(handle) {
+      if (!game || !handle) return null;
+      if (game.players.p1 && game.players.p1.handle === handle) return "p1";
+      if (game.players.p2 && game.players.p2.handle === handle) return "p2";
+      return null;
+    }
+    function mySeat() { return me ? seatOf(me.handle) : null; }
+    function discFor(seat) { return seat === "p1" ? 1 : 2; }
+    function nameOf(seat) { const p = game && game.players[seat]; return p ? p.name : null; }
+    function handleOfTurn() { return game ? game.turn : null; }
+    function seatOfTurn() { return seatOf(handleOfTurn()); }
+
+    // ── Win detection ────────────────────────────────────────
+    const DIRS = [[0,1],[1,0],[1,1],[1,-1]];
+    function findWin(board, lastIdx) {
+      // scan whole board (robust to any source of truth), return winning line or null
+      for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+          const v = board[idx(r, c)];
+          if (!v) continue;
+          for (const [dr, dc] of DIRS) {
+            const line = [idx(r, c)];
+            let rr = r + dr, cc = c + dc;
+            while (rr >= 0 && rr < ROWS && cc >= 0 && cc < COLS && board[idx(rr, cc)] === v) {
+              line.push(idx(rr, cc));
+              if (line.length === 4) return { disc: v, line };
+              rr += dr; cc += dc;
+            }
+          }
+        }
+      }
+      return null;
+    }
+    function isFull(board) { return board.every((v) => v !== 0); }
+    function landingRow(board, c) {
+      for (let r = ROWS - 1; r >= 0; r--) { if (board[idx(r, c)] === 0) return r; }
+      return -1;
+    }
+
+    // ── DB doc bootstrap (single shared doc) ─────────────────
+    async function loadDoc() {
+      const page = await col.list({ sort: "-created_at", limit: 100 });
+      const found = page.items.find((d) => d.data && d.data.key === DOC_KEY) || page.items[0];
+      if (found) { docId = found.id; docVersion = found.updated_at; return normalize(found.data); }
+      const created = await col.create(blankGame());
+      docId = created.id; docVersion = created.updated_at;
+      return normalize(created.data);
+    }
+
+    function normalize(data) {
+      const g = Object.assign(blankGame(), data || {});
+      if (!Array.isArray(g.board) || g.board.length !== COLS * ROWS) g.board = emptyBoard();
+      if (!g.players || typeof g.players !== "object") g.players = { p1: null, p2: null };
+      if (!("p1" in g.players)) g.players.p1 = null;
+      if (!("p2" in g.players)) g.players.p2 = null;
+      return g;
+    }
+
+    async function writeDoc(next) {
+      next.moveNum = (next.moveNum || 0);
+      try {
+        const res = await col.replace(docId, next);
+        docVersion = res.updated_at;
+        adoptDoc(res, { force: true });
+        return true;
+      } catch (e) {
+        return false;
+      }
+    }
+
+    function adoptDoc(doc, opts = {}) {
+      if (!doc) return;
+      const incoming = normalize(doc.data);
+      // Drop stale / out-of-order writes by monotonic moveNum (unless this is our own confirmed write).
+      if (!opts.force && game && (incoming.moveNum || 0) < (game.moveNum || 0)) return;
+      docId = doc.id;
+      if (doc.updated_at) docVersion = doc.updated_at;
+      game = incoming;
+      render();
+    }
+
+    async function refetch() { try { adoptDoc(await col.get(docId), { force: true }); } catch (e) {} }
+
+    // ── Seat / matchmaking actions ───────────────────────────
+    function seatsTaken() {
+      const out = [];
+      if (game.players.p1) out.push(game.players.p1.handle);
+      if (game.players.p2) out.push(game.players.p2.handle);
+      return out;
+    }
+
+    // smaller handle = p1 (first to move) per the spec, when auto-assigning the two seats
+    async function takeSeat() {
+      if (busy || !game) return;
+      if (game.phase !== "lobby") { toast("Game in progress — you're spectating."); return; }
+      if (mySeat()) { toast("You're already seated."); return; }
+      const taken = seatsTaken();
+      if (taken.length >= 2) { toast("Both seats are full — you're up next."); return; }
+      busy = true;
+      try {
+        const next = JSON.parse(JSON.stringify(game));
+        const meRef = { handle: me.handle, name: me.name || me.handle };
+        // place into the empty seat, then re-order so smaller handle is p1
+        if (!next.players.p1) next.players.p1 = meRef;
+        else next.players.p2 = meRef;
+        orderSeats(next);
+        // if both seats now filled, start playing
+        if (next.players.p1 && next.players.p2) {
+          startPlaying(next);
+        } else {
+          next.moveNum = (game.moveNum || 0) + 1;
+        }
+        const ok = await writeDoc(next);
+        if (!ok) { toast("Someone grabbed it — syncing…"); await refetch(); }
+      } finally { busy = false; }
+    }
+
+    function orderSeats(g) {
+      const a = g.players.p1, b = g.players.p2;
+      if (a && b && b.handle.toLowerCase() < a.handle.toLowerCase()) { g.players.p1 = b; g.players.p2 = a; }
+    }
+
+    function startPlaying(g) {
+      g.phase = "playing";
+      g.board = emptyBoard();
+      g.winner = null;
+      g.line = null;
+      g.turn = g.players[g.firstSeat || "p1"].handle;
+      g.startedBy = { handle: me.handle, name: me.name };
+      g.moveNum = (g.moveNum || 0) + 1;
+    }
+
+    async function leaveSeat() {
+      if (busy || !game) return;
+      const seat = mySeat();
+      if (!seat) { toast("You're not seated."); return; }
+      busy = true;
+      try {
+        const next = JSON.parse(JSON.stringify(game));
+        next.players[seat] = null;
+        // leaving during a game ends it and returns everyone to lobby
+        if (next.phase === "playing") {
+          next.phase = "lobby";
+          next.board = emptyBoard();
+          next.turn = null; next.winner = null; next.line = null;
+        }
+        orderSeats(next);
+        next.moveNum = (game.moveNum || 0) + 1;
+        const ok = await writeDoc(next);
+        if (!ok) await refetch();
+      } finally { busy = false; }
+    }
+
+    function spectate() {
+      // purely local intent — just acknowledge; spectators always see the live board
+      toast("Watching. You'll be up after this game.");
+      render();
+    }
+
+    // ── Move ─────────────────────────────────────────────────
+    async function dropDisc(c) {
+      if (busy || !game || game.phase !== "playing") return;
+      const seat = mySeat();
+      if (!seat) { toast("You're spectating this game."); return; }
+      if (game.turn !== me.handle) { toast("Not your turn."); return; }
+      const board = game.board.slice();
+      const r = landingRow(board, c);
+      if (r < 0) { toast("That column is full."); return; }
+
+      busy = true;
+      try {
+        board[idx(r, c)] = discFor(seat);
+        const next = JSON.parse(JSON.stringify(game));
+        next.board = board;
+        next.moveNum = (game.moveNum || 0) + 1;
+
+        const win = findWin(board, idx(r, c));
+        if (win) {
+          next.phase = "over";
+          next.winner = me.handle;
+          next.line = win.line;
+          next.turn = null;
+        } else if (isFull(board)) {
+          next.phase = "over";
+          next.winner = "draw";
+          next.line = null;
+          next.turn = null;
+        } else {
+          next.turn = game.players[seat === "p1" ? "p2" : "p1"].handle;
+        }
+
+        // optimistic ws ping for snappy feedback (db is source of truth)
+        room.publish({ cid: clientId, t: "move", col: c, row: r, by: seat, moveNum: next.moveNum });
+
+        const ok = await writeDoc(next);
+        if (!ok) { toast("Move conflict — re-syncing…"); await refetch(); }
+      } finally { busy = false; }
+    }
+
+    // ── Rematch / back to lobby ──────────────────────────────
+    async function rematch() {
+      if (busy || !game || game.phase !== "over") return;
+      if (!mySeat()) { toast("Only the players can start a rematch."); return; }
+      busy = true;
+      try {
+        const next = JSON.parse(JSON.stringify(game));
+        // both seats must still be filled to rematch
+        if (!next.players.p1 || !next.players.p2) {
+          next.phase = "lobby"; next.board = emptyBoard(); next.turn = null; next.winner = null; next.line = null;
+          next.moveNum = (game.moveNum || 0) + 1;
+        } else {
+          next.firstSeat = (game.firstSeat === "p1") ? "p2" : "p1"; // swap who goes first
+          startPlaying(next);
+        }
+        const ok = await writeDoc(next);
+        if (!ok) await refetch();
+      } finally { busy = false; }
+    }
+
+    async function toLobby() {
+      if (busy || !game) return;
+      // a seated player resetting to lobby clears the game for everyone
+      if (mySeat()) {
+        busy = true;
+        try {
+          const next = blankGame();
+          next.firstSeat = game.firstSeat || "p1";
+          next.players = JSON.parse(JSON.stringify(game.players));
+          next.moveNum = (game.moveNum || 0) + 1;
+          const ok = await writeDoc(next);
+          if (!ok) await refetch();
+        } finally { busy = false; }
+      } else {
+        render(); // spectator just views the lobby screen via render logic
+      }
+    }
+
+    // ── Rendering ────────────────────────────────────────────
+    function render() {
+      if (!game) return;
+      if (game.phase === "lobby") renderLobby();
+      else renderGame();
+    }
+
+    function renderLobby() {
+      showScreen("lobby");
+      const p1 = game.players.p1, p2 = game.players.p2;
+      setSeat("p1Name", p1);
+      setSeat("p2Name", p2);
+
+      // roster: who's online, marking players vs spectators
+      const seated = new Set(seatsTaken());
+      const list = uniqByHandle(presence);
+      const ul = $("rosterList");
+      ul.innerHTML = "";
+      $("onlineCount").textContent = String(list.length);
+      if (!list.length) {
+        ul.innerHTML = '<li class="spec"><span class="pdot"></span>no one here yet…</li>';
+      } else {
+        for (const p of list) {
+          const li = document.createElement("li");
+          const isMe = me && p.handle === me.handle;
+          const role = seated.has(p.handle) ? "player" : "watching";
+          if (!seated.has(p.handle)) li.classList.add("spec");
+          li.innerHTML = `<span class="pdot"></span><span>${esc(p.name)}${isMe ? " (you)" : ""}</span><span class="mini">${role}</span>`;
+          ul.appendChild(li);
+        }
+      }
+
+      const seat = mySeat();
+      const full = seatsTaken().length >= 2;
+      $("btnSit").disabled = !!seat || full;
+      $("btnSit").textContent = full && !seat ? "Seats full" : "Take a seat";
+      $("btnLeaveSeat").classList.toggle("hidden", !seat);
+    }
+
+    function setSeat(elId, p) {
+      const el = $(elId);
+      if (p) {
+        const isMe = me && p.handle === me.handle;
+        el.classList.remove("empty");
+        el.innerHTML = esc(p.name) + (isMe ? '<span class="tag-you">you</span>' : "");
+      } else {
+        el.classList.add("empty");
+        el.textContent = "open seat";
+      }
+    }
+
+    function renderGame() {
+      showScreen("game");
+      const seat = mySeat();
+      const spectating = !seat;
+      $("specTag").classList.toggle("hidden", !spectating);
+
+      renderBoard();
+      renderColBtns();
+      renderStatus();
+
+      const over = game.phase === "over";
+      // only seated players see a rematch; it needs both seats filled
+      const canRematch = over && !!seat && !!game.players.p1 && !!game.players.p2;
+      $("btnRematch").classList.toggle("hidden", !canRematch);
+      $("btnToLobby").textContent = seat ? "End & back to lobby" : "Back to lobby";
+
+      // mid-game opponent-left detection (presence-based)
+      const note = $("gameNote");
+      note.className = "note";
+      note.textContent = "";
+      if (game.phase === "playing") {
+        const onlineHandles = new Set(uniqByHandle(presence).map((p) => p.handle));
+        const oppSeat = seat === "p1" ? "p2" : (seat === "p2" ? "p1" : null);
+        const opp = oppSeat ? game.players[oppSeat] : null;
+        const missing = [];
+        for (const s of ["p1", "p2"]) {
+          const pl = game.players[s];
+          if (pl && !onlineHandles.has(pl.handle)) missing.push(pl.name);
+        }
+        if (seat && opp && !onlineHandles.has(opp.handle)) {
+          note.className = "note warn";
+          note.textContent = `${opp.name} left the game. Waiting for them to return — or end the game.`;
+        } else if (!seat && missing.length) {
+          note.className = "note warn";
+          note.textContent = `${missing.join(" & ")} disconnected.`;
+        }
+      }
+    }
+
+    function renderBoard() {
+      const sig = game.board.join(",") + "|" + (game.line ? game.line.join(",") : "");
+      const winSet = new Set(game.line || []);
+      // rebuild only when board content changes (preserve / trigger drop animation on new discs)
+      if (sig !== lastRenderSig) {
+        boardEl.innerHTML = "";
+        for (let r = 0; r < ROWS; r++) {
+          for (let c = 0; c < COLS; c++) {
+            const i = idx(r, c);
+            const v = game.board[i];
+            const cell = document.createElement("div");
+            cell.className = "cell" + (v === 1 ? " r" : v === 2 ? " y" : "") + (winSet.has(i) ? " win" : "");
+            if (v) { const f = document.createElement("div"); f.className = "disc-fill"; cell.appendChild(f); }
+            boardEl.appendChild(cell);
+          }
+        }
+        lastRenderSig = sig;
+      } else {
+        // just refresh win highlight without re-animating
+        const cells = boardEl.children;
+        for (let i = 0; i < cells.length; i++) cells[i].classList.toggle("win", winSet.has(i));
+      }
+    }
+
+    function renderColBtns() {
+      const seat = mySeat();
+      const myTurn = game.phase === "playing" && seat && game.turn === me.handle;
+      boardWrap.classList.toggle("playable", !!myTurn);
+      if (colBtnsEl.children.length !== COLS) {
+        colBtnsEl.innerHTML = "";
+        for (let c = 0; c < COLS; c++) {
+          const b = document.createElement("button");
+          b.className = "colbtn";
+          b.textContent = "▾";
+          b.addEventListener("click", () => dropDisc(c));
+          colBtnsEl.appendChild(b);
+        }
+      }
+      for (let c = 0; c < COLS; c++) {
+        const b = colBtnsEl.children[c];
+        const open = landingRow(game.board, c) >= 0;
+        b.disabled = !(myTurn && open);
+        b.classList.toggle("ok", !!(myTurn && open));
+      }
+    }
+
+    function renderStatus() {
+      const pill = $("turnPill");
+      const txt = $("turnText");
+      pill.className = "turnpill";
+      if (game.phase === "over") {
+        if (game.winner === "draw") { txt.textContent = "It's a draw."; pill.classList.add("win"); }
+        else {
+          const wSeat = seatOf(game.winner);
+          const wName = wSeat ? nameOf(wSeat) : game.winner;
+          const isMe = me && game.winner === me.handle;
+          txt.textContent = isMe ? "🏆 You win!" : `🏆 ${wName} wins!`;
+          pill.classList.add("win");
+        }
+        return;
+      }
+      // playing
+      const tSeat = seatOfTurn();
+      if (tSeat) pill.classList.add(tSeat);
+      const myTurn = me && game.turn === me.handle;
+      if (myTurn) { pill.classList.add("your"); txt.textContent = "Your turn — drop a disc"; }
+      else {
+        const waitName = tSeat ? nameOf(tSeat) : "opponent";
+        txt.textContent = mySeat() ? `Waiting for ${waitName}…` : `${waitName}'s turn`;
+      }
+    }
+
+    // ── Wiring ───────────────────────────────────────────────
+    $("btnSit").addEventListener("click", takeSeat);
+    $("btnLeaveSeat").addEventListener("click", leaveSeat);
+    $("btnSpectate").addEventListener("click", spectate);
+    $("btnRematch").addEventListener("click", rematch);
+    $("btnToLobby").addEventListener("click", toLobby);
+    $("btnCopy").addEventListener("click", async () => {
+      const link = $("inviteLink").value;
+      try { await navigator.clipboard.writeText(link); toast("Invite link copied!"); }
+      catch (e) { const el = $("inviteLink"); el.focus(); el.select(); toast("Press ⌘/Ctrl-C to copy."); }
+    });
+
+    // ── Boot ─────────────────────────────────────────────────
+    (async () => {
+      try {
+        await worlds.ready;
+        me = await worlds.me();
+        $("meName").textContent = me.name || me.handle;
+        $("inviteLink").value = location.href;
+
+        game = await loadDoc();
+
+        // live shared board state
+        col.subscribe((ev) => {
+          if (!ev || !ev.doc) return;
+          const d = ev.doc;
+          const k = d.data && d.data.key;
+          if (d.id === docId || k === DOC_KEY) {
+            if (ev.type === "delete") { game = blankGame(); lastRenderSig = ""; render(); return; }
+            adoptDoc(d);
+          }
+        });
+
+        // live roster via presence
+        room.presence((members) => {
+          presence = uniqByHandle(members || []);
+          render();
+        });
+
+        // snappy move echo (db remains source of truth; this just nudges a refetch if we're behind)
+        room.subscribe((msg) => {
+          const p = msg && msg.payload;
+          if (!p || p.cid === clientId) return;
+          if (p.t === "move" && (p.moveNum || 0) > (game ? (game.moveNum || 0) : 0)) {
+            refetch();
+          }
+        });
+
+        render();
+      } catch (e) {
+        boot.classList.remove("hidden");
+        boot.textContent = "Couldn't connect to Worlds. Refresh to retry.";
+        console.error("[connect4] boot failed", e);
+      }
+    })();
+  })();
+  </script>
+</body>
+</html>

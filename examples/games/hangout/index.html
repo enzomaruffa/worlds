@@ -1,0 +1,1219 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Hangout Planner — Worlds</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #09090b;
+    --surface: #0c0c0f;
+    --surface-2: #131318;
+    --surface-3: #1a1a20;
+    --border: #27272a;
+    --border-soft: #1c1c20;
+    --gold: #f59e0b;
+    --gold-bright: #fbbf24;
+    --text: #e4e4e7;
+    --muted: #a1a1aa;
+    --muted-2: #71717a;
+    --danger: #ef4444;
+    --good: #22c55e;
+    --maybe: #eab308;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background:
+      radial-gradient(1200px 600px at 50% -10%, rgba(245,158,11,.06), transparent 60%),
+      var(--bg);
+    color: var(--text);
+    font-family: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+  a { color: var(--gold); }
+  .wrap { width: min(680px, 94vw); margin: 0 auto; padding: 1.25rem 0 4rem; }
+
+  /* ── Header ─────────────────────────────── */
+  header.top {
+    display: flex; align-items: center; gap: .75rem;
+    padding: .25rem 0 1rem;
+    border-bottom: 1px solid var(--border-soft);
+    margin-bottom: 1.25rem;
+  }
+  .badge {
+    width: 42px; height: 42px; border-radius: 11px; flex: none;
+    display: grid; place-items: center;
+    background: linear-gradient(160deg, #1a1a1f, #0b0b0e);
+    border: 1px solid var(--border);
+    box-shadow: 0 0 0 1px rgba(245,158,11,.08) inset;
+    font-size: 1.35rem;
+  }
+  .titles h1 { margin: 0; font-size: 1.18rem; letter-spacing: .04em; font-weight: 600; }
+  .titles h1 .accent { color: var(--gold); }
+  .titles p { margin: .1rem 0 0; font-size: .78rem; color: var(--muted-2); letter-spacing: .02em; }
+  .me-chip {
+    margin-left: auto; display: flex; align-items: center; gap: .5rem;
+    padding: .35rem .6rem; border-radius: 999px;
+    background: var(--surface); border: 1px solid var(--border);
+    font-size: .78rem; color: var(--muted); white-space: nowrap;
+  }
+  .me-chip img { width: 22px; height: 22px; border-radius: 50%; object-fit: cover; }
+  .me-chip .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--good); box-shadow: 0 0 8px var(--good); }
+
+  /* ── Cards / surfaces ───────────────────── */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 1.1rem 1.15rem;
+  }
+  .card + .card { margin-top: 1rem; }
+  .section-label {
+    font-size: .7rem; text-transform: uppercase; letter-spacing: .18em;
+    color: var(--muted-2); margin: 0 0 .65rem;
+    display: flex; align-items: center; gap: .5rem;
+  }
+  .section-label .live {
+    margin-left: auto; display: inline-flex; align-items: center; gap: .35rem;
+    font-size: .62rem; color: var(--muted-2); letter-spacing: .08em;
+  }
+  .section-label .pulse {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--good); box-shadow: 0 0 8px var(--good);
+    animation: pulse 1.8s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .25; } }
+
+  /* ── Inputs ─────────────────────────────── */
+  label.field { display: block; }
+  .lab { font-size: .72rem; text-transform: uppercase; letter-spacing: .12em; color: var(--muted-2); margin: 0 0 .4rem; }
+  input[type="text"], input[type="number"], input[type="date"] {
+    width: 100%;
+    font-family: inherit; font-size: .95rem;
+    color: var(--text);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: .65rem .75rem;
+    outline: none;
+    transition: border-color .15s ease, box-shadow .15s ease;
+  }
+  input:focus { border-color: var(--gold); box-shadow: 0 0 0 3px rgba(245,158,11,.12); }
+  input::placeholder { color: var(--muted-2); }
+  input[type="date"] { color-scheme: dark; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: .7rem; }
+  @media (max-width: 460px) { .grid2 { grid-template-columns: 1fr; } }
+  .stack { display: flex; flex-direction: column; gap: .85rem; }
+
+  /* ── Buttons ────────────────────────────── */
+  button { font-family: inherit; font-size: .92rem; font-weight: 600; cursor: pointer; }
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: .45rem;
+    padding: .7rem 1.1rem; border-radius: 11px;
+    border: 1px solid var(--border);
+    background: var(--surface-2); color: var(--text);
+    transition: background .15s ease, border-color .15s ease, transform .05s ease, opacity .15s ease;
+  }
+  .btn:hover:not(:disabled) { border-color: var(--muted-2); }
+  .btn:active:not(:disabled) { transform: translateY(1px); }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .btn.primary {
+    background: linear-gradient(160deg, var(--gold-bright), var(--gold));
+    color: #1a1205; border-color: transparent;
+    box-shadow: 0 6px 20px -8px rgba(245,158,11,.5);
+  }
+  .btn.primary:hover:not(:disabled) { filter: brightness(1.05); }
+  .btn.ghost { background: transparent; }
+  .btn.full { width: 100%; }
+  .btn.lg { font-size: 1rem; padding: .8rem 1.2rem; }
+  .btn.sm { padding: .45rem .7rem; font-size: .82rem; border-radius: 9px; }
+  .icon-btn {
+    flex: none; width: 38px; height: 38px; border-radius: 9px;
+    display: grid; place-items: center;
+    font-family: inherit; font-size: 1.1rem; line-height: 1; font-weight: 600;
+    color: var(--muted); cursor: pointer;
+    background: var(--surface-2); border: 1px solid var(--border);
+    transition: background .15s ease, color .15s ease, border-color .15s ease;
+  }
+  .icon-btn:hover:not(:disabled) { color: var(--danger); border-color: var(--danger); }
+  .icon-btn:disabled { opacity: .35; cursor: not-allowed; }
+
+  /* ── Share box ──────────────────────────── */
+  .share {
+    background: var(--surface-2);
+    border: 1px dashed var(--border);
+    border-radius: 12px;
+    padding: .75rem .8rem;
+    display: flex; align-items: center; gap: .6rem; flex-wrap: wrap;
+  }
+  .share .link {
+    flex: 1; min-width: 0;
+    font-size: .85rem; color: var(--gold-bright);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  .share .btn { flex: none; padding: .5rem .8rem; }
+
+  /* ── Hangout header ─────────────────────── */
+  .hg-title { font-size: 1.45rem; font-weight: 600; line-height: 1.25; margin: 0 0 .35rem; word-break: break-word; }
+  .hg-meta { display: flex; flex-wrap: wrap; gap: .9rem; font-size: .85rem; color: var(--muted); }
+  .hg-meta .mi { display: inline-flex; align-items: center; gap: .35rem; }
+  .hg-meta .mi b { color: var(--text); font-weight: 500; }
+
+  /* ── Avatars ────────────────────────────── */
+  .ava {
+    width: 30px; height: 30px; border-radius: 50%; flex: none;
+    display: grid; place-items: center;
+    font-size: .72rem; font-weight: 700; color: #1a1205;
+    background: linear-gradient(160deg, var(--gold-bright), var(--gold));
+    overflow: hidden; object-fit: cover;
+    border: 1px solid rgba(0,0,0,.3);
+  }
+  .ava.sm { width: 24px; height: 24px; font-size: .62rem; }
+  img.ava { color: transparent; }
+
+  /* ── RSVP ───────────────────────────────── */
+  .rsvp-btns { display: grid; grid-template-columns: repeat(3, 1fr); gap: .55rem; margin-bottom: 1rem; }
+  .rsvp-btn {
+    padding: .7rem .5rem; border-radius: 11px; text-align: center;
+    border: 1px solid var(--border); background: var(--surface-2); color: var(--muted);
+    font-size: .9rem; display: flex; flex-direction: column; gap: .15rem; align-items: center;
+    transition: background .15s ease, border-color .15s ease, color .15s ease, transform .05s ease;
+  }
+  .rsvp-btn .em { font-size: 1.15rem; }
+  .rsvp-btn:hover:not(:disabled) { border-color: var(--muted-2); color: var(--text); }
+  .rsvp-btn:active:not(:disabled) { transform: translateY(1px); }
+  .rsvp-btn.on.going { border-color: var(--good); color: var(--good); background: rgba(34,197,94,.1); }
+  .rsvp-btn.on.maybe { border-color: var(--maybe); color: var(--maybe); background: rgba(234,179,8,.1); }
+  .rsvp-btn.on.out   { border-color: var(--danger); color: var(--danger); background: rgba(239,68,68,.1); }
+  .rsvp-btn:disabled { cursor: progress; }
+
+  .rsvp-group { margin-top: .9rem; }
+  .rsvp-group .gh { font-size: .76rem; color: var(--muted-2); margin: 0 0 .4rem; display: flex; align-items: center; gap: .4rem; }
+  .rsvp-group .gh .cnt { color: var(--text); font-variant-numeric: tabular-nums; }
+  .pers-list { display: flex; flex-direction: column; gap: .4rem; }
+  .pers {
+    display: flex; align-items: center; gap: .55rem;
+    padding: .4rem .55rem; border-radius: 9px;
+    background: var(--surface-2); border: 1px solid var(--border-soft);
+  }
+  .pers .nm { font-size: .9rem; }
+  .pers .me-tag { margin-left: auto; font-size: .66rem; color: var(--gold); letter-spacing: .06em; text-transform: uppercase; }
+
+  /* ── Vote ───────────────────────────────── */
+  .add-inline { display: flex; gap: .5rem; margin-bottom: .85rem; }
+  .add-inline input { flex: 1; }
+  .opt-list { display: flex; flex-direction: column; gap: .65rem; }
+  .opt {
+    border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2);
+    padding: .7rem .8rem; cursor: pointer; position: relative; overflow: hidden;
+    transition: border-color .15s ease, background .15s ease, transform .05s ease;
+  }
+  .opt:hover { border-color: var(--muted-2); }
+  .opt:active { transform: translateY(1px); }
+  .opt.mine { border-color: var(--gold); }
+  .opt.lead { background: #16130b; }
+  .opt.lead.mine { border-color: var(--gold-bright); }
+  .opt-track { position: absolute; inset: 0; pointer-events: none; }
+  .opt-fill {
+    position: absolute; inset: 0 auto 0 0; width: 0%;
+    background: linear-gradient(90deg, rgba(63,63,70,.35), rgba(82,82,91,.2));
+    transition: width .55s cubic-bezier(.22,.61,.36,1);
+  }
+  .opt.lead .opt-fill { background: linear-gradient(90deg, rgba(245,158,11,.22), rgba(251,191,36,.1)); }
+  .opt-body { position: relative; }
+  .opt-head { display: flex; align-items: center; gap: .5rem; }
+  .opt-label { font-size: .98rem; font-weight: 500; flex: 1; min-width: 0; word-break: break-word; }
+  .opt.lead .opt-label { color: var(--gold-bright); }
+  .opt-check { font-size: .9rem; color: var(--gold); flex: none; }
+  .opt-tally { font-size: .85rem; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; flex: none; }
+  .opt.lead .opt-tally { color: var(--gold-bright); }
+  .opt-del { position: relative; z-index: 2; }
+  .opt-voters { display: flex; align-items: center; gap: .3rem; margin-top: .5rem; flex-wrap: wrap; }
+  .opt-voters .none { font-size: .76rem; color: var(--muted-2); }
+
+  /* ── Cost split ─────────────────────────── */
+  .exp-form { margin-bottom: 1rem; }
+  .exp-list { display: flex; flex-direction: column; gap: .5rem; margin-bottom: 1rem; }
+  .exp {
+    display: flex; align-items: center; gap: .6rem;
+    padding: .55rem .65rem; border-radius: 10px;
+    background: var(--surface-2); border: 1px solid var(--border-soft);
+  }
+  .exp .ex-main { flex: 1; min-width: 0; }
+  .exp .ex-label { font-size: .9rem; font-weight: 500; word-break: break-word; }
+  .exp .ex-sub { font-size: .74rem; color: var(--muted-2); margin-top: .1rem; }
+  .exp .ex-amt { font-size: .98rem; font-weight: 700; color: var(--gold-bright); font-variant-numeric: tabular-nums; flex: none; }
+
+  .totbar {
+    display: flex; align-items: center; gap: .5rem;
+    padding: .7rem .8rem; border-radius: 10px; margin-bottom: 1rem;
+    background: var(--surface-3); border: 1px solid var(--border);
+    font-size: .88rem; color: var(--muted);
+  }
+  .totbar .n { color: var(--gold-bright); font-weight: 700; font-variant-numeric: tabular-nums; }
+
+  .balances { display: flex; flex-direction: column; gap: .35rem; margin-bottom: 1rem; }
+  .bal { display: flex; align-items: center; gap: .55rem; font-size: .85rem; }
+  .bal .nm { flex: 1; min-width: 0; }
+  .bal .net { font-variant-numeric: tabular-nums; font-weight: 600; flex: none; }
+  .bal .net.pos { color: var(--good); }
+  .bal .net.neg { color: var(--danger); }
+  .bal .net.zero { color: var(--muted-2); }
+
+  .settle { display: flex; flex-direction: column; gap: .5rem; }
+  .xfer {
+    display: flex; align-items: center; gap: .5rem;
+    padding: .6rem .7rem; border-radius: 10px;
+    background: rgba(245,158,11,.06); border: 1px solid rgba(245,158,11,.22);
+    font-size: .9rem;
+  }
+  .xfer .from { font-weight: 600; }
+  .xfer .arr { color: var(--gold); }
+  .xfer .to { font-weight: 600; }
+  .xfer .amt { margin-left: auto; font-weight: 700; color: var(--gold-bright); font-variant-numeric: tabular-nums; }
+  .settled-msg {
+    text-align: center; font-size: .88rem; color: var(--good);
+    background: rgba(34,197,94,.07); border: 1px solid rgba(34,197,94,.25);
+    border-radius: 10px; padding: .7rem;
+  }
+
+  /* ── Empty / states ─────────────────────── */
+  .empty { font-size: .85rem; color: var(--muted-2); padding: .65rem 0; text-align: center; }
+  .boot, .err { text-align: center; color: var(--muted-2); padding: 3rem 1rem; font-size: .95rem; }
+  .err { color: var(--muted); }
+  .err .icon { font-size: 2rem; display: block; margin-bottom: .5rem; }
+  .hidden { display: none !important; }
+  .footer { margin-top: 1.5rem; text-align: center; font-size: .76rem; color: var(--muted-2); }
+  .footer button { background: none; border: none; color: var(--gold); font-size: inherit; padding: 0; cursor: pointer; }
+  .toast {
+    position: fixed; left: 50%; bottom: 1.4rem;
+    transform: translateX(-50%) translateY(1.5rem);
+    background: var(--surface-2); border: 1px solid var(--border);
+    color: var(--text); padding: .6rem 1rem; border-radius: 999px;
+    font-size: .85rem; box-shadow: 0 12px 30px -10px rgba(0,0,0,.6);
+    opacity: 0; pointer-events: none; transition: opacity .2s ease, transform .2s ease; z-index: 50;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="top">
+      <div class="badge">🗓️</div>
+      <div class="titles">
+        <h1>Hangout <span class="accent">Planner</span></h1>
+        <p>RSVP · vote the meal · split the bill</p>
+      </div>
+      <div class="me-chip" id="meChip" hidden>
+        <span class="dot"></span>
+        <img id="meAvatar" alt="" hidden />
+        <span id="meName">…</span>
+      </div>
+    </header>
+
+    <div id="boot" class="boot">Connecting to Worlds…</div>
+
+    <!-- CREATE -->
+    <section id="screenCreate" class="hidden">
+      <div class="card">
+        <p class="section-label">Plan a hangout</p>
+        <div class="stack">
+          <label class="field">
+            <div class="lab">Title</div>
+            <input id="cTitle" type="text" maxlength="120" placeholder="Friday dinner &amp; drinks" />
+          </label>
+          <div class="grid2">
+            <label class="field">
+              <div class="lab">When (optional)</div>
+              <input id="cWhen" type="date" />
+            </label>
+            <label class="field">
+              <div class="lab">Place (optional)</div>
+              <input id="cPlace" type="text" maxlength="120" placeholder="Downtown" />
+            </label>
+          </div>
+          <button id="createBtn" class="btn primary full lg">Create hangout</button>
+        </div>
+      </div>
+
+      <div id="recentWrap" class="card hidden">
+        <p class="section-label">Your recent hangouts</p>
+        <div id="recentList" class="pers-list"></div>
+      </div>
+    </section>
+
+    <!-- HANGOUT -->
+    <section id="screenHangout" class="hidden">
+      <!-- Share -->
+      <div class="card">
+        <p class="section-label">Share this hangout</p>
+        <div class="share">
+          <span class="link" id="shareLink"></span>
+          <button class="btn" id="copyBtn">Copy link</button>
+        </div>
+      </div>
+
+      <!-- Title -->
+      <div class="card">
+        <h2 id="hgTitle" class="hg-title"></h2>
+        <div id="hgMeta" class="hg-meta"></div>
+      </div>
+
+      <!-- RSVP -->
+      <div class="card">
+        <p class="section-label">RSVP <span class="live"><span class="pulse"></span>LIVE</span></p>
+        <div class="rsvp-btns">
+          <button class="rsvp-btn going" data-rsvp="going"><span class="em">✅</span>Going</button>
+          <button class="rsvp-btn maybe" data-rsvp="maybe"><span class="em">🤔</span>Maybe</button>
+          <button class="rsvp-btn out"   data-rsvp="out"><span class="em">🚫</span>Out</button>
+        </div>
+        <div id="rsvpGroups"></div>
+      </div>
+
+      <!-- Vote -->
+      <div class="card">
+        <p class="section-label">Meal / activity vote <span class="live"><span class="pulse"></span>LIVE</span></p>
+        <div class="add-inline">
+          <input id="optInput" type="text" maxlength="60" placeholder="Add an option — Pizza, Sushi, Tacos…" />
+          <button id="addOptBtn" class="btn sm">＋ Add</button>
+        </div>
+        <div id="optList" class="opt-list"></div>
+      </div>
+
+      <!-- Cost split -->
+      <div class="card">
+        <p class="section-label">Cost split <span class="live"><span class="pulse"></span>LIVE</span></p>
+        <div class="exp-form stack">
+          <div class="grid2">
+            <label class="field">
+              <div class="lab">What for</div>
+              <input id="exLabel" type="text" maxlength="60" placeholder="Pizza" />
+            </label>
+            <label class="field">
+              <div class="lab">Amount</div>
+              <input id="exAmount" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00" />
+            </label>
+          </div>
+          <button id="addExpBtn" class="btn sm full">＋ Add expense (split among everyone going)</button>
+        </div>
+
+        <div id="totBar" class="totbar hidden"></div>
+        <div id="expList" class="exp-list"></div>
+
+        <p class="section-label" style="margin-top:.4rem;">Settle up</p>
+        <div id="settleWrap"></div>
+      </div>
+
+      <div class="footer">
+        <button id="makeAnother">＋ Plan another hangout</button>
+      </div>
+    </section>
+
+    <!-- NOT FOUND -->
+    <section id="screenError" class="hidden">
+      <div class="card err">
+        <span class="icon">🫥</span>
+        <div id="errMsg">That hangout couldn't be found. It may have been removed, or the link is incomplete.</div>
+        <div style="margin-top:1.2rem;">
+          <button class="btn primary" id="errCreate">Plan a new hangout</button>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+<script src="/worlds.js"></script>
+<script>
+(() => {
+  "use strict";
+
+  // ── Constants ────────────────────────────────────────────
+  const COLLECTION = "hangouts";
+  const RECENT_KEY = "hangout.recent.v1";
+  const RSVP_META = {
+    going: { label: "Going", em: "✅" },
+    maybe: { label: "Maybe", em: "🤔" },
+    out:   { label: "Out",   em: "🚫" },
+  };
+
+  // ── DOM refs ─────────────────────────────────────────────
+  const $ = (id) => document.getElementById(id);
+  const boot = $("boot");
+  const screens = { create: $("screenCreate"), hangout: $("screenHangout"), error: $("screenError") };
+  const toastEl = $("toast");
+
+  // ── Worlds handle ────────────────────────────────────────
+  const col = worlds.db.collection(COLLECTION);
+
+  // ── State ────────────────────────────────────────────────
+  let me = null;       // {handle,name,avatar_url,...}
+  let current = null;  // {id, data}
+  let unsub = null;    // live subscription teardown
+  let writing = false; // serialize my own writes so a slow PATCH can't clobber a newer local edit
+
+  // ── Helpers ──────────────────────────────────────────────
+  function showScreen(name) {
+    boot.classList.add("hidden");
+    for (const k in screens) screens[k].classList.toggle("hidden", k !== name);
+  }
+  function toast(text) {
+    toastEl.textContent = text;
+    toastEl.classList.add("show");
+    clearTimeout(toast._t);
+    toast._t = setTimeout(() => toastEl.classList.remove("show"), 2400);
+  }
+  function idFromUrl() {
+    const h = new URLSearchParams(location.search).get("h");
+    return h ? h.trim() : null;
+  }
+  function shareUrlFor(id) {
+    return location.origin + location.pathname + "?h=" + encodeURIComponent(id);
+  }
+  function uid() {
+    return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+  }
+  function escapeHtml(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => (
+      { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+    ));
+  }
+  function initials(name) {
+    const parts = String(name || "?").trim().split(/\s+/).filter(Boolean);
+    if (!parts.length) return "?";
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  }
+  function fmtMoney(n) {
+    const v = Math.round((Number(n) || 0) * 100) / 100;
+    return "$" + v.toFixed(2);
+  }
+  // Display name for a handle, using the doc's name map then a fallback.
+  function nameFor(handle) {
+    const d = current && current.data;
+    const nm = d && d.names && d.names[handle];
+    return nm || handle;
+  }
+  function avatarFor(handle) {
+    if (me && handle === me.handle && me.avatar_url) return me.avatar_url;
+    return null;
+  }
+  function avatarEl(handle, small) {
+    const url = avatarFor(handle);
+    if (url) {
+      const img = document.createElement("img");
+      img.className = "ava" + (small ? " sm" : "");
+      img.src = url; img.alt = "";
+      return img;
+    }
+    const d = document.createElement("div");
+    d.className = "ava" + (small ? " sm" : "");
+    d.textContent = initials(nameFor(handle));
+    return d;
+  }
+
+  // ── Data normalization (defensive against partial docs) ──
+  function data() { return (current && current.data) || {}; }
+  function rsvps()    { const d = data(); return (d.rsvps && typeof d.rsvps === "object") ? d.rsvps : {}; }
+  function names()    { const d = data(); return (d.names && typeof d.names === "object") ? d.names : {}; }
+  function options()  { const d = data(); return Array.isArray(d.options) ? d.options : []; }
+  function votes()    { const d = data(); return (d.votes && typeof d.votes === "object") ? d.votes : {}; }
+  function expenses() { const d = data(); return Array.isArray(d.expenses) ? d.expenses : []; }
+  function goingHandles() {
+    const r = rsvps();
+    return Object.keys(r).filter((h) => r[h] === "going");
+  }
+
+  // ── localStorage recent ──────────────────────────────────
+  function recent() {
+    try { return JSON.parse(localStorage.getItem(RECENT_KEY) || "[]"); }
+    catch { return []; }
+  }
+  function remember(id, title) {
+    try {
+      const list = recent().filter((r) => r.id !== id);
+      list.unshift({ id, title, at: Date.now() });
+      localStorage.setItem(RECENT_KEY, JSON.stringify(list.slice(0, 8)));
+    } catch { /* storage unavailable */ }
+  }
+
+  // ── Write helper: read-merge-update without clobbering ────
+  // mutate(latestData) returns a patch object (shallow keys to set).
+  // We always re-fetch first so concurrent edits to *other* keys survive,
+  // and serialize our own writes so a slow request can't overwrite a newer one.
+  async function applyEdit(mutate) {
+    if (!current) return;
+    while (writing) { await writing; }
+    let release;
+    writing = new Promise((r) => { release = r; });
+    try {
+      const id = current.id;
+      const fresh = await col.get(id);
+      if (!fresh || !fresh.data) throw new Error("missing");
+      current = fresh;
+      const patch = mutate(fresh.data) || {};
+      const updated = await col.update(id, patch);
+      if (updated && updated.data) current = updated;
+      render();
+      return current;
+    } finally {
+      const r = release; writing = false; r();
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  //  CREATE MODE
+  // ═══════════════════════════════════════════════════════════
+  function initCreate() {
+    $("createBtn").onclick = createHangout;
+    $("cTitle").addEventListener("keydown", (e) => { if (e.key === "Enter") createHangout(); });
+    renderRecent();
+  }
+  function renderRecent() {
+    const list = recent();
+    const wrap = $("recentWrap");
+    if (!list.length) { wrap.classList.add("hidden"); return; }
+    wrap.classList.remove("hidden");
+    const host = $("recentList");
+    host.innerHTML = "";
+    for (const r of list) {
+      const a = document.createElement("a");
+      a.href = shareUrlFor(r.id);
+      a.className = "pers";
+      a.style.textDecoration = "none";
+      a.style.color = "inherit";
+      a.innerHTML = '<span class="nm">' + escapeHtml(r.title || "(untitled hangout)") + "</span>";
+      host.appendChild(a);
+    }
+  }
+  async function createHangout() {
+    const title = $("cTitle").value.trim();
+    if (!title) { toast("Give it a title first."); $("cTitle").focus(); return; }
+    const when = $("cWhen").value || "";
+    const place = $("cPlace").value.trim();
+
+    const btn = $("createBtn");
+    btn.disabled = true; btn.textContent = "Creating…";
+    try {
+      const doc = await col.create({
+        title, when, place,
+        created_by: me.handle,
+        created_at: new Date().toISOString(),
+        rsvps: {},
+        names: { [me.handle]: me.name || me.handle },
+        options: [],
+        votes: {},
+        expenses: [],
+      });
+      remember(doc.id, title);
+      history.replaceState(null, "", shareUrlFor(doc.id));
+      openHangout(doc);
+    } catch (e) {
+      console.error("[hangout] create failed", e);
+      toast("Couldn't create the hangout. Try again.");
+      btn.disabled = false; btn.textContent = "Create hangout";
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  //  HANGOUT MODE
+  // ═══════════════════════════════════════════════════════════
+  function openHangout(doc) {
+    current = doc;
+    remember(doc.id, doc.data && doc.data.title);
+
+    const link = shareUrlFor(doc.id);
+    $("shareLink").textContent = link;
+    $("copyBtn").onclick = () => copyLink(link);
+    $("makeAnother").onclick = goCreate;
+
+    // Ensure my display name is registered (so others see a real name, not a handle).
+    ensureMyName();
+
+    wireActions();
+    render();
+    showScreen("hangout");
+
+    if (unsub) { try { unsub(); } catch {} unsub = null; }
+    unsub = col.subscribe((ev) => {
+      if (!ev || !ev.doc || ev.doc.id !== doc.id) return;
+      if (ev.type === "delete") {
+        showError("This hangout was removed by its creator.");
+        if (unsub) { try { unsub(); } catch {} unsub = null; }
+        return;
+      }
+      // Don't let an inbound event overwrite while we hold a pending write.
+      if (writing) return;
+      current = ev.doc;
+      render();
+    });
+  }
+
+  async function ensureMyName() {
+    if (!me) return;
+    if (names()[me.handle] === (me.name || me.handle)) return;
+    try {
+      await applyEdit((d) => {
+        const nm = { ...(d.names || {}) };
+        nm[me.handle] = me.name || me.handle;
+        return { names: nm };
+      });
+    } catch (e) { console.warn("[hangout] name register failed", e); }
+  }
+
+  function wireActions() {
+    document.querySelectorAll(".rsvp-btn").forEach((b) => {
+      b.onclick = () => setRsvp(b.getAttribute("data-rsvp"));
+    });
+    $("addOptBtn").onclick = addOption;
+    $("optInput").onkeydown = (e) => { if (e.key === "Enter") addOption(); };
+    $("addExpBtn").onclick = addExpense;
+    $("exAmount").onkeydown = (e) => { if (e.key === "Enter") addExpense(); };
+  }
+
+  // ── RSVP ─────────────────────────────────────────────────
+  async function setRsvp(status) {
+    if (!RSVP_META[status]) return;
+    const btns = document.querySelectorAll(".rsvp-btn");
+    btns.forEach((b) => { b.disabled = true; });
+    // optimistic
+    const optimistic = { ...rsvps() };
+    optimistic[me.handle] = status;
+    current = { ...current, data: { ...data(), rsvps: optimistic, names: { ...names(), [me.handle]: me.name || me.handle } } };
+    render();
+    try {
+      await applyEdit((d) => {
+        const r = { ...(d.rsvps || {}) };
+        r[me.handle] = status;
+        const nm = { ...(d.names || {}) };
+        nm[me.handle] = me.name || me.handle;
+        return { rsvps: r, names: nm };
+      });
+    } catch (e) {
+      console.error("[hangout] rsvp failed", e);
+      toast("Couldn't save your RSVP. Try again.");
+    } finally {
+      document.querySelectorAll(".rsvp-btn").forEach((b) => { b.disabled = false; });
+    }
+  }
+
+  function renderRsvp() {
+    const r = rsvps();
+    const mine = me ? r[me.handle] : null;
+    document.querySelectorAll(".rsvp-btn").forEach((b) => {
+      b.classList.toggle("on", b.getAttribute("data-rsvp") === mine);
+    });
+
+    const host = $("rsvpGroups");
+    host.innerHTML = "";
+    const order = ["going", "maybe", "out"];
+    const total = Object.keys(r).length;
+    if (!total) {
+      const e = document.createElement("div");
+      e.className = "empty";
+      e.textContent = "No RSVPs yet — be the first to respond above.";
+      host.appendChild(e);
+      return;
+    }
+    for (const status of order) {
+      const handles = Object.keys(r).filter((h) => r[h] === status);
+      if (!handles.length) continue;
+      const grp = document.createElement("div");
+      grp.className = "rsvp-group";
+      const head = document.createElement("div");
+      head.className = "gh";
+      head.innerHTML = RSVP_META[status].em + " " + RSVP_META[status].label +
+        ' <span class="cnt">· ' + handles.length + "</span>";
+      grp.appendChild(head);
+      const list = document.createElement("div");
+      list.className = "pers-list";
+      for (const h of handles) {
+        const row = document.createElement("div");
+        row.className = "pers";
+        row.appendChild(avatarEl(h, true));
+        const nm = document.createElement("span");
+        nm.className = "nm";
+        nm.textContent = nameFor(h);
+        row.appendChild(nm);
+        if (me && h === me.handle) {
+          const tag = document.createElement("span");
+          tag.className = "me-tag"; tag.textContent = "you";
+          row.appendChild(tag);
+        }
+        list.appendChild(row);
+      }
+      grp.appendChild(list);
+      host.appendChild(grp);
+    }
+  }
+
+  // ── Vote ─────────────────────────────────────────────────
+  async function addOption() {
+    const input = $("optInput");
+    const label = input.value.trim();
+    if (!label) return;
+    input.value = "";
+    try {
+      await applyEdit((d) => {
+        const opts = Array.isArray(d.options) ? d.options.slice() : [];
+        if (opts.some((o) => o && o.label && o.label.toLowerCase() === label.toLowerCase())) {
+          toast("That option already exists.");
+          return {};
+        }
+        opts.push({ id: uid(), label, by: me.handle });
+        return { options: opts };
+      });
+    } catch (e) {
+      console.error("[hangout] add option failed", e);
+      toast("Couldn't add the option. Try again.");
+      input.value = label;
+    }
+  }
+
+  async function castVote(optionId) {
+    const cur = votes()[me.handle];
+    const next = cur === optionId ? null : optionId; // toggle off if re-tapping your pick
+    // optimistic
+    const ov = { ...votes() };
+    if (next == null) delete ov[me.handle]; else ov[me.handle] = next;
+    current = { ...current, data: { ...data(), votes: ov, names: { ...names(), [me.handle]: me.name || me.handle } } };
+    render();
+    try {
+      await applyEdit((d) => {
+        const v = { ...(d.votes || {}) };
+        if (next == null) delete v[me.handle]; else v[me.handle] = next;
+        const nm = { ...(d.names || {}) };
+        nm[me.handle] = me.name || me.handle;
+        return { votes: v, names: nm };
+      });
+    } catch (e) {
+      console.error("[hangout] vote failed", e);
+      toast("Couldn't save your vote. Try again.");
+    }
+  }
+
+  async function removeOption(optionId) {
+    try {
+      await applyEdit((d) => {
+        const opts = (Array.isArray(d.options) ? d.options : []).filter((o) => o.id !== optionId);
+        const v = { ...(d.votes || {}) };
+        for (const h of Object.keys(v)) if (v[h] === optionId) delete v[h];
+        return { options: opts, votes: v };
+      });
+    } catch (e) {
+      console.error("[hangout] remove option failed", e);
+      toast("Couldn't remove the option. Try again.");
+    }
+  }
+
+  function renderVote() {
+    const opts = options();
+    const v = votes();
+    const host = $("optList");
+    host.innerHTML = "";
+
+    if (!opts.length) {
+      const e = document.createElement("div");
+      e.className = "empty";
+      e.textContent = "No options yet — add Pizza, Sushi, Tacos… above.";
+      host.appendChild(e);
+      return;
+    }
+
+    // tally
+    const tally = {};
+    const voters = {};
+    for (const o of opts) { tally[o.id] = 0; voters[o.id] = []; }
+    for (const h of Object.keys(v)) {
+      const oid = v[h];
+      if (tally[oid] != null) { tally[oid]++; voters[oid].push(h); }
+    }
+    let max = 0;
+    for (const o of opts) max = Math.max(max, tally[o.id]);
+    const totalVotes = Object.keys(v).filter((h) => tally[v[h]] != null).length;
+    const myVote = me ? v[me.handle] : null;
+
+    for (const o of opts) {
+      const count = tally[o.id];
+      const isLead = max > 0 && count === max;
+      const isMine = myVote === o.id;
+      const pct = totalVotes > 0 ? (count / totalVotes) * 100 : 0;
+
+      const card = document.createElement("div");
+      card.className = "opt" + (isLead ? " lead" : "") + (isMine ? " mine" : "");
+      card.onclick = (e) => {
+        if (e.target.closest(".opt-del")) return;
+        castVote(o.id);
+      };
+
+      const track = document.createElement("div");
+      track.className = "opt-track";
+      const fill = document.createElement("div");
+      fill.className = "opt-fill";
+      fill.style.width = pct + "%";
+      track.appendChild(fill);
+      card.appendChild(track);
+
+      const body = document.createElement("div");
+      body.className = "opt-body";
+
+      const head = document.createElement("div");
+      head.className = "opt-head";
+      if (isMine) {
+        const chk = document.createElement("span");
+        chk.className = "opt-check"; chk.textContent = "●";
+        head.appendChild(chk);
+      }
+      const lbl = document.createElement("span");
+      lbl.className = "opt-label";
+      lbl.textContent = o.label;
+      head.appendChild(lbl);
+      const tal = document.createElement("span");
+      tal.className = "opt-tally";
+      tal.textContent = count + (count === 1 ? " vote" : " votes");
+      head.appendChild(tal);
+      // creator (or anyone) can remove an option
+      const del = document.createElement("button");
+      del.className = "icon-btn opt-del"; del.style.width = "30px"; del.style.height = "30px"; del.style.fontSize = ".95rem";
+      del.type = "button"; del.title = "Remove option"; del.textContent = "×";
+      del.onclick = (e) => { e.stopPropagation(); removeOption(o.id); };
+      head.appendChild(del);
+      body.appendChild(head);
+
+      const vr = document.createElement("div");
+      vr.className = "opt-voters";
+      if (voters[o.id].length) {
+        for (const h of voters[o.id]) vr.appendChild(avatarEl(h, true));
+      } else {
+        const none = document.createElement("span");
+        none.className = "none";
+        none.textContent = "No votes yet";
+        vr.appendChild(none);
+      }
+      body.appendChild(vr);
+
+      card.appendChild(body);
+      host.appendChild(card);
+    }
+  }
+
+  // ── Cost split ───────────────────────────────────────────
+  async function addExpense() {
+    const labelEl = $("exLabel");
+    const amtEl = $("exAmount");
+    const label = labelEl.value.trim();
+    const amount = Math.round((parseFloat(amtEl.value) || 0) * 100) / 100;
+    if (!label) { toast("What was the expense for?"); labelEl.focus(); return; }
+    if (!(amount > 0)) { toast("Enter an amount greater than zero."); amtEl.focus(); return; }
+
+    const going = goingHandles();
+    const among = going.length ? going : [me.handle];
+
+    try {
+      await applyEdit((d) => {
+        const exps = Array.isArray(d.expenses) ? d.expenses.slice() : [];
+        exps.push({ id: uid(), by: me.handle, amount, label, among });
+        const nm = { ...(d.names || {}) };
+        nm[me.handle] = me.name || me.handle;
+        return { expenses: exps, names: nm };
+      });
+      labelEl.value = ""; amtEl.value = "";
+      labelEl.focus();
+    } catch (e) {
+      console.error("[hangout] add expense failed", e);
+      toast("Couldn't add the expense. Try again.");
+    }
+  }
+
+  async function removeExpense(expId) {
+    try {
+      await applyEdit((d) => {
+        const exps = (Array.isArray(d.expenses) ? d.expenses : []).filter((x) => x.id !== expId);
+        return { expenses: exps };
+      });
+    } catch (e) {
+      console.error("[hangout] remove expense failed", e);
+      toast("Couldn't remove the expense. Try again.");
+    }
+  }
+
+  // Net balance per person = (what they paid) − (their share of every expense).
+  // Positive net = others owe them; negative = they owe.
+  function computeBalances() {
+    const exps = expenses();
+    const net = {};   // handle -> cents
+    const bump = (h, cents) => { net[h] = (net[h] || 0) + cents; };
+
+    let totalCents = 0;
+    for (const x of exps) {
+      const amtCents = Math.round((Number(x.amount) || 0) * 100);
+      if (amtCents <= 0) continue;
+      totalCents += amtCents;
+      const among = Array.isArray(x.among) && x.among.length ? x.among : [x.by];
+      bump(x.by, amtCents); // payer fronted the money
+      // split as evenly as possible to the last cent
+      const base = Math.floor(amtCents / among.length);
+      let rem = amtCents - base * among.length;
+      for (const h of among) {
+        let share = base;
+        if (rem > 0) { share += 1; rem -= 1; }
+        bump(h, -share); // each owes their share
+      }
+    }
+    return { net, totalCents };
+  }
+
+  // Greedy minimal-transfer settlement from net balances.
+  function computeSettlement(net) {
+    const creditors = []; // {h, cents>0}
+    const debtors = [];   // {h, cents>0 owed}
+    for (const h of Object.keys(net)) {
+      const c = net[h];
+      if (c > 0) creditors.push({ h, cents: c });
+      else if (c < 0) debtors.push({ h, cents: -c });
+    }
+    creditors.sort((a, b) => b.cents - a.cents);
+    debtors.sort((a, b) => b.cents - a.cents);
+    const transfers = [];
+    let ci = 0, di = 0;
+    while (ci < creditors.length && di < debtors.length) {
+      const cr = creditors[ci], db = debtors[di];
+      const amt = Math.min(cr.cents, db.cents);
+      if (amt > 0) transfers.push({ from: db.h, to: cr.h, cents: amt });
+      cr.cents -= amt; db.cents -= amt;
+      if (cr.cents <= 0) ci++;
+      if (db.cents <= 0) di++;
+    }
+    return transfers;
+  }
+
+  function renderCost() {
+    const exps = expenses();
+    const { net, totalCents } = computeBalances();
+
+    // total bar
+    const totBar = $("totBar");
+    if (exps.length) {
+      totBar.classList.remove("hidden");
+      totBar.innerHTML = "Total spent <span class=\"n\">" + fmtMoney(totalCents / 100) +
+        "</span> · " + exps.length + (exps.length === 1 ? " expense" : " expenses");
+    } else {
+      totBar.classList.add("hidden");
+    }
+
+    // expense list
+    const list = $("expList");
+    list.innerHTML = "";
+    if (!exps.length) {
+      const e = document.createElement("div");
+      e.className = "empty";
+      e.textContent = "No expenses yet — add who paid for what above.";
+      list.appendChild(e);
+    } else {
+      for (const x of exps) {
+        const among = Array.isArray(x.among) && x.among.length ? x.among : [x.by];
+        const row = document.createElement("div");
+        row.className = "exp";
+        row.appendChild(avatarEl(x.by, true));
+        const main = document.createElement("div");
+        main.className = "ex-main";
+        const lbl = document.createElement("div");
+        lbl.className = "ex-label";
+        lbl.textContent = x.label;
+        const sub = document.createElement("div");
+        sub.className = "ex-sub";
+        sub.textContent = nameFor(x.by) + " paid · split among " + among.length +
+          (among.length === 1 ? " person" : " people");
+        main.appendChild(lbl); main.appendChild(sub);
+        row.appendChild(main);
+        const amt = document.createElement("div");
+        amt.className = "ex-amt";
+        amt.textContent = fmtMoney(x.amount);
+        row.appendChild(amt);
+        const del = document.createElement("button");
+        del.className = "icon-btn"; del.style.width = "30px"; del.style.height = "30px"; del.style.fontSize = ".95rem";
+        del.type = "button"; del.title = "Remove expense"; del.textContent = "×";
+        del.onclick = () => removeExpense(x.id);
+        row.appendChild(del);
+        list.appendChild(row);
+      }
+    }
+
+    // settlement
+    const wrap = $("settleWrap");
+    wrap.innerHTML = "";
+    if (!exps.length) {
+      const e = document.createElement("div");
+      e.className = "empty";
+      e.textContent = "Add an expense to see who owes whom.";
+      wrap.appendChild(e);
+      return;
+    }
+
+    // per-person net balances
+    const balances = document.createElement("div");
+    balances.className = "balances";
+    const handles = Object.keys(net).sort((a, b) => (net[b] || 0) - (net[a] || 0));
+    for (const h of handles) {
+      const cents = net[h] || 0;
+      const row = document.createElement("div");
+      row.className = "bal";
+      row.appendChild(avatarEl(h, true));
+      const nm = document.createElement("span");
+      nm.className = "nm";
+      nm.textContent = nameFor(h) + (me && h === me.handle ? " (you)" : "");
+      row.appendChild(nm);
+      const netEl = document.createElement("span");
+      const cls = cents > 0 ? "pos" : (cents < 0 ? "neg" : "zero");
+      netEl.className = "net " + cls;
+      netEl.textContent = (cents > 0 ? "+" : (cents < 0 ? "−" : "")) + fmtMoney(Math.abs(cents) / 100);
+      row.appendChild(netEl);
+      balances.appendChild(row);
+    }
+    wrap.appendChild(balances);
+
+    // who owes whom
+    const transfers = computeSettlement({ ...net });
+    if (!transfers.length) {
+      const ok = document.createElement("div");
+      ok.className = "settled-msg";
+      ok.textContent = "🎉 All square — nobody owes anyone.";
+      wrap.appendChild(ok);
+      return;
+    }
+    const settle = document.createElement("div");
+    settle.className = "settle";
+    for (const t of transfers) {
+      const x = document.createElement("div");
+      x.className = "xfer";
+      x.appendChild(avatarEl(t.from, true));
+      const from = document.createElement("span");
+      from.className = "from"; from.textContent = nameFor(t.from);
+      const arr = document.createElement("span");
+      arr.className = "arr"; arr.textContent = "owes";
+      const to = document.createElement("span");
+      to.className = "to"; to.textContent = nameFor(t.to);
+      const amt = document.createElement("span");
+      amt.className = "amt"; amt.textContent = fmtMoney(t.cents / 100);
+      x.appendChild(from); x.appendChild(arr); x.appendChild(to); x.appendChild(amt);
+      settle.appendChild(x);
+    }
+    wrap.appendChild(settle);
+  }
+
+  // ── Header ───────────────────────────────────────────────
+  function renderHeader() {
+    const d = data();
+    $("hgTitle").textContent = d.title || "(untitled hangout)";
+    const meta = $("hgMeta");
+    meta.innerHTML = "";
+    if (d.when) {
+      let pretty = d.when;
+      try {
+        const dt = new Date(d.when + "T00:00:00");
+        if (!isNaN(dt)) pretty = dt.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" });
+      } catch {}
+      const mi = document.createElement("span");
+      mi.className = "mi";
+      mi.innerHTML = "🗓️ <b>" + escapeHtml(pretty) + "</b>";
+      meta.appendChild(mi);
+    }
+    if (d.place) {
+      const mi = document.createElement("span");
+      mi.className = "mi";
+      mi.innerHTML = "📍 <b>" + escapeHtml(d.place) + "</b>";
+      meta.appendChild(mi);
+    }
+    const going = goingHandles().length;
+    const mi = document.createElement("span");
+    mi.className = "mi";
+    mi.innerHTML = "👥 <b>" + going + "</b> going";
+    meta.appendChild(mi);
+  }
+
+  // ── Master render ────────────────────────────────────────
+  function render() {
+    if (!current) return;
+    renderHeader();
+    renderRsvp();
+    renderVote();
+    renderCost();
+  }
+
+  // ── Copy link ────────────────────────────────────────────
+  async function copyLink(link) {
+    let ok = false;
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(link);
+        ok = true;
+      }
+    } catch { /* fall through */ }
+    if (!ok) {
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = link; ta.style.position = "fixed"; ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.focus(); ta.select();
+        ok = document.execCommand("copy");
+        document.body.removeChild(ta);
+      } catch { ok = false; }
+    }
+    toast(ok ? "Link copied!" : "Copy failed — select & copy manually.");
+  }
+
+  // ── Navigation ───────────────────────────────────────────
+  function goCreate() {
+    if (unsub) { try { unsub(); } catch {} unsub = null; }
+    current = null;
+    history.replaceState(null, "", location.origin + location.pathname);
+    $("cTitle").value = ""; $("cWhen").value = ""; $("cPlace").value = "";
+    initCreate();
+    showScreen("create");
+    $("cTitle").focus();
+  }
+  function showError(msg) {
+    if (msg) $("errMsg").textContent = msg;
+    $("errCreate").onclick = goCreate;
+    showScreen("error");
+  }
+
+  // ── Boot ─────────────────────────────────────────────────
+  (async () => {
+    try {
+      await worlds.ready;
+      me = await worlds.me();
+      const chip = $("meChip");
+      chip.hidden = false;
+      $("meName").textContent = me.name || me.handle || "you";
+      if (me.avatar_url) {
+        const av = $("meAvatar");
+        av.src = me.avatar_url; av.hidden = false;
+      }
+
+      const id = idFromUrl();
+      if (!id) { initCreate(); showScreen("create"); return; }
+
+      try {
+        const doc = await col.get(id);
+        if (!doc || !doc.data) { showError(); return; }
+        openHangout(doc);
+      } catch (e) {
+        console.error("[hangout] not found", e);
+        showError();
+      }
+    } catch (e) {
+      boot.textContent = "Couldn't connect to Worlds. Refresh to retry.";
+      console.error("[hangout] boot failed", e);
+    }
+  })();
+})();
+</script>
+</body>
+</html>
