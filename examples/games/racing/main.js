@@ -727,58 +727,71 @@ addScenery();
 // ───────────────────────────────────────────────────────────────────────────
 function makeKart(colorHex) {
   const group = new THREE.Group();
-  const bodyMat = new THREE.MeshLambertMaterial({ color: colorHex });
+  const bodyMat = new THREE.MeshLambertMaterial({ color: colorHex });   // recolored per player
   const darkMat = new THREE.MeshLambertMaterial({ color: 0x18181b });
   const tireMat = new THREE.MeshLambertMaterial({ color: 0x0e0e10 });
+  const rimMat = new THREE.MeshLambertMaterial({ color: 0xd4d4d8 });
   const trimMat = new THREE.MeshLambertMaterial({ color: 0xfafafa });
+  const skinMat = new THREE.MeshLambertMaterial({ color: 0xf1c9a5 });
+  const add = (geo, mat, x, y, z) => {
+    const m = new THREE.Mesh(geo, mat);
+    m.position.set(x, y, z);
+    m.castShadow = true;
+    group.add(m);
+    return m;
+  };
 
-  const chassis = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.45, 3.0), bodyMat);
-  chassis.position.y = 0.55;
-  chassis.castShadow = true;
-  group.add(chassis);
-
-  const nose = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.35, 0.9), bodyMat);
-  nose.position.set(0, 0.5, 1.7);
-  nose.castShadow = true;
-  group.add(nose);
-
-  const cockpit = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.55, 1.2), darkMat);
-  cockpit.position.set(0, 0.95, -0.1);
-  cockpit.castShadow = true;
-  group.add(cockpit);
-
-  // seat headrest + roll hoop hint
-  const hoop = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.7, 0.25), bodyMat);
-  hoop.position.set(0, 1.25, -0.75);
-  hoop.castShadow = true;
-  group.add(hoop);
-
-  // rear wing
-  const wing = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.12, 0.6), trimMat);
-  wing.position.set(0, 1.15, -1.55);
-  wing.castShadow = true;
-  group.add(wing);
-  for (const s of [0.7, -0.7]) {
-    const strut = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.5, 0.12), darkMat);
-    strut.position.set(s, 0.9, -1.55);
-    group.add(strut);
+  // low floor pan + main tub
+  add(new THREE.BoxGeometry(1.4, 0.16, 2.7), darkMat, 0, 0.34, 0);
+  add(new THREE.BoxGeometry(1.35, 0.42, 1.7), bodyMat, 0, 0.6, -0.1);
+  // side pods (radiators)
+  add(new THREE.BoxGeometry(0.34, 0.4, 1.4), bodyMat, 0.88, 0.55, 0);
+  add(new THREE.BoxGeometry(0.34, 0.4, 1.4), bodyMat, -0.88, 0.55, 0);
+  // tapered nose + front splitter
+  add(new THREE.BoxGeometry(1.1, 0.3, 1.2), bodyMat, 0, 0.5, 1.35);
+  add(new THREE.BoxGeometry(1.6, 0.08, 0.45), trimMat, 0, 0.38, 1.95);
+  // cockpit recess
+  add(new THREE.BoxGeometry(0.85, 0.34, 0.95), darkMat, 0, 0.8, 0);
+  // driver: suit torso, skin head, helmet in the player colour + visor
+  add(new THREE.BoxGeometry(0.5, 0.46, 0.46), trimMat, 0, 1.0, -0.1);
+  add(new THREE.SphereGeometry(0.18, 12, 10), skinMat, 0, 1.32, -0.05);
+  add(new THREE.SphereGeometry(0.24, 16, 12), bodyMat, 0, 1.4, -0.1);
+  add(new THREE.BoxGeometry(0.4, 0.1, 0.06), darkMat, 0, 1.42, 0.14); // visor
+  // steering wheel
+  const sw = add(new THREE.TorusGeometry(0.16, 0.035, 8, 16), darkMat, 0, 0.98, 0.42);
+  sw.rotation.x = Math.PI / 2.4;
+  // roll hoop + rear wing on struts
+  add(new THREE.BoxGeometry(0.8, 0.55, 0.2), bodyMat, 0, 1.3, -0.75);
+  add(new THREE.BoxGeometry(1.85, 0.1, 0.5), trimMat, 0, 1.25, -1.45);
+  for (const s of [0.66, -0.66]) add(new THREE.BoxGeometry(0.1, 0.5, 0.1), darkMat, s, 1.0, -1.45);
+  // twin exhausts
+  for (const s of [0.22, -0.22]) {
+    const e = add(new THREE.CylinderGeometry(0.06, 0.06, 0.5, 8), rimMat, s, 0.5, -1.5);
+    e.rotation.x = Math.PI / 2;
   }
 
-  // wheels
-  const wheelGeo = new THREE.CylinderGeometry(0.45, 0.45, 0.4, 12);
+  // wheels: tire + light rim, grouped so rotation.x spins and rotation.y steers
+  const tireGeo = new THREE.CylinderGeometry(0.46, 0.46, 0.4, 16);
+  const rimGeo = new THREE.CylinderGeometry(0.24, 0.24, 0.42, 8);
   const wheels = [];
-  const wx = 0.95;
-  const wz = 1.05;
+  const wx = 0.9;
+  const wz = 1.02;
   for (const [sx, sz] of [
     [wx, wz],
     [-wx, wz],
     [wx, -wz],
     [-wx, -wz],
   ]) {
-    const w = new THREE.Mesh(wheelGeo, tireMat);
-    w.rotation.z = Math.PI / 2;
-    w.position.set(sx, 0.45, sz);
-    w.castShadow = true;
+    const w = new THREE.Group();
+    const tire = new THREE.Mesh(tireGeo, tireMat);
+    tire.rotation.z = Math.PI / 2;
+    tire.castShadow = true;
+    w.add(tire);
+    const rim = new THREE.Mesh(rimGeo, rimMat);
+    rim.rotation.z = Math.PI / 2;
+    rim.position.x = sx > 0 ? 0.04 : -0.04;
+    w.add(rim);
+    w.position.set(sx, 0.46, sz);
     group.add(w);
     wheels.push(w);
   }
