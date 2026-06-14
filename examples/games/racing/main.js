@@ -360,6 +360,100 @@ let finishNormal, finishCenter, finishForward;
   scene.add(banner);
 }
 
+// ───────────────────────────────────────────────────────────────────────────
+// CHECKPOINTS — a ring of gates around the track, evenly spaced along the
+// spline and offset from the finish line. A lap only counts after the kart has
+// passed ALL of them in order since the last finish crossing (anti-shortcut).
+// ───────────────────────────────────────────────────────────────────────────
+const CHECKPOINT_COUNT = 5;
+const checkpoints = []; // { index, center:Vector3, forward:Vector3, normal:Vector3, post:[Mesh,Mesh], bar:Mesh, mats:[...] }
+
+{
+  // Spread evenly but skip sample 0 (the finish line). First gate sits at a
+  // fraction of the way around so none overlaps the start/finish band.
+  for (let k = 0; k < CHECKPOINT_COUNT; k++) {
+    const frac = (k + 0.5) / CHECKPOINT_COUNT; // never 0 → never on the finish
+    const index = Math.floor(frac * SAMPLES) % SAMPLES;
+    const c = centerPts[index];
+    const t = tangents[index];
+    const forward = t.clone().setY(0).normalize();
+    const normal = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), t).normalize();
+    checkpoints.push({
+      index,
+      center: c.clone(),
+      forward,
+      normal,
+    });
+  }
+}
+
+function buildCheckpointGates() {
+  const dimMat = () => new THREE.MeshBasicMaterial({ color: 0x4b5563, transparent: true, opacity: 0.55 });
+  for (const cp of checkpoints) {
+    const group = new THREE.Group();
+    const matA = dimMat();
+    const matB = dimMat();
+    const barMat = dimMat();
+    cp.mats = [matA, matB, barMat];
+    const postGeo = new THREE.CylinderGeometry(0.22, 0.22, 7, 8);
+    for (const [s, mat] of [
+      [1, matA],
+      [-1, matB],
+    ]) {
+      const off = cp.normal.clone().multiplyScalar(s * (ROAD_HALF + 0.4));
+      const post = new THREE.Mesh(postGeo, mat);
+      post.position.set(cp.center.x + off.x, 3.5, cp.center.z + off.z);
+      group.add(post);
+    }
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(ROAD_HALF * 2 + 0.8, 0.4, 0.4), barMat);
+    bar.position.set(cp.center.x, 6.8, cp.center.z);
+    bar.rotation.y = Math.atan2(cp.forward.x, cp.forward.z);
+    group.add(bar);
+    cp.group = group;
+    scene.add(group);
+  }
+  refreshCheckpointVisuals();
+}
+
+const CP_COLOR_NEXT = new THREE.Color(0xfbbf24); // gold — go here next
+const CP_COLOR_DONE = new THREE.Color(0x34d399); // green — already passed
+const CP_COLOR_IDLE = new THREE.Color(0x4b5563); // dim — not yet
+
+function refreshCheckpointVisuals() {
+  for (let k = 0; k < checkpoints.length; k++) {
+    const cp = checkpoints[k];
+    if (!cp.mats) continue;
+    let color, opacity;
+    if (k === lap.nextCheckpoint && raceStarted) {
+      color = CP_COLOR_NEXT;
+      opacity = 0.95;
+    } else if (k < lap.nextCheckpoint) {
+      color = CP_COLOR_DONE;
+      opacity = 0.45;
+    } else {
+      color = CP_COLOR_IDLE;
+      opacity = 0.55;
+    }
+    for (const mat of cp.mats) {
+      mat.color.copy(color);
+      mat.opacity = opacity;
+    }
+  }
+}
+
+// Signed distance to a checkpoint's plane (+ahead of the gate along track dir).
+function signedCheckpointDist(cp, x, z) {
+  const dx = x - cp.center.x;
+  const dz = z - cp.center.z;
+  return dx * cp.forward.x + dz * cp.forward.z;
+}
+function nearCheckpoint(cp, x, z) {
+  const dx = x - cp.center.x;
+  const dz = z - cp.center.z;
+  const lateral = dx * cp.normal.x + dz * cp.normal.z;
+  return Math.abs(lateral) < ROAD_HALF + 2;
+}
+
 // ── Scenery: cones near apexes + low-poly trees + grandstand blocks ─────────
 function addScenery() {
   // Cones along both curbs (instanced).
@@ -538,13 +632,31 @@ function makeLabel(text) {
   ctx.fillText(text, cv.width / 2, cv.height / 2 + 2);
   const tex = new THREE.CanvasTexture(cv);
   tex.colorSpace = THREE.SRGBColorSpace;
-  const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false, depthWrite: false, transparent: true });
+  // sizeAttenuation:false → scale is in normalized screen height (y) units, so
+  // the label is a constant on-screen caption regardless of camera distance/zoom.
+  const mat = new THREE.SpriteMaterial({
+    map: tex,
+    depthTest: false,
+    depthWrite: false,
+    transparent: true,
+    sizeAttenuation: false,
+  });
   const sprite = new THREE.Sprite(mat);
   const aspect = cv.width / cv.height;
-  sprite.scale.set(1.15 * aspect, 1.15, 1);
+  const LABEL_H = 1 / 20; // base; scaled per-frame by distance (bigger far, smaller close)
+  sprite.userData.baseW = LABEL_H * aspect;
+  sprite.userData.baseH = LABEL_H;
+  sprite.scale.set(LABEL_H * aspect, LABEL_H, 1);
   sprite.position.y = 2.5;
   sprite.renderOrder = 10;
   return sprite;
+}
+const _lblV = new THREE.Vector3();
+function scaleLabel(sprite) {
+  if (!sprite || !sprite.userData.baseW) return;
+  const d = camera.position.distanceTo(sprite.getWorldPosition(_lblV));
+  const f = Math.max(0.5, Math.min(2.4, d / 26));
+  sprite.scale.set(sprite.userData.baseW * f, sprite.userData.baseH * f, 1);
 }
 function roundRect(ctx, x, y, w, h, r) {
   ctx.beginPath();
@@ -710,10 +822,74 @@ function offRoadAmount(x, z) {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
+// COLLISIONS — arcade "soft walls". Both nudge the LOCAL player only.
+// ───────────────────────────────────────────────────────────────────────────
+// allow drifting onto the curb a bit before the wall kicks in
+const WALL_LIMIT = ROAD_HALF + CURB_W + 0.6;
+const WALL_PUSH = 0.6; // how much of the overshoot to correct per frame
+
+function resolveTrackWall(fx, fz) {
+  const near = nearestSample(player.pos.x, player.pos.z);
+  const c = centerPts[near.index];
+  // outward radial direction from the centerline in the XZ plane
+  let ox = player.pos.x - c.x;
+  let oz = player.pos.z - c.z;
+  const dist = Math.hypot(ox, oz);
+  if (dist < WALL_LIMIT || dist < 1e-4) return;
+  ox /= dist;
+  oz /= dist;
+  const overshoot = dist - WALL_LIMIT;
+  // push back toward the road (forgiving, not a hard snap)
+  player.pos.x -= ox * overshoot * WALL_PUSH;
+  player.pos.z -= oz * overshoot * WALL_PUSH;
+  // kill the outward component of velocity (vel is along heading fx/fz)
+  const into = fx * ox + fz * oz; // >0 means driving outward into the wall
+  if (into > 0 && player.vel > 0) {
+    player.vel -= player.vel * into * 0.5;
+  } else if (into < 0 && player.vel < 0) {
+    player.vel -= player.vel * -into * 0.5;
+  }
+}
+
+const KART_RADIUS = 1.1;
+const KART_MIN_DIST = KART_RADIUS * 2;
+
+function resolveKartCollisions(fx, fz) {
+  for (const r of remotes.values()) {
+    if (!r.init) continue;
+    let dx = player.pos.x - r.cur.x;
+    let dz = player.pos.z - r.cur.z;
+    const dist = Math.hypot(dx, dz);
+    if (dist >= KART_MIN_DIST) continue;
+    let nx, nz;
+    if (dist < 1e-4) {
+      // exactly overlapping → push along our own forward axis
+      nx = fx;
+      nz = fz;
+    } else {
+      nx = dx / dist;
+      nz = dz / dist;
+    }
+    const overlap = KART_MIN_DIST - dist;
+    // light push: move the local kart out along the separation normal
+    player.pos.x += nx * overlap;
+    player.pos.z += nz * overlap;
+    // damp the velocity component heading INTO the other kart (arcade nudge)
+    const into = -(fx * nx + fz * nz); // >0 means we're driving toward them
+    if (into > 0 && player.vel > 0) {
+      player.vel -= player.vel * into * 0.35;
+    } else if (into < 0 && player.vel < 0) {
+      player.vel -= player.vel * -into * 0.35;
+    }
+  }
+}
+
+// ───────────────────────────────────────────────────────────────────────────
 // LAP detection — cross the finish band in the forward track direction.
 // We track the signed distance to the finish plane each frame; a sign flip
 // from behind→ahead while near the line, moving forward, counts as a lap.
 // ───────────────────────────────────────────────────────────────────────────
+let raceStarted = false; // gate lap timing until countdown finishes
 const lap = {
   count: 0,
   startMs: 0, // current lap start timestamp
@@ -722,7 +898,12 @@ const lap = {
   prevSide: null, // sign of distance to finish plane last frame
   armed: false, // must travel away from the line before a lap can re-count
   wrongWay: false,
+  nextCheckpoint: 0, // index into checkpoints[] we must clear next
+  prevCpSide: null, // sign of dist to the NEXT checkpoint plane last frame
 };
+
+// gates need the `lap` state to color the next checkpoint — build now.
+buildCheckpointGates();
 
 function signedFinishDist(x, z) {
   // distance along finishForward from the finish center; +ahead, -behind.
@@ -741,15 +922,21 @@ function startTimerNow(now) {
   lap.startMs = now;
 }
 
-let raceStarted = false; // gate lap timing until countdown finishes
 function onCrossFinish(forward, now) {
   if (!raceStarted) return;
   if (!forward) {
     flashToast("↺ turn around");
     return;
   }
+  // Anti-shortcut: a lap is only valid once every checkpoint was cleared in
+  // order since the last finish crossing.
+  const allChecked = lap.nextCheckpoint >= checkpoints.length;
+  if (lap.count > 0 && !allChecked) {
+    flashToast("⚑ missed checkpoints · lap not counted");
+    return; // do NOT count the lap, do NOT reset the timer
+  }
   if (lap.count > 0) {
-    // completed a lap
+    // completed a valid lap
     const ms = now - lap.startMs;
     lap.lastMs = ms;
     if (lap.bestMs == null || ms < lap.bestMs) {
@@ -766,6 +953,10 @@ function onCrossFinish(forward, now) {
   }
   lap.count++;
   lap.startMs = now;
+  // reset checkpoint ring for the new lap
+  lap.nextCheckpoint = 0;
+  lap.prevCpSide = null;
+  refreshCheckpointVisuals();
   updateHud();
 }
 
@@ -786,6 +977,10 @@ function frame(now) {
   maybeSendPose(now);
   pruneRemotes(now);
   updateLiveTimer(now);
+
+  // name tags: bigger far, smaller close (after camera update so distance is current)
+  scaleLabel(player.label);
+  for (const r of remotes.values()) scaleLabel(r.label);
 
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
@@ -840,6 +1035,14 @@ function stepPhysics(dt, now) {
   player.pos.x += fx * player.vel * dt;
   player.pos.z += fz * player.vel * dt;
 
+  // ── track containment ("soft wall" at the road edge) ──
+  // Past the road half-width + margin, push back toward the centerline and
+  // kill the outward velocity component. Forgiving enough to clip curbs.
+  resolveTrackWall(fx, fz);
+
+  // ── kart-to-kart collisions (local player vs remotes; XZ circle test) ──
+  resolveKartCollisions(fx, fz);
+
   // mesh transform
   if (player.mesh) {
     player.mesh.position.set(player.pos.x, 0, player.pos.z);
@@ -872,6 +1075,27 @@ function stepPhysics(dt, now) {
   // re-arm once we're a safe distance ahead of the line
   if (sd > 8) lap.armed = true;
   lap.prevSide = sd;
+
+  // ── checkpoint gating ──
+  // Must pass the NEXT checkpoint's plane going forward (within the road's
+  // lateral span). Crossing in order arms the next; finish only counts a lap
+  // once all are cleared.
+  if (raceStarted && lap.nextCheckpoint < checkpoints.length) {
+    const cp = checkpoints[lap.nextCheckpoint];
+    const csd = signedCheckpointDist(cp, player.pos.x, player.pos.z);
+    if (lap.prevCpSide !== null && nearCheckpoint(cp, player.pos.x, player.pos.z)) {
+      const crossedForward = lap.prevCpSide < 0 && csd >= 0;
+      if (crossedForward) {
+        lap.nextCheckpoint++;
+        refreshCheckpointVisuals();
+      }
+    }
+    // track sign against whichever checkpoint is now next
+    const cpNow = checkpoints[lap.nextCheckpoint];
+    lap.prevCpSide = cpNow ? signedCheckpointDist(cpNow, player.pos.x, player.pos.z) : null;
+  } else {
+    lap.prevCpSide = null;
+  }
 
   // wrong-way detection: moving fast but heading opposes track tangent
   if (Math.abs(player.vel) > 8) {
@@ -1172,6 +1396,10 @@ function runCountdown() {
       lap.prevSide = signedFinishDist(player.pos.x, player.pos.z);
       lap.startMs = performance.now();
       lap.count = 1; // we are on lap 1
+      // arm the checkpoint ring for lap 1
+      lap.nextCheckpoint = 0;
+      lap.prevCpSide = signedCheckpointDist(checkpoints[0], player.pos.x, player.pos.z);
+      refreshCheckpointVisuals();
       updateHud();
       flashToast("go! cross the line to set a lap");
       return;
