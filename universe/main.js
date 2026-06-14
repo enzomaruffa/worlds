@@ -139,7 +139,7 @@ warpBlurPass = new ShaderPass({
       vec3 acc = base.rgb; float total = 1.0;
       for (int i = 1; i <= 28; i++) {
         float t = (float(i) - jit) / 28.0;
-        vec3 s = texture2D(tDiffuse, vUv - dir * t * uWarp * 0.6).rgb;
+        vec3 s = texture2D(tDiffuse, vUv - dir * t * uWarp * 0.28).rgb;
         float w = 1.0 - t;
         acc += s * w; total += w;
       }
@@ -243,7 +243,7 @@ let starMat = null;
         vA = 0.35 + 0.65 * abs(sin(uTime * (0.4 + mag*0.3) + phase));
         vWarp = uWarp;
         vec4 mv = modelViewMatrix * vec4(position,1.0);
-        gl_PointSize = mag * 2.6 * (600.0 / -mv.z) * (1.0 + uWarp * 5.0);
+        gl_PointSize = mag * 2.6 * (600.0 / -mv.z) * (1.0 + uWarp * 3.0);
         gl_Position = projectionMatrix * mv;
       }`,
     fragmentShader: `
@@ -251,7 +251,7 @@ let starMat = null;
       void main(){
         vec2 d2 = gl_PointCoord - 0.5;
         // stretch into long hyperspace streaks as warp ramps up
-        d2.x /= (1.0 + vWarp * 11.0);
+        d2.x /= (1.0 + vWarp * 7.0);
         float d = length(d2);
         if (d > 0.5) discard;
         // blue→white hot core during FTL
@@ -296,7 +296,7 @@ let warpMat = null, warpField = null;
         float span = 700.0, speed = 1100.0;
         // head scrolls toward the camera along local -Z (forward); tail trails behind it
         float headZ = -span + mod(seed.z * span + uTime * speed, span);
-        float len = 6.0 + uWarp * 420.0;
+        float len = 5.0 + uWarp * 230.0;
         float z = headZ - along * len;
         float depth = clamp((-z) / span, 0.0, 1.0);
         // fade in past the near plane, fade out toward the far end; tail dimmer than head
@@ -1828,11 +1828,11 @@ function tick() {
   if (thrust && !wasThrust) playSfx("thrust", 0.4);
   wasThrust = thrust;
   // FTL: an active jump (flyTarget) forces the star-streak on; fast manual flight ramps it too.
-  if (flyTarget && !wasFly) { if (flashEl) { flashEl.style.opacity = "0.6"; setTimeout(() => { flashEl.style.opacity = "0"; }, 120); } }
+  if (flyTarget && !wasFly) { if (flashEl) { flashEl.style.opacity = "0.32"; setTimeout(() => { flashEl.style.opacity = "0"; }, 110); } }
   wasFly = !!flyTarget;
   if (starMat) {
-    const targetWarp = flyTarget ? 1 : Math.max(0, Math.min((speed - 110) / 260, 1));
-    const rate = flyTarget ? 9 : 4;
+    const targetWarp = flyTarget ? 0.62 : Math.max(0, Math.min((speed - 110) / 260, 1));
+    const rate = flyTarget ? 5 : 4;
     starMat.uniforms.uWarp.value += (targetWarp - starMat.uniforms.uWarp.value) * Math.min(1, dt * rate);
   }
   // follow badge: visible while trailing another pilot; clears if they leave
@@ -1905,12 +1905,12 @@ function tick() {
 
   // ---- cinematic camera: speed-FOV, banking, shake, FTL punch ----
   // FTL jumps punch the FOV way out + shake the rig for a real hyperspace kick.
-  const targetFov = 70 + Math.min(speed, 140) / 140 * 20 + (dive ? 30 : 0) + (flyTarget ? 38 : 0);
-  camera.fov += (targetFov - camera.fov) * Math.min(1, dt * (flyTarget ? 7 : 4));
+  const targetFov = 70 + Math.min(speed, 140) / 140 * 20 + (dive ? 30 : 0) + (flyTarget ? 15 : 0);
+  camera.fov += (targetFov - camera.fov) * Math.min(1, dt * (flyTarget ? 5 : 4));
   camera.updateProjectionMatrix();
   const dYaw = yaw - prevYaw; prevYaw = yaw;
   bank += (Math.max(-0.5, Math.min(0.5, -dYaw * 9)) - bank) * Math.min(1, dt * 6);
-  camShake = Math.max(camShake * Math.exp(-3 * dt), flyTarget ? 0.07 : (thrust && !introActive ? 0.04 : 0));
+  camShake = Math.max(camShake * Math.exp(-3 * dt), flyTarget ? 0.025 : (thrust && !introActive ? 0.04 : 0));
 
   if (introActive) {
     // sweeping orbit-arc fly-in: spiral around hello.world, settle behind the ship
