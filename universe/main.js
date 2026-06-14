@@ -890,6 +890,8 @@ const joy = { x: 0, y: 0, active: false };
 const raycaster = new THREE.Raycaster();
 const card = document.getElementById("card");
 let flyTarget = null;
+let focusTarget = null;          // a world we're "frozen" facing (card open, gravity paused)
+const _faceDir = new THREE.Vector3();
 
 function pick(cx, cy) {
   raycaster.setFromCamera(new THREE.Vector2((cx / innerWidth) * 2 - 1, -(cy / innerHeight) * 2 + 1), camera);
@@ -911,6 +913,7 @@ function pick(cx, cy) {
   following = null;
   showCard(o.userData.site);
   flyTarget = o;
+  focusTarget = o;       // glide in, then freeze facing it
   blip();
   warpSound();
 }
@@ -977,7 +980,7 @@ function showCard(site) {
   loreEl.textContent = "✦ summoning lore…";
   loadLore(site).then((lore) => { if (cardSite && cardSite.name === site.name) loreEl.textContent = `✦ ${lore}`; });
 }
-document.getElementById("cardClose").onclick = () => { card.style.display = "none"; flyTarget = null; };
+document.getElementById("cardClose").onclick = () => { card.style.display = "none"; flyTarget = null; focusTarget = null; };
 
 // ---------- toasts ----------
 function toast(html, ms = 4200) {
@@ -1018,6 +1021,8 @@ function startDive(group) {
   if (dive || !group?.userData?.site) return;
   dive = { group, t: 0 };
   flyTarget = null;
+  focusTarget = null;
+  card.style.display = "none"; cardSite = null;   // "walk in" closes the modal
   divePrompt.style.display = "none";
   warpSound();
   playSfx("thrust", 0.5, 0.8);
@@ -1388,7 +1393,7 @@ askForm.addEventListener("submit", async (e) => {
   askInput.value = "";
   askInput.blur();
   const g = planets.get(target.name);
-  if (g) { flyTarget = g; showCard(g.userData.site); warpSound(); toast(`▸ navigating to <b style="color:#e5a00d">${target.name}.world</b> — ${why}`); }
+  if (g) { flyTarget = g; focusTarget = g; showCard(g.userData.site); warpSound(); toast(`▸ navigating to <b style="color:#e5a00d">${target.name}.world</b> — ${why}`); }
 });
 
 // assets first — planets plant Kenney forests at build time
@@ -1472,6 +1477,19 @@ function tick() {
     yaw -= sx * 1.3 * dt;
     pitch = Math.max(-1.2, Math.min(1.2, pitch - sy * 1.3 * dt));
   }
+  // frozen-focus: ease the ship to face the world we clicked/warped to (cinematic)
+  if (focusTarget && !dive) {
+    _faceDir.subVectors(focusTarget.position, ship.position);
+    if (_faceDir.lengthSq() > 1e-4) {
+      _faceDir.normalize();
+      const ty = Math.atan2(_faceDir.x, -_faceDir.z);
+      const tp = Math.max(-1.2, Math.min(1.2, Math.asin(Math.max(-1, Math.min(1, _faceDir.y)))));
+      let d = ty - yaw; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI;
+      const e = 1 - Math.exp(-5 * dt);
+      yaw += d * e;
+      pitch += (tp - pitch) * e;
+    }
+  }
   // ship orientation
   const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(pitch, yaw, 0, "YXZ"));
   ship.quaternion.slerp(q, 1 - Math.exp(-8 * dt));
@@ -1499,6 +1517,14 @@ function tick() {
     ship.position.lerp(goal, 1 - Math.exp(-k * dt));
     vel.multiplyScalar(Math.exp(-4 * dt)); // bleed residual momentum
     if (ship.position.distanceTo(goal) < 2) flyTarget = null;
+  } else if (focusTarget) {
+    // frozen hold: keep a vantage just off the world, no gravity/drift, facing it,
+    // until the pilot dives in ("walk") or closes the card (gravity resumes).
+    const br = focusTarget.userData.bodyR ?? 6;
+    const goal = focusTarget.position.clone().add(new THREE.Vector3(0, br * 0.5, br + shipRadius + 5));
+    ship.position.lerp(goal, 1 - Math.exp(-3 * dt));
+    vel.multiplyScalar(Math.exp(-6 * dt));
+    if (thrust) { focusTarget = null; card.style.display = "none"; cardSite = null; } // thrust to break free
   } else if (following && pilots.get(following)) {
     // formation flight: trail behind the followed pilot
     const lead = pilots.get(following).group;
