@@ -224,9 +224,14 @@ const server = Bun.serve<SocketData, never>({
         }
       }
 
-      // The one multiplexed socket.
+      // The one multiplexed socket. Presence + message `from` MUST use the same
+      // profile-resolved identity as /api/v1/me — otherwise a user who customizes
+      // their handle/name shows up in presence under their raw login identity and
+      // games see them as a second, different player.
       if (url.pathname === "/api/v1/socket") {
-        const who = identityFrom(req);
+        const raw = identityFrom(req);
+        const prof = await resolveProfile(raw.handle, raw.email);
+        const who = { email: raw.email, handle: prof.handle, name: prof.name, avatar: prof.avatar_url };
         if (srv.upgrade(req, { data: { who, site, subs: new Map() } })) return undefined as never;
         throw new WorldsError("invalid_request", "expected websocket upgrade");
       }
