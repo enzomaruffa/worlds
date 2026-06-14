@@ -299,61 +299,41 @@
     <footer class="foot">Built on Worlds · board state is shared &amp; survives reload</footer>
   </div>
 
-  <div id="toast"></div>
-
   <script src="/worlds.js"></script>
   <script>
   (() => {
     "use strict";
 
-    // ── Constants / identity ─────────────────────────────────
-    const COLLECTION = "connect4";
-    const ROOM = "room";
-    const DOC_KEY = "connect4-main";
+    // ── Constants ────────────────────────────────────────────
     const COLS = 7, ROWS = 6;
-    const clientId = crypto.randomUUID();
 
     // ── DOM ──────────────────────────────────────────────────
     const $ = (id) => document.getElementById(id);
     const boot = $("boot");
     const screens = { lobby: $("screenLobby"), game: $("screenGame") };
-    const toastEl = $("toast");
     const boardEl = $("board");
     const colBtnsEl = $("colBtns");
     const boardWrap = $("boardWrap");
 
     // ── Worlds handles ───────────────────────────────────────
-    const col = worlds.db.collection(COLLECTION);
-    const room = worlds.ws.channel(ROOM);
+    // The board is one shared, authoritative doc (worlds.room handles load-or-
+    // create, live sync, and monotonic ordering); presence rides a ws channel.
+    const ROOM = worlds.room("connect4", { initial: blankGame });
+    const chan = worlds.ws.channel("connect4");
 
     // ── Runtime state ────────────────────────────────────────
     let me = null;                 // {handle,name}
-    let docId = null;
-    let docVersion = null;
-    let game = null;               // doc.data
+    let game = null;               // ROOM state (normalized)
     let presence = [];             // [{handle,name}]
     let presenceLoaded = false;    // has the presence roster reported at least once?
     let busy = false;              // re-entrancy guard for writes
     let lastRenderSig = "";        // dedupe identical renders (for drop animation control)
 
     // ── Helpers ──────────────────────────────────────────────
-    function toast(text) {
-      toastEl.textContent = text;
-      toastEl.classList.add("show");
-      clearTimeout(toast._t);
-      toast._t = setTimeout(() => toastEl.classList.remove("show"), 2400);
-    }
+    const { toast, esc, uniqByHandle } = worlds;   // shared SDK building blocks
     function showScreen(name) {
       boot.classList.add("hidden");
       for (const k in screens) screens[k].classList.toggle("hidden", k !== name);
-    }
-    function esc(s) { const d = document.createElement("div"); d.textContent = s == null ? "" : String(s); return d.innerHTML; }
-    function uniqByHandle(list) {
-      const seen = new Set(), out = [];
-      for (const m of (list || [])) {
-        if (m && m.handle && !seen.has(m.handle)) { seen.add(m.handle); out.push({ handle: m.handle, name: m.name || m.handle }); }
-      }
-      return out;
     }
     function emptyBoard() { return new Array(COLS * ROWS).fill(0); } // 0 empty, 1 p1(red), 2 p2(yellow)
     function idx(r, c) { return r * COLS + c; }
@@ -368,7 +348,6 @@
 
     function blankGame() {
       return {
-        key: DOC_KEY,
         phase: "lobby",             // lobby | playing | over
         board: emptyBoard(),
         players: { p1: null, p2: null }, // each {handle,name} or null
@@ -376,7 +355,6 @@
         winner: null,               // handle | "draw" | null
         line: null,                 // [cellIndex,...] | null
         firstSeat: "p1",            // which seat moves first this game (rematch flips)
-        moveNum: 0,                 // monotonic — drops stale writes
         startedBy: null
       };
     }
@@ -421,16 +399,8 @@
       return -1;
     }
 
-    // ── DB doc bootstrap (single shared doc) ─────────────────
-    async function loadDoc() {
-      const page = await col.list({ sort: "-created_at", limit: 100 });
-      const found = page.items.find((d) => d.data && d.data.key === DOC_KEY) || page.items[0];
-      if (found) { docId = found.id; docVersion = found.updated_at; return normalize(found.data); }
-      const created = await col.create(blankGame());
-      docId = created.id; docVersion = created.updated_at;
-      return normalize(created.data);
-    }
-
+    // ── Shared board state (worlds.room) ─────────────────────
+    // Defensive shape-fix on every read — never trust a doc to be well-formed.
     function normalize(data) {
       const g = Object.assign(blankGame(), data || {});
       if (!Array.isArray(g.board) || g.board.length !== COLS * ROWS) g.board = emptyBoard();
@@ -440,30 +410,9 @@
       return g;
     }
 
-    async function writeDoc(next) {
-      next.moveNum = (next.moveNum || 0);
-      try {
-        const res = await col.replace(docId, next);
-        docVersion = res.updated_at;
-        adoptDoc(res, { force: true });
-        return true;
-      } catch (e) {
-        return false;
-      }
-    }
+    async function writeDoc(next) { return ROOM.set(next); }
 
-    function adoptDoc(doc, opts = {}) {
-      if (!doc) return;
-      const incoming = normalize(doc.data);
-      // Drop stale / out-of-order writes by monotonic moveNum (unless this is our own confirmed write).
-      if (!opts.force && game && (incoming.moveNum || 0) < (game.moveNum || 0)) return;
-      docId = doc.id;
-      if (doc.updated_at) docVersion = doc.updated_at;
-      game = incoming;
-      render();
-    }
-
-    async function refetch() { try { adoptDoc(await col.get(docId), { force: true }); } catch (e) {} }
+    async function refetch() { await ROOM.refetch(); }
 
     // The shared doc can be left behind by players who closed the tab. Recycle
     // abandoned state so newcomers can actually sit + play: a mid-game with both
@@ -484,7 +433,6 @@
         if ((p1 && live.has(p1.handle)) || (p2 && live.has(p2.handle))) return; // someone's still here
         const next = blankGame();
         next.firstSeat = game.firstSeat || "p1";
-        next.moveNum = (game.moveNum || 0) + 1;
         busy = true;
         try { await writeDoc(next); } finally { busy = false; }
         return;
@@ -498,7 +446,6 @@
         if (p1Off) next.players.p1 = null;
         if (p2Off) next.players.p2 = null;
         orderSeats(next);
-        next.moveNum = (game.moveNum || 0) + 1;
         busy = true;
         try { await writeDoc(next); } finally { busy = false; }
       }
@@ -528,11 +475,7 @@
         else next.players.p2 = meRef;
         orderSeats(next);
         // if both seats now filled, start playing
-        if (next.players.p1 && next.players.p2) {
-          startPlaying(next);
-        } else {
-          next.moveNum = (game.moveNum || 0) + 1;
-        }
+        if (next.players.p1 && next.players.p2) startPlaying(next);
         const ok = await writeDoc(next);
         if (!ok) { toast("Someone grabbed it — syncing…"); await refetch(); }
       } finally { busy = false; }
@@ -550,7 +493,6 @@
       g.line = null;
       g.turn = g.players[g.firstSeat || "p1"].handle;
       g.startedBy = { handle: me.handle, name: me.name };
-      g.moveNum = (g.moveNum || 0) + 1;
     }
 
     async function leaveSeat() {
@@ -568,7 +510,6 @@
           next.turn = null; next.winner = null; next.line = null;
         }
         orderSeats(next);
-        next.moveNum = (game.moveNum || 0) + 1;
         const ok = await writeDoc(next);
         if (!ok) await refetch();
       } finally { busy = false; }
@@ -595,7 +536,6 @@
         board[idx(r, c)] = discFor(seat);
         const next = JSON.parse(JSON.stringify(game));
         next.board = board;
-        next.moveNum = (game.moveNum || 0) + 1;
 
         const win = findWin(board, idx(r, c));
         if (win) {
@@ -612,9 +552,6 @@
           next.turn = game.players[seat === "p1" ? "p2" : "p1"].handle;
         }
 
-        // optimistic ws ping for snappy feedback (db is source of truth)
-        room.publish({ cid: clientId, t: "move", col: c, row: r, by: seat, moveNum: next.moveNum });
-
         const ok = await writeDoc(next);
         if (!ok) { toast("Move conflict — re-syncing…"); await refetch(); }
       } finally { busy = false; }
@@ -630,7 +567,6 @@
         // both seats must still be filled to rematch
         if (!next.players.p1 || !next.players.p2) {
           next.phase = "lobby"; next.board = emptyBoard(); next.turn = null; next.winner = null; next.line = null;
-          next.moveNum = (game.moveNum || 0) + 1;
         } else {
           next.firstSeat = (game.firstSeat === "p1") ? "p2" : "p1"; // swap who goes first
           startPlaying(next);
@@ -649,7 +585,6 @@
           const next = blankGame();
           next.firstSeat = game.firstSeat || "p1";
           next.players = JSON.parse(JSON.stringify(game.players));
-          next.moveNum = (game.moveNum || 0) + 1;
           const ok = await writeDoc(next);
           if (!ok) await refetch();
         } finally { busy = false; }
@@ -841,37 +776,21 @@
         $("meName").textContent = me.name || me.handle;
         $("inviteLink").value = location.href;
 
-        game = await loadDoc();
-
-        // live shared board state
-        col.subscribe((ev) => {
-          if (!ev || !ev.doc) return;
-          const d = ev.doc;
-          const k = d.data && d.data.key;
-          if (d.id === docId || k === DOC_KEY) {
-            if (ev.type === "delete") { game = blankGame(); lastRenderSig = ""; render(); return; }
-            adoptDoc(d);
-          }
+        // shared board: worlds.room delivers load + every live change (own + remote)
+        await ROOM.ready;
+        ROOM.onChange((s) => {
+          game = normalize(s);
+          render();
+          maybeResetAbandoned();
         });
 
         // live roster via presence
-        room.presence((members) => {
+        chan.presence((members) => {
           presence = uniqByHandle(members || []);
           presenceLoaded = true;
           render();
           maybeResetAbandoned();
         });
-
-        // snappy move echo (db remains source of truth; this just nudges a refetch if we're behind)
-        room.subscribe((msg) => {
-          const p = msg && msg.payload;
-          if (!p || p.cid === clientId) return;
-          if (p.t === "move" && (p.moveNum || 0) > (game ? (game.moveNum || 0) : 0)) {
-            refetch();
-          }
-        });
-
-        render();
       } catch (e) {
         boot.classList.remove("hidden");
         boot.textContent = "Couldn't connect to Worlds. Refresh to retry.";
