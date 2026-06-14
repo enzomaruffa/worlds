@@ -140,16 +140,20 @@ godrayPass = new ShaderPass({
       vec4 base = texture2D(tDiffuse, vUv);
       if (uIntensity <= 0.001) { gl_FragColor = base; return; }
       vec2 delta = (uSun - vUv) / 48.0 * 0.9;
-      vec2 uv = vUv; float decay = 1.0; vec3 acc = vec3(0.0);
+      // per-pixel jitter on the start step turns the marching banding (the striped
+      // "comb" beam) into invisible noise; higher threshold means only a star is
+      // bright enough to ray — the ship's own flame no longer smears into combs.
+      float jit = fract(sin(dot(vUv, vec2(12.9898, 78.233))) * 43758.5453);
+      vec2 uv = vUv + delta * jit; float decay = 1.0; vec3 acc = vec3(0.0);
       for (int i = 0; i < 48; i++) {
         uv += delta;
         vec3 s = texture2D(tDiffuse, uv).rgb;
         float b = max(s.r, max(s.g, s.b));
-        acc += s * smoothstep(0.55, 1.2, b) * decay;
+        acc += s * smoothstep(0.72, 1.3, b) * decay;
         decay *= 0.95;
       }
       acc /= 48.0;
-      gl_FragColor = base + vec4(acc * uColor * uIntensity * 2.2, 0.0);
+      gl_FragColor = base + vec4(acc * uColor * uIntensity * 1.8, 0.0);
     }`,
 });
 composer.addPass(godrayPass);
@@ -231,11 +235,15 @@ let starMat = null;
   scene.add(new THREE.Points(g, mat));
 }
 
-// ---------- the core: a black hole landmark at the edge of known space ----------
+// ---------- the core: a MASSIVE golden black hole at the edge of known space ----------
+// It pulls hard (BH_MASS), and crossing the event horizon (EH_R) doesn't kill you —
+// it spaghettifies you and spits you out at the home star (a wormhole shortcut home).
 const CORE_POS = new THREE.Vector3(-1500, 90, 1500);
+const BH_MASS = 36000;     // far heavier than any star — felt from ~600 units out
+const EH_R = 60;           // event-horizon radius: cross it → wormhole jump home
 let coreDisk = null;
 {
-  coreDisk = new THREE.Mesh(new THREE.RingGeometry(26, 72, 128, 1), new THREE.ShaderMaterial({
+  coreDisk = new THREE.Mesh(new THREE.RingGeometry(64, 230, 200, 1), new THREE.ShaderMaterial({
     side: THREE.DoubleSide, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
     uniforms: { uTime },
     vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
@@ -243,20 +251,28 @@ let coreDisk = null;
       varying vec2 vUv; uniform float uTime;
       void main(){
         vec2 c = vUv - 0.5; float ang = atan(c.y, c.x); float r = length(c) * 2.0;
-        float swirl = gfbm(vec3(cos(ang)*3.0, sin(ang)*3.0, r*5.0 - uTime*0.8));
-        vec3 hot = vec3(1.0,0.78,0.4), cool = vec3(0.55,0.2,0.85);
-        vec3 col = mix(hot, cool, smoothstep(0.0,1.0,r)) * (0.5 + 0.9*swirl);
-        float edge = smoothstep(0.0, 0.12, r-0.0) * smoothstep(1.0, 0.8, r);
-        gl_FragColor = vec4(col * edge * 1.6, edge);
+        float swirl = gfbm(vec3(cos(ang)*4.0, sin(ang)*4.0, r*6.0 - uTime*1.1));
+        // gold-hot inner accretion → deep amber outer (no violet — a golden hole)
+        vec3 hot = vec3(1.0,0.92,0.5), cool = vec3(1.0,0.5,0.1);
+        vec3 col = mix(hot, cool, smoothstep(0.0,1.0,r)) * (0.55 + 1.0*swirl);
+        float edge = smoothstep(0.0, 0.1, r) * smoothstep(1.0, 0.78, r);
+        gl_FragColor = vec4(col * edge * 2.3, edge);
       }`,
   }));
   coreDisk.position.copy(CORE_POS); coreDisk.rotation.set(Math.PI / 2 - 0.4, 0, 0.3);
   scene.add(coreDisk);
-  const eh = new THREE.Mesh(new THREE.SphereGeometry(22, 32, 32), new THREE.MeshBasicMaterial({ color: 0x000000 }));
+  const eh = new THREE.Mesh(new THREE.SphereGeometry(EH_R * 0.9, 48, 48), new THREE.MeshBasicMaterial({ color: 0x000000 }));
   eh.position.copy(CORE_POS); scene.add(eh);
-  const photon = new THREE.Mesh(new THREE.TorusGeometry(24, 0.8, 12, 96),
-    new THREE.MeshBasicMaterial({ color: 0xffe6b0, transparent: true, blending: THREE.AdditiveBlending }));
+  const photon = new THREE.Mesh(new THREE.TorusGeometry(EH_R, 2.2, 16, 180),
+    new THREE.MeshBasicMaterial({ color: 0xffe6a0, transparent: true, blending: THREE.AdditiveBlending }));
   photon.position.copy(CORE_POS); photon.rotation.set(Math.PI / 2 - 0.4, 0, 0.3); scene.add(photon);
+  // soft lensing glow so the hole reads as huge from across the map
+  const glow = new THREE.Mesh(new THREE.SphereGeometry(160, 24, 24), new THREE.MeshBasicMaterial({
+    color: 0xffb347, transparent: true, opacity: 0.07, blending: THREE.AdditiveBlending, depthWrite: false,
+  }));
+  glow.position.copy(CORE_POS); scene.add(glow);
+  const bhLight = new THREE.PointLight(0xffb84d, 900, 1200, 2);
+  bhLight.position.copy(CORE_POS); scene.add(bhLight);
 }
 
 // ---------- shooting stars / comets ----------
@@ -681,7 +697,7 @@ function makePlanet(site) {
 
   // planets orbit their category's star (biome stays a visual trait)
   const [px, , pz] = u.pos;
-  const orbitR = 78 + Math.hypot(px, pz) * 110; // clear the larger stars
+  const orbitR = 170 + Math.hypot(px, pz) * 200; // spread well clear of the stars — room to fly
   const angle = Math.atan2(pz, px) + rng() * 0.3;
   group.userData = { site, sys, orbitR, angle, speed: 0.016 / Math.sqrt(orbitR / 40), spin: 0.08 + rng() * 0.16, y: (rng() - 0.5) * 20, scaleIn: 0, spinner, clouds, bodyR: radius * 1.3, mass: radius * 1.4 };
   group.scale.setScalar(0.001);
@@ -1020,14 +1036,16 @@ function showCard(site) {
   loreEl.textContent = "✦ summoning lore…";
   loadLore(site).then((lore) => { if (cardSite && cardSite.name === site.name) loreEl.textContent = `✦ ${lore}`; });
 }
-// Leave a focused world: shove + turn the ship OUTWARD so you sail away instead of
-// straight back into the surface (otherwise gravity + your forward thrust trap you).
-function releaseFocus() {
+// Release a focused world. shove=true (LEAVING — thrust away) turns the ship OUTWARD
+// and pushes off so you sail away instead of straight back into the surface. shove=false
+// (CLOSING the card) just dismisses the panel and lets free-flight resume where you are —
+// no kick, no reorient (per design: closing ≠ leaving).
+function releaseFocus(shove = true) {
   card.style.display = "none";
   cardSite = null;
   const p = focusTarget;
   focusTarget = null;
-  if (!p) return;
+  if (!p || !shove) return;
   const out = ship.position.clone().sub(p.position);
   if (out.lengthSq() < 1e-4) out.set(0, 0, 1);
   out.normalize();
@@ -1035,7 +1053,27 @@ function releaseFocus() {
   yaw = Math.atan2(out.x, -out.z);
   pitch = Math.max(-0.5, Math.min(0.5, Math.asin(Math.max(-1, Math.min(1, out.y)))));
 }
-document.getElementById("cardClose").onclick = () => { flyTarget = null; releaseFocus(); };
+// Closing the card just dismisses it — doesn't shove you off the planet.
+document.getElementById("cardClose").onclick = () => { flyTarget = null; releaseFocus(false); };
+
+// Cross the black hole's event horizon → wormhole shortcut to the home star. No death,
+// just a flash + a jump back to the heart of the universe.
+function wormholeJump() {
+  const sun = SYSTEMS.misc.pos;
+  const dest = sun.clone().add(new THREE.Vector3(0, 50, SYSTEMS.misc.starR * 6 + 60));
+  ship.position.copy(dest);
+  vel.set(0, 0, 0);
+  flyTarget = null; focusTarget = null; following = null;
+  const dir = sun.clone().sub(dest).normalize();
+  yaw = Math.atan2(dir.x, -dir.z);
+  pitch = Math.max(-0.5, Math.min(0.5, Math.asin(Math.max(-1, Math.min(1, dir.y)))));
+  if (typeof flashEl !== "undefined" && flashEl) {
+    flashEl.style.opacity = "1";
+    setTimeout(() => { flashEl.style.opacity = "0"; }, 90);
+  }
+  warpSound();
+  toast("🌀 <b>spaghettified</b> — the wormhole spits you out at the home star");
+}
 
 // ---------- toasts ----------
 function toast(html, ms = 4200) {
@@ -1188,6 +1226,10 @@ const commsChannel = worlds.ws.channel("comms");
 const hud = document.getElementById("hud");
 const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
 let following = null;
+// persistent "you're following @x" badge so the follow feature is obvious
+const followBadge = document.createElement("div");
+followBadge.style.cssText = "position:absolute;bottom:18px;left:50%;transform:translateX(-50%);background:rgba(8,20,30,.92);border:1px solid #2563eb;border-radius:999px;padding:7px 15px;font:600 12px ui-monospace,monospace;color:#7dd3fc;pointer-events:none;display:none;white-space:nowrap;max-width:90vw;overflow:hidden;text-overflow:ellipsis;box-shadow:0 6px 20px rgba(0,0,0,.45)";
+hud.appendChild(followBadge);
 
 const bubbles = [];
 function showBubble(getPos, html, emote, ms) {
@@ -1484,6 +1526,7 @@ renderer.domElement.addEventListener("pointerdown", endIntro);
 const clock = new THREE.Clock();
 let lastThud = 0;
 let wasThrust = false;
+let wasFly = false;
 // reused scratch to avoid per-frame allocations in the hot loop
 const _forward = new THREE.Vector3(), _camGoal = new THREE.Vector3(), _camLook = new THREE.Vector3();
 const _pq = new THREE.Quaternion(), _back = new THREE.Vector3();
@@ -1533,6 +1576,11 @@ function tick() {
     yaw -= sx * 1.3 * dt;
     pitch = Math.max(-1.2, Math.min(1.2, pitch - sy * 1.3 * dt));
   }
+  // keyboard flight: WASD (A/D turn, W/S thrust+reverse) + R/F pitch + arrows — fly with no mouse
+  const kYaw = (keys.has("KeyA") || keys.has("ArrowLeft") ? 1 : 0) - (keys.has("KeyD") || keys.has("ArrowRight") ? 1 : 0);
+  if (kYaw) yaw += kYaw * 1.7 * dt;
+  const kPitch = (keys.has("KeyR") ? 1 : 0) - (keys.has("KeyF") ? 1 : 0);
+  if (kPitch) pitch = Math.max(-1.2, Math.min(1.2, pitch + kPitch * 1.4 * dt));
   // frozen-focus: ease the ship to face the world we clicked/warped to (cinematic)
   if (focusTarget && !dive) {
     _faceDir.subVectors(focusTarget.position, ship.position);
@@ -1594,17 +1642,21 @@ function tick() {
     if (driveAmt > 0.05) vel.addScaledVector(forward, 70 * driveAmt * dt);
     if (keys.has("KeyS") || keys.has("ArrowDown")) vel.addScaledVector(forward, -34 * dt);
     const G = 48, accel = new THREE.Vector3(), to = new THREE.Vector3();
-    const pullFrom = (pos, mass) => {
+    const pullFrom = (pos, mass, cap = 22, min = 36) => {
       to.subVectors(pos, ship.position);
-      const d2 = Math.max(to.lengthSq(), 36);
-      accel.addScaledVector(to.normalize(), Math.min((G * mass) / d2, 22));
+      const d2 = Math.max(to.lengthSq(), min);
+      accel.addScaledVector(to.normalize(), Math.min((G * mass) / d2, cap));
     };
     for (const b of starBodies) pullFrom(b.pos, b.mass);
     for (const g of planets.values()) pullFrom(g.position, g.userData.mass);
+    pullFrom(CORE_POS, BH_MASS, 75, 144);   // the black hole pulls hard, from far away
     vel.addScaledVector(accel, dt);
     vel.multiplyScalar(Math.exp(-0.85 * dt));
     ship.position.addScaledVector(vel, dt);
   }
+
+  // cross the event horizon → wormhole jump to the home star (a shortcut, not death)
+  if (!dive && ship.position.distanceTo(CORE_POS) < EH_R + shipRadius) wormholeJump();
 
   // collisions: stars and planets are solid (skip while diving through one)
   let hit = false;
@@ -1687,9 +1739,21 @@ function tick() {
   }
   if (thrust && !wasThrust) playSfx("thrust", 0.4);
   wasThrust = thrust;
+  // FTL: an active jump (flyTarget) forces the star-streak on; fast manual flight ramps it too.
+  if (flyTarget && !wasFly) { if (flashEl) { flashEl.style.opacity = "0.6"; setTimeout(() => { flashEl.style.opacity = "0"; }, 120); } }
+  wasFly = !!flyTarget;
   if (starMat) {
-    const targetWarp = Math.max(0, Math.min((speed - 110) / 260, 1)); // only on fast jumps
-    starMat.uniforms.uWarp.value += (targetWarp - starMat.uniforms.uWarp.value) * Math.min(1, dt * 4);
+    const targetWarp = flyTarget ? 1 : Math.max(0, Math.min((speed - 110) / 260, 1));
+    const rate = flyTarget ? 9 : 4;
+    starMat.uniforms.uWarp.value += (targetWarp - starMat.uniforms.uWarp.value) * Math.min(1, dt * rate);
+  }
+  // follow badge: visible while trailing another pilot; clears if they leave
+  if (following && pilots.get(following)) {
+    followBadge.style.display = "block";
+    followBadge.innerHTML = `▸ following <b>@${esc(pilots.get(following).group.userData.handle)}</b> · tap empty space to break off`;
+  } else {
+    if (following && !pilots.get(following)) following = null;
+    followBadge.style.display = "none";
   }
 
   // other pilots: broadcast mine, glide theirs toward their last report
