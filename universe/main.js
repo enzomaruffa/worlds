@@ -1760,28 +1760,44 @@ function tick() {
   // cross the event horizon → wormhole jump to the home star (a shortcut, not death)
   if (!dive && ship.position.distanceTo(CORE_POS) < EH_R + shipRadius) wormholeJump();
 
-  // collisions: stars and planets are solid (skip while diving through one)
-  let hit = false;
+  // soft collisions: every body is wrapped in a cushion shell — a repulsor field that
+  // eases you to a stop before the surface — instead of a hard wall that snaps your
+  // position and kicks you back. softHit (0→1) tracks how deep into the cushion you are
+  // (drives a gentle shield glow); a true surface contact gives a small shake + thud.
+  let softHit = 0, hardHit = false;
   if (!dive) {
-    const push = new THREE.Vector3();
     const resolve = (pos, surf) => {
-      push.subVectors(ship.position, pos);
-      const dist = push.length() || 1e-3;
-      if (dist < surf) {
-        push.multiplyScalar(1 / dist);
-        ship.position.copy(pos).addScaledVector(push, surf);
-        const into = vel.dot(push);
-        if (into < 0) vel.addScaledVector(push, -into * 1.5); // cancel inward + bounce
+      _push.subVectors(ship.position, pos);
+      const dist = _push.length() || 1e-3;
+      const cushion = Math.max(4, Math.min(30, surf * 0.18)); // soft shell thickness
+      const soft = surf + cushion;
+      if (dist >= soft) return;
+      _push.multiplyScalar(1 / dist);          // outward unit normal
+      const pen = (soft - dist) / cushion;     // 0 at shell edge → 1 at surface → >1 inside
+      const into = vel.dot(_push);             // < 0 ⇒ heading into the body
+      if (dist > surf) {
+        // inside the cushion: a gentle spring nudges you out and bleeds inward speed —
+        // no snap, no thud. Ramps with pen² so the shell edge is feather-soft.
+        const k = pen * pen;
+        vel.addScaledVector(_push, k * 100 * dt);                   // soft repulsor (beats gravity)
+        if (into < 0) vel.addScaledVector(_push, -into * k * 0.6);  // ease away inward motion
+        softHit = Math.max(softHit, Math.min(1, pen));
+      } else {
+        // punched through (came in hot): ease back to the surface and zero the inward
+        // component — no rebound, so you slide along the surface instead of pinging off.
+        ship.position.lerp(_collTmp.copy(pos).addScaledVector(_push, surf), 1 - Math.exp(-14 * dt));
+        if (into < 0) vel.addScaledVector(_push, -into);
         flyTarget = null;
-        hit = true;
+        softHit = 1; hardHit = true;
       }
     };
     for (const b of starBodies) resolve(b.pos, b.r * 1.1 + shipRadius);
     for (const g of planets.values()) resolve(g.position, g.userData.bodyR + shipRadius);
   }
-  if (hit && shieldMesh) {
-    shieldMesh.material.uniforms.uHit.value = 1.0;
-    camShake = Math.max(camShake, 0.7);
+  // shield shimmers as it absorbs the cushion; only a real surface hit shakes + thuds (gently now)
+  if (shieldMesh && softHit > 0.001) shieldMesh.material.uniforms.uHit.value = Math.max(shieldMesh.material.uniforms.uHit.value, softHit);
+  if (hardHit) {
+    camShake = Math.max(camShake, 0.22);
     if (t - lastThud > 0.35) { thud(); lastThud = t; }
   }
   if (shieldMesh) shieldMesh.material.uniforms.uHit.value *= Math.exp(-6 * dt);
