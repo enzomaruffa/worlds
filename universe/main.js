@@ -114,12 +114,18 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 0.85;
 document.body.appendChild(renderer.domElement);
 
-const composer = new EffectComposer(renderer);
+// Post-processing (bloom + god rays + tone-map). Guarded: Safari's stricter WebGL
+// (float render targets / GLSL) can throw here; if so we fall back to a plain render
+// so the universe still loads (just without the glow) instead of going blank.
+let composer = null;
+let godrayPass = null;
+try {
+composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
 composer.addPass(new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.5, 0.7, 0.85));
 
 // shader-based volumetric god rays (radial light scatter from the nearest star)
-const godrayPass = new ShaderPass({
+godrayPass = new ShaderPass({
   uniforms: {
     tDiffuse: { value: null },
     uSun: { value: new THREE.Vector2(0.5, 0.5) },
@@ -148,6 +154,11 @@ const godrayPass = new ShaderPass({
 });
 composer.addPass(godrayPass);
 composer.addPass(new OutputPass()); // tone-maps + sRGB at the very end (single pass)
+} catch (e) {
+  console.warn("postprocessing unavailable — plain render fallback (Safari?):", e);
+  composer = null;
+  godrayPass = null;
+}
 
 scene.add(new THREE.HemisphereLight(0x404a66, 0x080810, 1.4));
 
@@ -1725,7 +1736,7 @@ function tick() {
   updateNav();
 
   // ---- god rays aimed at the nearest on-screen star ----
-  {
+  if (godrayPass) {
     let near = null, nd = Infinity;
     for (const b of starBodies) { const d = camera.position.distanceTo(b.pos); if (d < nd) { nd = d; near = b; } }
     let gi = 0;
@@ -1770,7 +1781,11 @@ function tick() {
   updateBubbles();
   updateCompass(forward);
 
-  composer.render();
+  if (composer) {
+    try { composer.render(); }
+    catch (e) { console.warn("composer.render failed — switching to plain render:", e); composer = null; }
+  }
+  if (!composer) renderer.render(scene, camera);
   requestAnimationFrame(tick);
 }
 tick();
@@ -1779,5 +1794,5 @@ addEventListener("resize", () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
-  composer.setSize(innerWidth, innerHeight);
+  if (composer) composer.setSize(innerWidth, innerHeight);
 });
