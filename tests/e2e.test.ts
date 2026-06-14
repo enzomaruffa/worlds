@@ -271,7 +271,7 @@ describe("platform surfaces", () => {
 
   test("loaders are served with the contract cache headers", async () => {
     const evergreen = await req("GET", "/worlds.js", { site: "home" });
-    expect(evergreen.headers.get("cache-control")).toBe("max-age=300");
+    expect(evergreen.headers.get("cache-control")).toBe("no-store");
     const pinned = await req("GET", "/v1/worlds.js", { site: "home" });
     expect(pinned.headers.get("cache-control")).toContain("immutable");
   });

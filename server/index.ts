@@ -59,7 +59,10 @@ function loader(file: string, immutable: boolean): Promise<Response | null> {
       ? new Response(f, {
           headers: {
             "content-type": "text/javascript; charset=utf-8",
-            "cache-control": immutable ? "public, max-age=31536000, immutable" : "max-age=300",
+            // Evergreen /worlds.js is no-store so a new SDK reaches every site
+            // immediately (Cloudflare rewrites a .js max-age to a multi-hour edge
+            // TTL but honors no-store) — sites that need to pin use /v1/worlds.js.
+            "cache-control": immutable ? "public, max-age=31536000, immutable" : "no-store",
           },
         })
       : null,
