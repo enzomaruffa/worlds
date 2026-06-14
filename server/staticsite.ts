@@ -2,17 +2,39 @@ import { join } from "node:path";
 import { store, type Stored } from "./blobstore";
 import { spaFallback } from "./sites";
 
-// Caching contract (docs/PLAN.md Q2): HTML no-cache + ETag so overwrite-deploys
-// show immediately; other assets get a short stale-while-revalidate window.
-function respond(req: Request, path: string, st: Stored): Response {
-  const isHtml = path.endsWith(".html") || path.endsWith("/");
-  const etag = `"${st.size.toString(16)}-${Math.floor(st.mtime / 1000).toString(16)}"`;
-  const res = new Response(st.body, {
-    headers: {
-      etag,
-      "cache-control": isHtml ? "no-cache" : "max-age=60, stale-while-revalidate=600",
-    },
-  });
+// Caching: code/text (html/js/css/…) gets `no-cache` (revalidate every load) so
+// overwrite-deploys propagate INSTANTLY; a CONTENT-HASH ETag keeps that cheap —
+// unchanged bytes 304 even across redeploys, so nothing re-downloads (e.g. the
+// 1.3MB vendored three.js). Binary media (rarely changes) gets a real max-age.
+// NOTE: Cloudflare's Browser-Cache-TTL can rewrite a max-age but respects no-cache.
+const REVALIDATE = /\.(html?|js|mjs|css|json|svg|txt|md|map|xml|webmanifest)$/i;
+function cacheControl(path: string): string {
+  return path.endsWith("/") || REVALIDATE.test(path) ? "no-cache" : "public, max-age=3600";
+}
+
+// Content-hash ETags, memoized by (size,mtime) so the hash is computed once per
+// file version. Re-readable bodies (BunFile/Blob) hash their bytes; streams fall
+// back to size+mtime (still correct, just re-downloads unchanged files on redeploy).
+const etagCache = new Map<string, { mtime: number; size: number; etag: string }>();
+async function etagFor(key: string, st: Stored): Promise<string> {
+  const c = etagCache.get(key);
+  if (c && c.mtime === st.mtime && c.size === st.size) return c.etag;
+  let etag = `"${st.size.toString(16)}-${Math.floor(st.mtime / 1000).toString(16)}"`;
+  const body = st.body as { arrayBuffer?: () => Promise<ArrayBuffer> };
+  if (typeof body.arrayBuffer === "function") {
+    try {
+      etag = `"${Bun.hash(await body.arrayBuffer()).toString(16)}"`;
+    } catch {
+      /* keep the size+mtime fallback */
+    }
+  }
+  etagCache.set(key, { mtime: st.mtime, size: st.size, etag });
+  return etag;
+}
+
+async function respond(req: Request, site: string, path: string, st: Stored): Promise<Response> {
+  const etag = await etagFor(`${site}:${path}`, st);
+  const res = new Response(st.body, { headers: { etag, "cache-control": cacheControl(path) } });
   return checkEtag(req, res);
 }
 
@@ -31,7 +53,7 @@ export async function serveSite(req: Request, site: string, pathname: string): P
 
   const tryServe = async (p: string): Promise<Response | null> => {
     const st = await store.readSite(site, p);
-    return st ? respond(req, p, st) : null;
+    return st ? await respond(req, site, p, st) : null;
   };
 
   let res = await tryServe(path);
