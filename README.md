@@ -25,8 +25,15 @@ const { text } = await worlds.ai.complete("…");       // Gemini, server-side k
 await worlds.ai.complete({ prompt, stream: true, onToken: t => append(t) });  // streaming
 const { url }  = await worlds.uploads.put(file);      // file storage
 worlds.ws.channel("room").publish({ x, y });          // multiplayer pub/sub
+worlds.lobby("room", { onStart: begin });             // waiting room: roster, host, ready, auto-start
+const board = worlds.room("connect4");                // one shared, live, conflict-guarded doc
 await worlds.notify.slack("#data", "dashboard is red");
+worlds.toast("saved!"); worlds.colorFor(handle);      // batteries: toast, color-from-handle, id, esc…
 ```
+
+The example sites under `examples/games/` (connect4, trivia, spyfall, racing, paint-arena,
+red-light, draw-guess, hangout, quick-poll) are the reference implementations of these
+primitives — read them to see `worlds.lobby` + `worlds.room` in real multiplayer use.
 
 The homepage ships as a **3D universe** — every site is a planet you can fly through.
 It's just a Worlds site built on the public SDK (`universe/`).
