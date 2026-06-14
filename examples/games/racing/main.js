@@ -136,6 +136,23 @@ scene.fog = new THREE.Fog(0x9ad0e8, 180, 420);
 const camera = new THREE.PerspectiveCamera(62, 1, 0.1, 1000);
 camera.position.set(0, 12, 80);
 
+// chase-camera zoom — mouse wheel (desktop) / pinch (touch). 1 = default.
+let camZoom = 1;
+addEventListener("wheel", (e) => {
+  e.preventDefault();
+  camZoom = Math.max(0.6, Math.min(2.6, camZoom * (e.deltaY > 0 ? 1.1 : 0.9)));
+}, { passive: false });
+let _pinchD = 0;
+addEventListener("touchmove", (e) => {
+  if (e.touches.length === 2) {
+    const d = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+    if (_pinchD) camZoom = Math.max(0.6, Math.min(2.6, camZoom * (_pinchD / d)));
+    _pinchD = d;
+    e.preventDefault();
+  }
+}, { passive: false });
+addEventListener("touchend", () => { _pinchD = 0; });
+
 // Gradient sky via a large back-faced sphere with a vertical-fade shader.
 {
   const skyGeo = new THREE.SphereGeometry(500, 24, 16);
@@ -524,8 +541,8 @@ function makeLabel(text) {
   const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false, depthWrite: false, transparent: true });
   const sprite = new THREE.Sprite(mat);
   const aspect = cv.width / cv.height;
-  sprite.scale.set(2.6 * aspect, 2.6, 1);
-  sprite.position.y = 3.0;
+  sprite.scale.set(1.15 * aspect, 1.15, 1);
+  sprite.position.y = 2.5;
   sprite.renderOrder = 10;
   return sprite;
 }
@@ -896,8 +913,8 @@ function updateCamera(dt) {
   const fz = Math.cos(player.heading);
   // chase position: behind + above the kart
   const speedZoom = 1 + Math.min(1, Math.abs(player.vel) / PHYS.maxSpeed) * 0.4;
-  const back = 9.5 * speedZoom;
-  const height = 5.2;
+  const back = 10.5 * speedZoom * camZoom;
+  const height = 4 + 2.2 * camZoom;
   tmpCamPos.set(
     player.pos.x - fx * back,
     height,
