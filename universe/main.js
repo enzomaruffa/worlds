@@ -422,11 +422,11 @@ function updateShootingStars(dt) {
 // ---------- star systems: one star per site CATEGORY, hello.world at the center ----------
 // (biome stays a per-planet visual trait; the system you orbit is what your site is FOR)
 const SYSTEMS = {
-  misc:        { title: "home",            tag: "the heart of it all",     pos: new THREE.Vector3(0, 0, 0),         hot: 0xffd84d, deep: 0xf25a05, starR: 40 },
-  games:       { title: "the arcade",      tag: "where games are born",    pos: new THREE.Vector3(760, 30, -240),   hot: 0xff8ad8, deep: 0x86198f, starR: 32 },
-  work:        { title: "mission control", tag: "mission-critical orbit",  pos: new THREE.Vector3(-760, -40, -320), hot: 0xdff1ff, deep: 0x1d4ed8, starR: 32 },
-  tools:       { title: "the workshop",    tag: "forge of useful things",  pos: new THREE.Vector3(240, 55, 820),    hot: 0xffd27a, deep: 0xb45309, starR: 32 },
-  experiments: { title: "the lab",         tag: "here be dragons",         pos: new THREE.Vector3(-340, -20, 780),  hot: 0x9affe2, deep: 0x0f766e, starR: 32 },
+  misc:        { title: "home",            tag: "the heart of it all",     pos: new THREE.Vector3(0, 0, 0),         hot: 0xffd84d, deep: 0xf25a05, starR: 40, codex: "Where the first signal was lit. Every road in the sky still bends quietly back toward it." },
+  games:       { title: "the arcade",      tag: "where games are born",    pos: new THREE.Vector3(760, 30, -240),   hot: 0xff8ad8, deep: 0x86198f, starR: 32, codex: "A perpetual festival-belt whose citizens insist that losing is merely a slower kind of winning." },
+  work:        { title: "mission control", tag: "mission-critical orbit",  pos: new THREE.Vector3(-760, -40, -320), hot: 0xdff1ff, deep: 0x1d4ed8, starR: 32, codex: "Run on tides of quarterly ritual. Nothing launches here without three blessings and a checklist." },
+  tools:       { title: "the workshop",    tag: "forge of useful things",  pos: new THREE.Vector3(240, 55, 820),    hot: 0xffd27a, deep: 0xb45309, starR: 32, codex: "A forge-cluster of tinkerers. Half their inventions exist only to help build the other half." },
+  experiments: { title: "the lab",         tag: "here be dragons",         pos: new THREE.Vector3(-340, -20, 780),  hot: 0x9affe2, deep: 0x0f766e, starR: 32, codex: "A quarantined reactor-belt where unfinished physics is left running overnight. The dragons, they insist, are a feature." },
 };
 
 function makeStar(sys, name) {
@@ -477,7 +477,7 @@ function makeStar(sys, name) {
   light.position.copy(sys.pos);
   scene.add(light);
 
-  starBodies.push({ pos: sys.pos.clone(), r: sys.starR, mass: sys.starR * 9, hot: sys.hot });
+  starBodies.push({ pos: sys.pos.clone(), r: sys.starR, mass: sys.starR * 9, hot: sys.hot, title: sys.title, tag: sys.tag, codex: sys.codex });
 }
 const starBodies = [];
 // declared before the makeStar() calls below — makeStar → label → _labelTextures,
@@ -1096,22 +1096,85 @@ function pick(cx, cy) {
   warpSound();
 }
 
-// AI-generated "civilization lore" per world (worlds.ai, with a local fallback).
-// Generated once, then persisted in our own worlds.db so every later visit — and
-// every other pilot — reads it back instead of re-billing Gemini. Regenerates only
-// if the underlying site's description changes.
+// AI-generated "civilization lore" per world (worlds.ai, with a rich local fallback).
+// Generated once, then persisted in our own worlds.db so every later visit — and every
+// other pilot — reads it back instead of re-billing the model. Each entry has three parts:
+// a civilization name, one vivid biome-aware sentence, and a quirky local custom.
+// Regenerates only if the underlying site's description changes.
 const loreCache = new Map();
 const loreStore = worlds.db.collection("lore");
+
+// cheap deterministic string hash → stable-but-varied fallback picks per world
+function loreHash(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
+
+// fallback civ names keyed by the planet's biome (so the people match the world you see)
+const LORE_BIOME = {
+  lush:        { civ: ["The Verdant Choir", "The Moss-Weavers", "The Canopy-Kin", "The Green-Blooded"] },
+  desert:      { civ: ["The Dune-Wardens", "The Glasslight Caravans", "The Sun-Parched", "The Mirage-Smiths"] },
+  ice:         { civ: ["The Frostbound", "The Pale Cartographers", "The Rime-Singers", "The Glacier-Keepers"] },
+  volcanic:    { civ: ["The Ember Choir", "The Forge-Kin", "The Ashwalkers", "The Cinder-Smiths"] },
+  archipelago: { civ: ["The Tide-Readers", "The Reef-Builders", "The Saltborn", "The Lantern-Fishers"] },
+};
+const LORE_BY = {
+  games: [
+    "a restless world of arcade-cantinas where the locals never stop playing",
+    "a neon carnival-moon that keeps score of absolutely everything, including sleep",
+    "a planet of perpetual tournaments where the losers write the next set of rules",
+  ],
+  work: [
+    "a disciplined colony of dashboard-temples that runs on quarterly tides",
+    "a world of orderly spires where every citizen owns at least one checklist",
+    "a clockwork settlement that schedules its sunrises a full sprint in advance",
+  ],
+  tools: [
+    "tinkerer-clans forge small useful miracles in its orbital workshops",
+    "a planet of patient artificers who fix things that were never quite broken",
+    "a world held together by clever brackets and a great deal of well-loved tape",
+  ],
+  experiments: [
+    "an unstable world where the laws of physics are still politely under review",
+    "a planet that reboots its own gravity whenever the locals get bored",
+    "a frontier lab-world where every sunset is, technically, a prototype",
+  ],
+  misc: [
+    "a frontier settlement that proudly refuses to fit into any category",
+    "a wandering world that changed its mind about what it wanted to be",
+    "an oddball colony that files itself under 'miscellaneous' with enormous pride",
+  ],
+};
+const LORE_CUSTOM = [
+  "every deploy is announced with a small, sincere song",
+  "they bury their bugs at sea and never speak of them again",
+  "newcomers are gifted a name and a slightly broken tool",
+  "they keep time by how often the home star blinks",
+  "all disputes are settled by a friendly game and a long, fond silence",
+  "they leave one light on for travelers who haven't shipped yet",
+  "the calendar has thirteen Fridays and no Mondays at all",
+  "elders are simply whoever has kept a tab open the longest",
+];
+
 function localLore(site) {
-  const by = {
-    games: "A restless world of arcade-cantinas where the locals never stop playing.",
-    work: "A disciplined colony of dashboard-temples that runs on quarterly tides.",
-    tools: "Tinkerer-clans forge small useful miracles in its orbital workshops.",
-    experiments: "An unstable world where the laws of physics are still under review.",
-    misc: "A frontier settlement that proudly refuses to fit any category.",
+  const biome = site.universe?.biome || "lush";
+  const b = LORE_BIOME[biome] ?? LORE_BIOME.lush;
+  const cat = LORE_BY[site.category] ? site.category : "misc";
+  const h = loreHash(site.name || "world");
+  const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+  return {
+    civ: `${b.civ[h % b.civ.length]} of ${site.name}.world`,
+    lore: cap(LORE_BY[cat][(h >>> 3) % LORE_BY[cat].length]) + ".",
+    custom: LORE_CUSTOM[(h >>> 7) % LORE_CUSTOM.length],
   };
-  return by[site.category] || by.misc;
 }
+
+// parse the model's three-line reply into {civ, lore, custom}; tolerant of labels/quotes/bullets
+function parseLore(text) {
+  const lines = String(text).split("\n").map((l) =>
+    l.trim().replace(/^(line\s*\d+\s*[:.)\-]*|[-*•]\s*|\d+\s*[:.)\-]\s*)/i, "").replace(/^["']|["']$/g, "").trim()
+  ).filter(Boolean);
+  if (lines.length < 2) return null;
+  return { civ: lines[0], lore: lines[1], custom: lines[2] || "" };
+}
+
 async function loadLore(site) {
   if (loreCache.has(site.name)) return loreCache.get(site.name);
   const desc = site.description || "";
@@ -1121,21 +1184,26 @@ async function loadLore(site) {
     stored = (await loreStore.list({ filter: { site: site.name }, limit: 1 })).items[0];
   } catch { /* db unavailable → just generate */ }
   if (stored && stored.data.lore && stored.data.desc === desc) {
-    loreCache.set(site.name, stored.data.lore);
-    return stored.data.lore;
+    // structured records read straight back; legacy (sentence-only) records keep their AI
+    // sentence and borrow a civ + custom from the local pool so the card still fills out.
+    const d = stored.data;
+    const out = d.civ ? { civ: d.civ, lore: d.lore, custom: d.custom || "" } : { ...localLore(site), lore: d.lore };
+    loreCache.set(site.name, out);
+    return out;
   }
 
-  let lore = "";
+  let lore = null;
   try {
+    const biome = site.universe?.biome || "lush";
     const res = await worlds.ai.complete({
-      prompt: `In one vivid sci-fi sentence (max 18 words), describe the fictional civilization on a planet representing this internal tool. Name: ${site.name}. Category: ${site.category}. About: ${desc || "unknown"}. Playful, no preamble.`,
-      model: "fast", max_tokens: 60,
+      prompt: `Invent lore for a planet representing an internal tool, on a ${biome} world. Name: ${site.name}. Category: ${site.category}. About: ${desc || "unknown"}.\nReturn exactly three lines, no labels, no numbering, no quotes:\n1) the civilization's name (2-4 words, evocative)\n2) one vivid, playful sci-fi sentence about them (max 18 words)\n3) one quirky local custom (max 12 words)`,
+      model: "fast", max_tokens: 110,
     });
-    lore = (res.text || "").trim().replace(/^["']|["']$/g, "");
+    lore = parseLore(res.text || "");
   } catch { /* fall back, don't persist */ }
 
   if (lore) {
-    const rec = { site: site.name, desc, lore };
+    const rec = { site: site.name, desc, civ: lore.civ, lore: lore.lore, custom: lore.custom };
     (stored ? loreStore.replace(stored.id, rec) : loreStore.create(rec)).catch(() => {});
   } else {
     lore = localLore(site);
@@ -1156,7 +1224,12 @@ function showCard(site) {
   v.textContent = "dive in →";
   const loreEl = document.getElementById("cardLore");
   loreEl.textContent = "✦ summoning lore…";
-  loadLore(site).then((lore) => { if (cardSite && cardSite.name === site.name) loreEl.textContent = `✦ ${lore}`; });
+  loadLore(site).then((L) => {
+    if (!(cardSite && cardSite.name === site.name)) return;
+    loreEl.innerHTML =
+      `<span class="loreCiv">${esc(L.civ)}</span>✦ ${esc(L.lore)}` +
+      (L.custom ? `<span class="loreCustom">⚙ ${esc(L.custom)}</span>` : "");
+  });
 }
 // Release a focused world. shove=true (LEAVING — thrust away) turns the ship OUTWARD
 // and pushes off so you sail away instead of straight back into the surface. shove=false
@@ -1194,16 +1267,104 @@ function wormholeJump() {
     setTimeout(() => { flashEl.style.opacity = "0"; }, 90);
   }
   warpSound();
-  toast("🌀 <b>spaghettified</b> — the wormhole spits you out at the home star");
+  toast(`🌀 <b>${randOf(["spaghettified", "folded sideways", "unwound", "compressed", "politely disassembled"])}</b> — the wormhole spits you out at the home star`);
 }
 
 // ---------- toasts ----------
-function toast(html, ms = 4200) {
+// opts.wide → a roomier, wrapping card (sits just under the compass) for multi-line
+// lore like codex entries and intercepted transmissions; default is the slim ellipsised pill.
+function toast(html, ms = 4200, opts = {}) {
   const el = document.createElement("div");
-  el.style.cssText = "position:absolute;top:14px;left:50%;transform:translateX(-50%);background:rgba(16,16,18,.92);border:1px solid #3f3f46;border-radius:999px;padding:8px 16px;font:12px ui-monospace,monospace;color:#e4e4e7;pointer-events:none;transition:opacity .4s;white-space:nowrap;max-width:90vw;overflow:hidden;text-overflow:ellipsis";
+  el.style.cssText = opts.wide
+    ? "position:absolute;top:46px;left:50%;transform:translateX(-50%);background:rgba(14,14,18,.94);border:1px solid #3f3f46;border-radius:12px;padding:9px 16px;font:11.5px/1.5 ui-monospace,monospace;color:#e4e4e7;pointer-events:none;transition:opacity .4s;max-width:min(440px,86vw);text-align:center"
+    : "position:absolute;top:14px;left:50%;transform:translateX(-50%);background:rgba(16,16,18,.92);border:1px solid #3f3f46;border-radius:999px;padding:8px 16px;font:12px ui-monospace,monospace;color:#e4e4e7;pointer-events:none;transition:opacity .4s;white-space:nowrap;max-width:90vw;overflow:hidden;text-overflow:ellipsis";
   el.innerHTML = html;
   document.getElementById("hud").appendChild(el);
   setTimeout(() => { el.style.opacity = "0"; setTimeout(() => el.remove(), 400); }, ms);
+}
+// pick a random element (named randOf so it never collides with the raycaster pick())
+const randOf = (a) => a[Math.floor(Math.random() * a.length)];
+
+// ---------- star-system codex: a short lore blurb the first time you drift near a star ----------
+let nearSystem = null; // title of the system the ship is currently inside (debounces re-fires)
+function updateCodex() {
+  let inRange = null;
+  for (const b of starBodies) {
+    // generous radius: stars sit ~800u apart, and the "warp here" vantage parks you at
+    // starR*6, so starR*8 reliably triggers on arrival without ever overlapping neighbours.
+    if (ship.position.distanceTo(b.pos) < b.r * 8) { inRange = b; break; }
+  }
+  const key = inRange?.title ?? null;
+  if (key === nearSystem) return;
+  nearSystem = key;
+  if (inRange && inRange.codex && !introActive && !cardSite) {
+    const c = `#${new THREE.Color(inRange.hot).getHexString()}`;
+    toast(
+      `<b style="color:${c};letter-spacing:.06em">✦ ${esc(inRange.title.toUpperCase())}</b> · <i style="color:#a1a1aa">${esc(inRange.tag)}</i><br><span style="color:#c4b5fd">${esc(inRange.codex)}</span>`,
+      6500, { wide: true },
+    );
+  }
+}
+
+// ---------- ambient "intercepted transmissions": flavor chatter that drifts in over time ----------
+// Mostly a curated pool (free, instant), templated with real world/pilot names. ~1 in 5 is a
+// fresh AI line about a real world — cached to worlds.db so we never re-bill for the same world.
+const TRANSMISSIONS = [
+  "the {world} relay insists its reactor is 'fine, probably' — telemetry strongly disagrees",
+  "intercepted: {world} has formally declared its coffee supply a strategic resource",
+  "distress ping from {world}: 'we shipped it. send snacks. send help.'",
+  "navigation buoy: mind the gravity wells near {world}, they have opinions",
+  "{world} is broadcasting its changelog on every frequency again. nobody can stop them",
+  "weather over {world}: scattered outages, clearing into a heroic patch by dusk",
+  "trade notice: {world} will swap one (1) elegant abstraction for any working duct tape",
+  "{world} reports its tests are green. the tests report otherwise. an inquiry is ongoing",
+  "lost & found near {world}: one semicolon, lightly used, surprisingly important",
+  "rumor from {world}: the staging moon achieved sentience and immediately asked for a raise",
+  "{pilot} was last seen orbiting {world}, transmitting nothing but extremely confident jazz",
+  "all pilots: {pilot} is doing loops near {world} again. wave if you pass",
+  "long-range scan: a new star is forming somewhere out past the workshop belt",
+  "reminder from mission control: a deploy is a promise you make to your future self",
+  "the lab requests that everyone please stop poking the experimental gravity. it remembers",
+  "the arcade has extended happy hour to all hours. this is now simply 'the hour'",
+];
+const txStore = worlds.db.collection("transmission");
+const txCache = new Map();
+async function transmissionFor(world) {
+  if (txCache.has(world)) return txCache.get(world);
+  try {
+    const stored = (await txStore.list({ filter: { world }, limit: 1 })).items[0];
+    if (stored?.data?.tx) { txCache.set(world, stored.data.tx); return stored.data.tx; }
+  } catch { /* db down → just generate */ }
+  const res = await worlds.ai.complete({
+    prompt: `Write one short intercepted radio transmission overheard from the planet "${world}.world" in a playful sci-fi galaxy. Max 16 words. In-universe, no preamble, no quotes.`,
+    model: "fast", max_tokens: 40,
+  });
+  const tx = (res.text || "").trim().replace(/^["']|["']$/g, "");
+  if (tx) { txCache.set(world, tx); txStore.create({ world, tx }).catch(() => {}); }
+  return tx;
+}
+const txWorld = () => { const n = [...planets.keys()]; return n.length ? `${randOf(n)}.world` : "an unnamed world"; };
+const txPilot = () => { const p = [...pilots.values()]; return p.length ? `@${p[Math.floor(Math.random() * p.length)].group.userData.handle}` : "a silent pilot"; };
+function showTx(text) { toast(`📡 <span style="color:#7dd3fc">intercepted transmission</span><br><span style="color:#cbd5e1">${esc(text)}</span>`, 6500, { wide: true }); }
+async function emitTransmission() {
+  // occasionally splurge on a fresh AI line about a real world (cached so it's a one-time cost)
+  if (Math.random() < 0.2 && planets.size) {
+    try {
+      const w = randOf([...planets.keys()]);
+      const tx = await transmissionFor(w);
+      if (tx) return showTx(tx);
+    } catch { /* fall through to the curated pool */ }
+  }
+  const line = randOf(TRANSMISSIONS).replaceAll("{world}", txWorld()).replaceAll("{pilot}", txPilot());
+  showTx(line);
+}
+let nextTx = 35 + Math.random() * 30; // first transmission lands ~35–65s in
+function updateTransmissions(dt) {
+  if (introActive || cardSite || nearSystem) return; // don't talk over the intro / a card / a codex
+  nextTx -= dt;
+  if (nextTx > 0) return;
+  nextTx = 55 + Math.random() * 45; // then every ~55–100s
+  emitTransmission();
 }
 
 // ---------- live deploy supernova (dogfoods worlds.db realtime) ----------
@@ -1272,7 +1433,7 @@ worlds.db.site("home").collection("sites").subscribe((ev) => {
     spawnNova(pos, sys.hot);
     playSfx("warp", 0.6);
   }, 80);
-  toast(`✦ <b style="color:#e5a00d">@${ev.doc.creator?.handle ?? "someone"}</b> just launched <b style="color:#e5a00d">${ev.doc.name}.world</b>`);
+  toast(`✦ <b style="color:#e5a00d">@${ev.doc.creator?.handle ?? "someone"}</b> just launched <b style="color:#e5a00d">${ev.doc.name}.world</b> — ${randOf(["the sky gained a star", "a new world ignites", "another light in the dark", "the galaxy just got bigger"])}`);
 });
 
 // ---------- other pilots, live over worlds.ws ----------
@@ -1327,7 +1488,7 @@ shipsChannel.subscribe((msg) => {
     pilots.set(key, p);
     rosterDirty = true;
     updatePilotCount();
-    toast(`▸ <b style="color:#7dd3fc">@${esc(msg.from.handle)}</b> entered the universe`);
+    toast(`▸ <b style="color:#7dd3fc">@${esc(msg.from.handle)}</b> ${randOf(["entered the universe", "dropped out of warp", "materialized from the void", "took the helm", "is now adrift among the stars"])}`);
   }
   p.target = { p: d.p, q: d.q };
   p.seen = performance.now();
@@ -1385,7 +1546,7 @@ function dropBeacon(pos, who) {
     new THREE.MeshBasicMaterial({ color: 0xe5a00d, transparent: true, opacity: 0.3, blending: THREE.AdditiveBlending }));
   beam.position.copy(pos).add(new THREE.Vector3(0, 70, 0)); scene.add(beam);
   beacons.push({ ring, beam, pos: pos.clone(), who, t: 0 });
-  toast(`⚑ <b style="color:#e5a00d">@${who}</b> pinged a spot — follow the beam`);
+  toast(`⚑ <b style="color:#e5a00d">@${who}</b> ${randOf(["pinged a spot — follow the beam", "dropped a beacon — come see", "marked coordinates — follow the light", "lit a flare in the dark"])}`);
 }
 function updateBeacons(dt) {
   for (let i = beacons.length - 1; i >= 0; i--) {
@@ -1695,6 +1856,8 @@ function tick() {
   updateShootingStars(dt);
   updateBeacons(dt);
   updateNovas(dt);
+  updateCodex();
+  updateTransmissions(dt);
 
   // joystick steers (with a deadzone, gentler gain); drag-look + keys also steer
   if (joy.active) {
@@ -1941,7 +2104,7 @@ function tick() {
       showBubble(() => p.group.position, "🤝", true, 1800);
       spawnNova(p.group.position.clone().lerp(ship.position, 0.5), p.color.getHex());
       playSfx("select", 0.5, 1.2);
-      toast(`🤝 high-five with <b style="color:#7dd3fc">@${esc(p.group.userData.handle)}</b>`);
+      toast(`🤝 ${randOf(["high-five with", "fly-by salute to", "wings waggled at", "warp-five with"])} <b style="color:#7dd3fc">@${esc(p.group.userData.handle)}</b>`);
     }
   }
   if (rosterDirty || t - lastRoster > 0.5) { updateRoster(); lastRoster = t; rosterDirty = false; }
