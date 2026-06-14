@@ -14,7 +14,7 @@ import { notifySlack } from "./notify";
 import { universe, universeEntry, creator } from "./universe";
 import { resolveProfile, updateProfile, overlayCreators } from "./profile";
 import { handleMcp } from "./mcp";
-import { handleAuth, sessionFrom } from "./auth";
+import { handleAuth, sessionFrom, validRenderToken, snapshotSetCookie } from "./auth";
 import { seedWorlds } from "./seed";
 import { websocket, type SocketData } from "./ws";
 
@@ -201,6 +201,15 @@ const server = Bun.serve<SocketData, never>({
       if (config.authMode === "google" && !config.dev) {
         const exempt = url.pathname === "/healthz" || url.pathname === "/readyz";
         if (!exempt && !sessionFrom(req)) {
+          // headless screenshot bot: a valid render token → brief snapshot session, then
+          // redirect to the clean URL so the captured page (and its API calls) are authed.
+          if (validRenderToken(url.searchParams.get("__render"))) {
+            url.searchParams.delete("__render");
+            return new Response(null, {
+              status: 302,
+              headers: { location: `${url.pathname}${url.search}`, "set-cookie": snapshotSetCookie() },
+            });
+          }
           if (req.method === "GET" && (req.headers.get("accept") ?? "").includes("text/html")) {
             const base = config.publicOrigin ?? `${url.protocol}//${config.baseDomain}`;
             // Build the return target off the public origin too — behind a tunnel

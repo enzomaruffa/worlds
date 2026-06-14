@@ -82,6 +82,20 @@ export function sessionFrom(req: Request): Session | null {
   return unseal<Session & { exp: number }>(readCookie(req, COOKIE));
 }
 
+// Screenshot bot: postDeploy mints a short render token; the sign-in wall trades it
+// for a brief HOST-ONLY snapshot session so headless Chrome can capture the (authed)
+// site over localhost. Host-only (no Domain) so it works on localhost, not just the base domain.
+export function mintRenderToken(): string {
+  return seal({ render: true, exp: Date.now() + 120_000 });
+}
+export function validRenderToken(t: string | null | undefined): boolean {
+  return !!unseal<{ render?: boolean; exp: number }>(t)?.render;
+}
+export function snapshotSetCookie(): string {
+  const session = seal({ email: "snapshot@worlds.local", name: "Snapshot", picture: "", exp: Date.now() + 120_000 });
+  return `${COOKIE}=${session}; Path=/; HttpOnly; SameSite=Lax; Max-Age=120`;
+}
+
 function allowed(email: string): boolean {
   const e = email.toLowerCase();
   if (config.allowedEmails.includes(e)) return true;

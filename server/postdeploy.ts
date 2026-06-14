@@ -6,6 +6,7 @@ import { dbReady } from "./db";
 import { embedText } from "./ai";
 import { store } from "./blobstore";
 import { getSite, setEmbedPos, setScreenshot, publishSiteDoc, siteUrl } from "./sites";
+import { mintRenderToken } from "./auth";
 
 // Runs after a deploy (fire-and-forget). Two best-effort jobs that refine the
 // universe: an embedding-derived position (so similar sites cluster) and a
@@ -79,8 +80,8 @@ async function capture(url: string): Promise<Blob | null> {
       // Async spawn (NOT spawnSync) — never block the server event loop.
       const proc = Bun.spawn(
         [bin, "--headless=new", "--disable-gpu", "--no-sandbox", "--hide-scrollbars",
-         "--window-size=1200,800", "--virtual-time-budget=4000", `--screenshot=${out}`, url],
-        { stdout: "ignore", stderr: "ignore", timeout: 25000 },
+         "--window-size=1200,800", "--virtual-time-budget=7000", `--screenshot=${out}`, url],
+        { stdout: "ignore", stderr: "ignore", timeout: 30000 },
       );
       const code = await proc.exited;
       if (code === 0 && (await Bun.file(out).exists())) {
@@ -93,8 +94,18 @@ async function capture(url: string): Promise<Blob | null> {
   return null;
 }
 
+// Capture over localhost with a render token (works behind the google sign-in wall);
+// in subdomain mode fall back to the public URL + token.
+function shotUrl(site: string): string {
+  const token = mintRenderToken();
+  if (config.routing === "path") return `http://localhost:${config.port}/app/${site}/?__render=${token}`;
+  const u = new URL(siteUrl(site));
+  u.searchParams.set("__render", token);
+  return u.toString();
+}
+
 async function captureScreenshot(site: string): Promise<void> {
-  const blob = await capture(siteUrl(site));
+  const blob = await capture(shotUrl(site));
   if (!blob) return;
   await store.putUpload(site, "__screenshot.png", blob);
   await setScreenshot(site, `/u/${site}/__screenshot.png`);
