@@ -27,6 +27,15 @@ const SDK_DIR = new URL("../sdk", import.meta.url).pathname;
 const DOCS_DIR = new URL("../docs", import.meta.url).pathname;
 const TUTORIAL_DIR = new URL("../tutorial", import.meta.url).pathname;
 
+// Default site favicon (a little ringed planet) — served for every site at
+// /favicon.ico so pages don't 404 on the browser's implicit request.
+const FAVICON_SVG =
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">' +
+  '<rect width="32" height="32" rx="7" fill="#0c0c0f"/>' +
+  '<circle cx="16" cy="16" r="7.5" fill="none" stroke="#f59e0b" stroke-width="2.5"/>' +
+  '<circle cx="16" cy="16" r="2.6" fill="#fbbf24"/>' +
+  '<circle cx="25" cy="9" r="1.3" fill="#fbbf24"/></svg>';
+
 // Static dirs bundled into the server image and served at a fixed host (like home).
 function serveBundled(dir: string, pathname: string): Promise<Response | null> {
   const f = Bun.file(join(dir, pathname === "/" ? "/index.html" : pathname));
@@ -239,6 +248,13 @@ const server = Bun.serve<SocketData, never>({
       if (url.pathname.startsWith("/api/")) return await api(req, url, site);
 
       if (url.pathname === "/healthz" || url.pathname === "/readyz") return new Response("ok");
+      // A default favicon for every site (sites rarely ship one) — keeps the
+      // browser console clean instead of a 404 per page load.
+      if (url.pathname === "/favicon.ico" || url.pathname === "/favicon.svg") {
+        return new Response(FAVICON_SVG, {
+          headers: { "content-type": "image/svg+xml", "cache-control": "public, max-age=86400" },
+        });
+      }
       if (url.pathname === "/worlds.js") return (await loader("worlds.js", false)) ?? siteNotFound(site);
       if (url.pathname === "/v1/worlds.js") return (await loader("worlds.js", true)) ?? siteNotFound(site);
       if (url.pathname === "/llms.txt") return llmsTxt(false);
