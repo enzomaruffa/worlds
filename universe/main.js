@@ -980,6 +980,8 @@ let trailHead = 0;
 const trailGeo = new THREE.BufferGeometry();
 trailGeo.setAttribute("position", new THREE.BufferAttribute(trailPos, 3));
 trailGeo.setAttribute("age", new THREE.BufferAttribute(trailAge, 1));
+trailGeo.attributes.position.setUsage(THREE.DynamicDrawUsage); // rewritten every frame
+trailGeo.attributes.age.setUsage(THREE.DynamicDrawUsage);
 const trail = new THREE.Points(trailGeo, new THREE.ShaderMaterial({
   transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
   vertexShader: `attribute float age; varying float vA;
@@ -1268,6 +1270,8 @@ function pilotShip(handle, key) {
   const geo = new THREE.BufferGeometry();
   geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
   geo.setAttribute("age", new THREE.BufferAttribute(age, 1));
+  geo.attributes.position.setUsage(THREE.DynamicDrawUsage); // rewritten every frame
+  geo.attributes.age.setUsage(THREE.DynamicDrawUsage);
   const line = new THREE.Points(geo, new THREE.ShaderMaterial({
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
     uniforms: { uColor: { value: color } },
@@ -1618,6 +1622,10 @@ let wasFly = false;
 // reused scratch to avoid per-frame allocations in the hot loop
 const _forward = new THREE.Vector3(), _camGoal = new THREE.Vector3(), _camLook = new THREE.Vector3(), _vp = new THREE.Vector3();
 const _pq = new THREE.Quaternion(), _back = new THREE.Vector3();
+// per-frame scratch — reused every tick so the render loop allocates nothing
+const _euler = new THREE.Euler(0, 0, 0, "YXZ"), _quat = new THREE.Quaternion();
+const _accel = new THREE.Vector3(), _to = new THREE.Vector3(), _push = new THREE.Vector3(), _collTmp = new THREE.Vector3();
+const _goal = new THREE.Vector3(), _engTmp = new THREE.Vector3(), _tmpv = new THREE.Vector3();
 function tick() {
   const dt = Math.min(clock.getDelta(), 0.05);
   uTime.value = clock.elapsedTime;
@@ -1685,8 +1693,9 @@ function tick() {
     }
   }
   // ship orientation
-  const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(pitch, yaw, 0, "YXZ"));
-  ship.quaternion.slerp(q, 1 - Math.exp(-8 * dt));
+  _euler.set(pitch, yaw, 0);
+  _quat.setFromEuler(_euler);
+  ship.quaternion.slerp(_quat, 1 - Math.exp(-8 * dt));
   const forward = _forward.set(0, 0, -1).applyQuaternion(ship.quaternion);
   const keyThrust = keys.has("KeyW") || keys.has("Space") || keys.has("ArrowUp");
   const driveAmt = Math.max(keyThrust ? 1 : 0, joy.active ? Math.min(Math.hypot(joy.x, joy.y), 1) : 0);
@@ -1701,12 +1710,13 @@ function tick() {
     if (dive.t >= DIVE_DUR) { location.href = dive.group.userData.site.url; dive.t = -999; }
   } else if (flyTarget && !thrust) {
     // autopilot warp: overrides physics, glides to a vantage point outside the body
-    let offset = flyTarget.offset;
-    if (!offset) {
+    let goal;
+    if (flyTarget.offset) {
+      goal = _goal.copy(flyTarget.position).add(flyTarget.offset);
+    } else {
       const br = flyTarget.userData.bodyR ?? 6;
-      offset = new THREE.Vector3(0, br * 0.5, br + shipRadius + 10);
+      goal = _goal.set(flyTarget.position.x, flyTarget.position.y + br * 0.5, flyTarget.position.z + br + shipRadius + 10);
     }
-    const goal = flyTarget.position.clone().add(offset);
     const k = ship.position.distanceTo(goal) > 120 ? 0.9 : 1.6;
     ship.position.lerp(goal, 1 - Math.exp(-k * dt));
     vel.multiplyScalar(Math.exp(-4 * dt)); // bleed residual momentum
@@ -1715,13 +1725,13 @@ function tick() {
     // frozen hold: keep a vantage just off the world, no gravity/drift, facing it,
     // until the pilot dives in ("walk"), closes the card, or thrusts away.
     const br = focusTarget.userData.bodyR ?? 6;
-    const goal = focusTarget.position.clone().add(new THREE.Vector3(0, br * 0.5, br + shipRadius + 10));
+    const goal = _goal.set(focusTarget.position.x, focusTarget.position.y + br * 0.5, focusTarget.position.z + br + shipRadius + 10);
     ship.position.lerp(goal, 1 - Math.exp(-3 * dt));
     vel.multiplyScalar(Math.exp(-6 * dt));
   } else if (following && pilots.get(following) && !thrust) {
     // formation flight: trail behind the followed pilot
     const lead = pilots.get(following).group;
-    const goal = lead.position.clone().add(new THREE.Vector3(0, 5, 20).applyQuaternion(lead.quaternion));
+    const goal = _goal.set(0, 5, 20).applyQuaternion(lead.quaternion).add(lead.position);
     ship.position.lerp(goal, 1 - Math.exp(-3 * dt));
     ship.quaternion.slerp(lead.quaternion, 1 - Math.exp(-3 * dt));
     vel.multiplyScalar(Math.exp(-3 * dt));
@@ -1731,16 +1741,18 @@ function tick() {
     if (thrust) { flyTarget = null; following = null; if (focusTarget) releaseFocus(); }
     if (driveAmt > 0.05) vel.addScaledVector(forward, 70 * driveAmt * dt);
     if (keys.has("KeyS") || keys.has("ArrowDown")) vel.addScaledVector(forward, -34 * dt);
-    const G = 48, accel = new THREE.Vector3(), to = new THREE.Vector3();
-    const pullFrom = (pos, mass, cap = 22, min = 36) => {
-      to.subVectors(pos, ship.position);
-      const d2 = Math.max(to.lengthSq(), min);
-      accel.addScaledVector(to.normalize(), Math.min((G * mass) / d2, cap));
+    const G = 48; _accel.set(0, 0, 0);
+    const pullFrom = (pos, mass, cap = 22, min = 36, cull2 = Infinity) => {
+      _to.subVectors(pos, ship.position);
+      const ls = _to.lengthSq();
+      if (ls > cull2) return;   // far bodies pull negligibly — skip the normalize/divide
+      const d2 = Math.max(ls, min);
+      _accel.addScaledVector(_to.normalize(), Math.min((G * mass) / d2, cap));
     };
     for (const b of starBodies) pullFrom(b.pos, b.mass);
-    for (const g of planets.values()) pullFrom(g.position, g.userData.mass);
+    for (const g of planets.values()) pullFrom(g.position, g.userData.mass, 22, 36, 810000); // ~900u cull
     pullFrom(CORE_POS, BH_MASS, 75, 144);   // the black hole pulls hard, from far away
-    vel.addScaledVector(accel, dt);
+    vel.addScaledVector(_accel, dt);
     vel.multiplyScalar(Math.exp(-0.85 * dt));
     ship.position.addScaledVector(vel, dt);
   }
@@ -1791,7 +1803,7 @@ function tick() {
   }
 
   // engine trail from the actual nozzle
-  const eng = enginePoint.clone().applyQuaternion(ship.quaternion).add(ship.position);
+  const eng = _engTmp.copy(enginePoint).applyQuaternion(ship.quaternion).add(ship.position);
   for (let i = 0; i < TRAIL_N; i++) trailAge[i] = Math.min(trailAge[i] + dt * 1.2, 1);
   if (thrust || vel.lengthSq() > 6 || flyTarget) {
     trailPos.set([eng.x, eng.y, eng.z], trailHead * 3);
@@ -1848,7 +1860,6 @@ function tick() {
 
   // other pilots: broadcast mine, glide theirs toward their last report
   broadcastShip(performance.now());
-  const tmpv = new THREE.Vector3();
   for (const [key, p] of pilots) {
     if (performance.now() - (p.seen ?? 0) > 8000) {
       scene.remove(p.group); scene.remove(p.trail.line);
@@ -1858,7 +1869,7 @@ function tick() {
       updatePilotCount();
       continue;
     }
-    p.group.position.lerp(tmpv.fromArray(p.target.p), 1 - Math.exp(-6 * dt));
+    p.group.position.lerp(_tmpv.fromArray(p.target.p), 1 - Math.exp(-6 * dt));
     p.group.quaternion.slerp(_pq.fromArray(p.target.q), 1 - Math.exp(-6 * dt));
     if (p.label) {
       // bigger far, smaller close — spot distant pilots, don't get crowded up close
@@ -1922,7 +1933,7 @@ function tick() {
     const arc = new THREE.Vector3(Math.cos(ang) * rad, hgt, Math.sin(ang) * rad);
     const end = ship.position.clone().addScaledVector(forward, -14).add(new THREE.Vector3(0, 4.5, 0));
     camera.position.lerpVectors(arc, end, e * e);
-    camera.lookAt(new THREE.Vector3().lerpVectors(new THREE.Vector3(0, 0, 0), ship.position, e));
+    camera.lookAt(_camLook.set(0, 0, 0).lerp(ship.position, e));
     if (introT >= INTRO_DUR) endIntro();
   } else {
     _camGoal.copy(ship.position).addScaledVector(forward, dive ? -8 : -14);
