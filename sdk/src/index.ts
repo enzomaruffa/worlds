@@ -11,6 +11,7 @@ import { lobby } from "./lobby";
 import { room } from "./room";
 import { id, colorFor, uniqByHandle, esc, countdown } from "./util";
 import { toast } from "./toast";
+import { mountLeave } from "./leave";
 
 const worlds: any = {
   WorldsError,
@@ -37,6 +38,10 @@ const worlds: any = {
 
 // Resolve this site's context once; sites can `await worlds.ready`.
 worlds.ready = call("GET", "/api/v1/site").then((s: any) => { worlds.site = s; return s; }).catch(() => worlds.site);
+
+// Drop a "back to Worlds" pill on every site (except home/universe) so no world
+// is a dead end. Opt out with `window.__worldsNoLeave = true`.
+worlds.ready.then((s: any) => mountLeave(s));
 
 // Visit beacon — feeds the universe's planet sizes. Never throws.
 try {

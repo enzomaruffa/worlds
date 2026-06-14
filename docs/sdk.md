@@ -136,6 +136,10 @@ worlds.esc(userText);                   // HTML-escape before innerHTML
 const t = worlds.countdown(endsAt, { onTick: (ms) => …, onEnd: () => … }); // t.stop() to cancel
 ```
 
+Every site also gets an automatic **"◐ Worlds" leave pill** (top-left) that flies the
+visitor back to the universe — so no world is a dead end. Opt out with
+`window.__worldsNoLeave = true` before the `worlds.js` tag.
+
 ## Notify — `worlds.notify`
 
 ```js
