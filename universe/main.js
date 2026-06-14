@@ -367,6 +367,35 @@ function label(text, y, color = 0xe4e4e7) {
 // once the display webfont lands, repaint any labels drawn with the mono fallback
 document.fonts?.ready?.then(() => { for (const draw of _labelTextures) draw(); });
 
+// Pilot name tags: SCREEN-SPACE (sizeAttenuation:false) so they don't balloon up
+// close. Scaled per-frame by distance (see the pilot loop) → bigger far, smaller
+// near, so you can spot far-off players and nearby ones don't dominate the view.
+const PILOT_LABEL_W = 0.30, PILOT_LABEL_H = 0.056; // base screen size
+function screenLabel(text, colorHex) {
+  const c = document.createElement("canvas");
+  c.width = 512; c.height = 96;
+  const ctx = c.getContext("2d");
+  const tex = new THREE.CanvasTexture(c);
+  const draw = () => {
+    ctx.clearRect(0, 0, c.width, c.height);
+    ctx.font = `600 44px ${LABEL_FONT}`;
+    ctx.textAlign = "center";
+    ctx.shadowColor = "rgba(0,0,0,.95)"; ctx.shadowBlur = 14;
+    ctx.fillStyle = `#${new THREE.Color(colorHex).getHexString()}`;
+    ctx.fillText(text, 256, 60);
+    tex.needsUpdate = true;
+  };
+  draw();
+  _labelTextures.push(draw);
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: tex, transparent: true, depthWrite: false, depthTest: false, sizeAttenuation: false,
+  }));
+  sprite.scale.set(PILOT_LABEL_W, PILOT_LABEL_H, 1);
+  sprite.position.y = 2.9;
+  sprite.renderOrder = 6;
+  return sprite;
+}
+
 // ---------- atmosphere + ocean shaders ----------
 function atmosphere(radius, colorHex) {
   return new THREE.Mesh(
@@ -980,7 +1009,22 @@ function showCard(site) {
   loreEl.textContent = "✦ summoning lore…";
   loadLore(site).then((lore) => { if (cardSite && cardSite.name === site.name) loreEl.textContent = `✦ ${lore}`; });
 }
-document.getElementById("cardClose").onclick = () => { card.style.display = "none"; flyTarget = null; focusTarget = null; };
+// Leave a focused world: shove + turn the ship OUTWARD so you sail away instead of
+// straight back into the surface (otherwise gravity + your forward thrust trap you).
+function releaseFocus() {
+  card.style.display = "none";
+  cardSite = null;
+  const p = focusTarget;
+  focusTarget = null;
+  if (!p) return;
+  const out = ship.position.clone().sub(p.position);
+  if (out.lengthSq() < 1e-4) out.set(0, 0, 1);
+  out.normalize();
+  vel.addScaledVector(out, 60);
+  yaw = Math.atan2(out.x, -out.z);
+  pitch = Math.max(-0.5, Math.min(0.5, Math.asin(Math.max(-1, Math.min(1, out.y)))));
+}
+document.getElementById("cardClose").onclick = () => { flyTarget = null; releaseFocus(); };
 
 // ---------- toasts ----------
 function toast(html, ms = 4200) {
@@ -1077,7 +1121,8 @@ function pilotShip(handle, key) {
   const glow = new THREE.Mesh(new THREE.SphereGeometry(0.2, 10, 10), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending }));
   glow.position.set(0, 0, 1.4);
   g.add(glow, new THREE.PointLight(color, 6, 16, 2));
-  g.add(label(`@${handle}`, 2.9, color.getHex()));
+  const nameSprite = screenLabel(`@${handle}`, color.getHex());
+  g.add(nameSprite);
   g.userData.pilotKey = key; g.userData.handle = handle; g.userData.color = color;
   scene.add(g);
 
@@ -1094,7 +1139,7 @@ function pilotShip(handle, key) {
   }));
   line.frustumCulled = false;
   scene.add(line);
-  return { group: g, color, trail: { line, geo, pos, age, head: 0 }, lastHi: 0 };
+  return { group: g, color, label: nameSprite, trail: { line, geo, pos, age, head: 0 }, lastHi: 0 };
 }
 
 shipsChannel.subscribe((msg) => {
@@ -1505,27 +1550,26 @@ function tick() {
     ship.position.lerp(dive.group.position, 1 - Math.exp(-5 * dt));
     flashEl.style.opacity = String(Math.min(1, k * 1.4));
     if (dive.t >= DIVE_DUR) { location.href = dive.group.userData.site.url; dive.t = -999; }
-  } else if (flyTarget) {
+  } else if (flyTarget && !thrust) {
     // autopilot warp: overrides physics, glides to a vantage point outside the body
     let offset = flyTarget.offset;
     if (!offset) {
       const br = flyTarget.userData.bodyR ?? 6;
-      offset = new THREE.Vector3(0, br * 0.5, br + shipRadius + 5);
+      offset = new THREE.Vector3(0, br * 0.5, br + shipRadius + 10);
     }
     const goal = flyTarget.position.clone().add(offset);
     const k = ship.position.distanceTo(goal) > 120 ? 0.9 : 1.6;
     ship.position.lerp(goal, 1 - Math.exp(-k * dt));
     vel.multiplyScalar(Math.exp(-4 * dt)); // bleed residual momentum
     if (ship.position.distanceTo(goal) < 2) flyTarget = null;
-  } else if (focusTarget) {
+  } else if (focusTarget && !thrust) {
     // frozen hold: keep a vantage just off the world, no gravity/drift, facing it,
-    // until the pilot dives in ("walk") or closes the card (gravity resumes).
+    // until the pilot dives in ("walk"), closes the card, or thrusts away.
     const br = focusTarget.userData.bodyR ?? 6;
-    const goal = focusTarget.position.clone().add(new THREE.Vector3(0, br * 0.5, br + shipRadius + 5));
+    const goal = focusTarget.position.clone().add(new THREE.Vector3(0, br * 0.5, br + shipRadius + 10));
     ship.position.lerp(goal, 1 - Math.exp(-3 * dt));
     vel.multiplyScalar(Math.exp(-6 * dt));
-    if (thrust) { focusTarget = null; card.style.display = "none"; cardSite = null; } // thrust to break free
-  } else if (following && pilots.get(following)) {
+  } else if (following && pilots.get(following) && !thrust) {
     // formation flight: trail behind the followed pilot
     const lead = pilots.get(following).group;
     const goal = lead.position.clone().add(new THREE.Vector3(0, 5, 20).applyQuaternion(lead.quaternion));
@@ -1533,14 +1577,16 @@ function tick() {
     ship.quaternion.slerp(lead.quaternion, 1 - Math.exp(-3 * dt));
     vel.multiplyScalar(Math.exp(-3 * dt));
   } else {
-    // manual flight with gravity from stars and planets
+    // manual flight with gravity. Thrust ALWAYS wins: drop any autopilot/focus so
+    // holding W always drives forward (releaseFocus turns us outward first).
+    if (thrust) { flyTarget = null; following = null; if (focusTarget) releaseFocus(); }
     if (driveAmt > 0.05) vel.addScaledVector(forward, 70 * driveAmt * dt);
     if (keys.has("KeyS") || keys.has("ArrowDown")) vel.addScaledVector(forward, -34 * dt);
-    const G = 95, accel = new THREE.Vector3(), to = new THREE.Vector3();
+    const G = 48, accel = new THREE.Vector3(), to = new THREE.Vector3();
     const pullFrom = (pos, mass) => {
       to.subVectors(pos, ship.position);
       const d2 = Math.max(to.lengthSq(), 36);
-      accel.addScaledVector(to.normalize(), Math.min((G * mass) / d2, 40));
+      accel.addScaledVector(to.normalize(), Math.min((G * mass) / d2, 22));
     };
     for (const b of starBodies) pullFrom(b.pos, b.mass);
     for (const g of planets.values()) pullFrom(g.position, g.userData.mass);
@@ -1576,7 +1622,7 @@ function tick() {
   if (shieldMesh) shieldMesh.material.uniforms.uHit.value *= Math.exp(-6 * dt);
 
   // dive proximity prompt
-  if (!dive && !flyTarget && !introActive && planets.size) {
+  if (!dive && !flyTarget && !focusTarget && !cardSite && !introActive && planets.size) {
     let best = Infinity, bp = null;
     for (const g of planets.values()) {
       const d = ship.position.distanceTo(g.position) - g.userData.bodyR;
@@ -1649,6 +1695,11 @@ function tick() {
     }
     p.group.position.lerp(tmpv.fromArray(p.target.p), 1 - Math.exp(-6 * dt));
     p.group.quaternion.slerp(_pq.fromArray(p.target.q), 1 - Math.exp(-6 * dt));
+    if (p.label) {
+      // bigger far, smaller close — spot distant pilots, don't get crowded up close
+      const f = Math.max(0.55, Math.min(2.6, camera.position.distanceTo(p.group.position) / 55));
+      p.label.scale.set(PILOT_LABEL_W * f, PILOT_LABEL_H * f, 1);
+    }
     // their engine trail
     const tr = p.trail;
     for (let i = 0; i < tr.age.length; i++) tr.age[i] = Math.min(tr.age[i] + dt * 1.2, 1);
