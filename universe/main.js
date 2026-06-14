@@ -111,7 +111,7 @@ renderer.setSize(innerWidth, innerHeight);
 // ACES filmic tone mapping: compresses HDR highlights so flying close to a star
 // rolls off smoothly instead of blowing out to pure white.
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 0.85;
+renderer.toneMappingExposure = 0.95;
 document.body.appendChild(renderer.domElement);
 
 // Post-processing (bloom + god rays + tone-map). Guarded: Safari's stricter WebGL
@@ -122,7 +122,7 @@ let godrayPass = null;
 try {
 composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
-composer.addPass(new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.5, 0.7, 0.85));
+composer.addPass(new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.8, 0.8, 0.78));
 
 // shader-based volumetric god rays (radial light scatter from the nearest star)
 godrayPass = new ShaderPass({
@@ -217,18 +217,20 @@ let starMat = null;
         vA = 0.35 + 0.65 * abs(sin(uTime * (0.4 + mag*0.3) + phase));
         vWarp = uWarp;
         vec4 mv = modelViewMatrix * vec4(position,1.0);
-        gl_PointSize = mag * 2.6 * (600.0 / -mv.z) * (1.0 + uWarp * 1.5);
+        gl_PointSize = mag * 2.6 * (600.0 / -mv.z) * (1.0 + uWarp * 5.0);
         gl_Position = projectionMatrix * mv;
       }`,
     fragmentShader: `
       varying float vA; varying float vWarp;
       void main(){
         vec2 d2 = gl_PointCoord - 0.5;
-        // stretch into vertical streaks as warp ramps up
-        d2.x /= (1.0 + vWarp * 2.5);
+        // stretch into long hyperspace streaks as warp ramps up
+        d2.x /= (1.0 + vWarp * 11.0);
         float d = length(d2);
         if (d > 0.5) discard;
-        gl_FragColor = vec4(0.85, 0.87, 1.0, (vA + vWarp * 0.4) * smoothstep(0.5, 0.0, d));
+        // blue→white hot core during FTL
+        vec3 col = mix(vec3(0.85,0.87,1.0), vec3(0.7,0.85,1.0), vWarp);
+        gl_FragColor = vec4(col, (vA + vWarp * 0.9) * smoothstep(0.5, 0.0, d));
       }`,
   });
   starMat = mat;
@@ -239,11 +241,11 @@ let starMat = null;
 // It pulls hard (BH_MASS), and crossing the event horizon (EH_R) doesn't kill you —
 // it spaghettifies you and spits you out at the home star (a wormhole shortcut home).
 const CORE_POS = new THREE.Vector3(-1500, 90, 1500);
-const BH_MASS = 36000;     // far heavier than any star — felt from ~600 units out
-const EH_R = 60;           // event-horizon radius: cross it → wormhole jump home
+const BH_MASS = 58000;     // far heavier than any star — felt from ~800 units out
+const EH_R = 96;           // event-horizon radius: cross it → wormhole jump home
 let coreDisk = null;
 {
-  coreDisk = new THREE.Mesh(new THREE.RingGeometry(64, 230, 200, 1), new THREE.ShaderMaterial({
+  coreDisk = new THREE.Mesh(new THREE.RingGeometry(105, 400, 256, 1), new THREE.ShaderMaterial({
     side: THREE.DoubleSide, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
     uniforms: { uTime },
     vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
@@ -251,27 +253,36 @@ let coreDisk = null;
       varying vec2 vUv; uniform float uTime;
       void main(){
         vec2 c = vUv - 0.5; float ang = atan(c.y, c.x); float r = length(c) * 2.0;
-        float swirl = gfbm(vec3(cos(ang)*4.0, sin(ang)*4.0, r*6.0 - uTime*1.1));
-        // gold-hot inner accretion → deep amber outer (no violet — a golden hole)
-        vec3 hot = vec3(1.0,0.92,0.5), cool = vec3(1.0,0.5,0.1);
-        vec3 col = mix(hot, cool, smoothstep(0.0,1.0,r)) * (0.55 + 1.0*swirl);
-        float edge = smoothstep(0.0, 0.1, r) * smoothstep(1.0, 0.78, r);
-        gl_FragColor = vec4(col * edge * 2.3, edge);
+        float swirl  = gfbm(vec3(cos(ang)*5.0,  sin(ang)*5.0,  r*7.0 - uTime*1.3));
+        float swirl2 = gfbm(vec3(cos(ang)*12.0, sin(ang)*12.0, r*3.0 + uTime*0.6));
+        // doppler beaming: the side spinning toward us blazes brighter
+        float doppler = 0.55 + 0.85 * (0.5 + 0.5 * sin(ang + 0.6));
+        // gold-hot inner accretion → deep amber outer (a golden hole, no violet)
+        vec3 hot = vec3(1.0,0.96,0.66), cool = vec3(1.0,0.42,0.06);
+        vec3 col = mix(hot, cool, smoothstep(0.0,1.0,r)) * (0.5 + 0.85*swirl + 0.3*swirl2) * doppler;
+        col += hot * smoothstep(0.28, 0.0, r) * 0.45;   // brighter inner rim by the horizon
+        float edge = smoothstep(0.0, 0.07, r) * smoothstep(1.0, 0.72, r);
+        gl_FragColor = vec4(col * edge * 1.45, edge * 0.95);
       }`,
   }));
   coreDisk.position.copy(CORE_POS); coreDisk.rotation.set(Math.PI / 2 - 0.4, 0, 0.3);
   scene.add(coreDisk);
-  const eh = new THREE.Mesh(new THREE.SphereGeometry(EH_R * 0.9, 48, 48), new THREE.MeshBasicMaterial({ color: 0x000000 }));
+  const eh = new THREE.Mesh(new THREE.SphereGeometry(EH_R * 0.92, 64, 64), new THREE.MeshBasicMaterial({ color: 0x000000 }));
   eh.position.copy(CORE_POS); scene.add(eh);
-  const photon = new THREE.Mesh(new THREE.TorusGeometry(EH_R, 2.2, 16, 180),
-    new THREE.MeshBasicMaterial({ color: 0xffe6a0, transparent: true, blending: THREE.AdditiveBlending }));
+  // photon ring: a thin blazing ring hugging the horizon
+  const photon = new THREE.Mesh(new THREE.TorusGeometry(EH_R * 1.02, 3.4, 16, 220),
+    new THREE.MeshBasicMaterial({ color: 0xfff0c0, transparent: true, blending: THREE.AdditiveBlending }));
   photon.position.copy(CORE_POS); photon.rotation.set(Math.PI / 2 - 0.4, 0, 0.3); scene.add(photon);
-  // soft lensing glow so the hole reads as huge from across the map
-  const glow = new THREE.Mesh(new THREE.SphereGeometry(160, 24, 24), new THREE.MeshBasicMaterial({
-    color: 0xffb347, transparent: true, opacity: 0.07, blending: THREE.AdditiveBlending, depthWrite: false,
+  // soft lensing glow so the hole reads as colossal from across the map
+  const glow = new THREE.Mesh(new THREE.SphereGeometry(300, 32, 32), new THREE.MeshBasicMaterial({
+    color: 0xffb347, transparent: true, opacity: 0.04, blending: THREE.AdditiveBlending, depthWrite: false,
   }));
   glow.position.copy(CORE_POS); scene.add(glow);
-  const bhLight = new THREE.PointLight(0xffb84d, 900, 1200, 2);
+  const halo = new THREE.Mesh(new THREE.SphereGeometry(EH_R * 1.22, 32, 32), new THREE.MeshBasicMaterial({
+    color: 0xffd27a, transparent: true, opacity: 0.1, blending: THREE.AdditiveBlending, depthWrite: false,
+  }));
+  halo.position.copy(CORE_POS); scene.add(halo);
+  const bhLight = new THREE.PointLight(0xffb84d, 1400, 1800, 2);
   bhLight.position.copy(CORE_POS); scene.add(bhLight);
 }
 
@@ -303,11 +314,11 @@ function updateShootingStars(dt) {
 // ---------- star systems: one star per site CATEGORY, hello.world at the center ----------
 // (biome stays a per-planet visual trait; the system you orbit is what your site is FOR)
 const SYSTEMS = {
-  misc:        { title: "home",            tag: "the heart of it all",     pos: new THREE.Vector3(0, 0, 0),         hot: 0xffd84d, deep: 0xf25a05, starR: 30 },
-  games:       { title: "the arcade",      tag: "where games are born",    pos: new THREE.Vector3(760, 30, -240),   hot: 0xff8ad8, deep: 0x86198f, starR: 24 },
-  work:        { title: "mission control", tag: "mission-critical orbit",  pos: new THREE.Vector3(-760, -40, -320), hot: 0xdff1ff, deep: 0x1d4ed8, starR: 24 },
-  tools:       { title: "the workshop",    tag: "forge of useful things",  pos: new THREE.Vector3(240, 55, 820),    hot: 0xffd27a, deep: 0xb45309, starR: 24 },
-  experiments: { title: "the lab",         tag: "here be dragons",         pos: new THREE.Vector3(-340, -20, 780),  hot: 0x9affe2, deep: 0x0f766e, starR: 24 },
+  misc:        { title: "home",            tag: "the heart of it all",     pos: new THREE.Vector3(0, 0, 0),         hot: 0xffd84d, deep: 0xf25a05, starR: 40 },
+  games:       { title: "the arcade",      tag: "where games are born",    pos: new THREE.Vector3(760, 30, -240),   hot: 0xff8ad8, deep: 0x86198f, starR: 32 },
+  work:        { title: "mission control", tag: "mission-critical orbit",  pos: new THREE.Vector3(-760, -40, -320), hot: 0xdff1ff, deep: 0x1d4ed8, starR: 32 },
+  tools:       { title: "the workshop",    tag: "forge of useful things",  pos: new THREE.Vector3(240, 55, 820),    hot: 0xffd27a, deep: 0xb45309, starR: 32 },
+  experiments: { title: "the lab",         tag: "here be dragons",         pos: new THREE.Vector3(-340, -20, 780),  hot: 0x9affe2, deep: 0x0f766e, starR: 32 },
 };
 
 function makeStar(sys, name) {
@@ -426,7 +437,7 @@ function screenLabel(text, colorHex) {
 // ---------- atmosphere + ocean shaders ----------
 function atmosphere(radius, colorHex) {
   return new THREE.Mesh(
-    new THREE.SphereGeometry(radius * 1.18, 32, 32),
+    new THREE.SphereGeometry(radius * 1.3, 40, 40),
     new THREE.ShaderMaterial({
       side: THREE.BackSide, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
       uniforms: { uColor: { value: new THREE.Color(colorHex) } },
@@ -435,8 +446,9 @@ function atmosphere(radius, colorHex) {
       fragmentShader: `varying vec3 vN; varying vec3 vW; uniform vec3 uColor;
         void main(){
           vec3 v = normalize(cameraPosition - vW);
-          float rim = pow(1.0 - abs(dot(vN, v)), 2.6);
-          gl_FragColor = vec4(uColor * rim, rim * 0.9);
+          // wider, brighter halo + a soft inner wash so worlds glow against the void
+          float rim = pow(1.0 - abs(dot(vN, v)), 2.1);
+          gl_FragColor = vec4(uColor * (rim * 1.5 + 0.05), rim * 1.05);
         }`,
     }),
   );
@@ -563,7 +575,7 @@ function makePlanet(site) {
   const biomeName = u.biome ?? "lush";
   const biome = BIOMES[biomeName] ?? BIOMES.lush;
   const sea = biome.ocean;
-  const radius = 4.5 + Math.min((site.visits_30d ?? 0) / 45, 6) + rng() * 2.0; // bigger worlds
+  const radius = 7.5 + Math.min((site.visits_30d ?? 0) / 40, 9) + rng() * 2.5; // bigger, chunkier worlds
   const activity = Math.min((site.visits_30d ?? 0) / 200, 1);
   const sys = SYSTEMS[site.category] ?? SYSTEMS.misc; // the star this world orbits
 
@@ -1423,7 +1435,7 @@ for (const [key, sys] of Object.entries(SYSTEMS)) {
   const btn = document.createElement("button");
   btn.style.color = "#c4b5fd";
   btn.textContent = "◍ the universe · black hole";
-  btn.onclick = () => { initAudio(); warpSound(); flyTarget = { position: CORE_POS.clone(), offset: new THREE.Vector3(0, 70, 200) }; };
+  btn.onclick = () => { initAudio(); warpSound(); flyTarget = { position: CORE_POS.clone(), offset: new THREE.Vector3(0, 320, 980) }; };
   systemsBar.appendChild(btn);
 }
 
@@ -1815,13 +1827,14 @@ function tick() {
     godrayPass.uniforms.uIntensity.value += (gi - godrayPass.uniforms.uIntensity.value) * Math.min(1, dt * 5);
   }
 
-  // ---- cinematic camera: speed-FOV, banking, shake, warp-roll ----
-  const targetFov = 70 + Math.min(speed, 140) / 140 * 20 + (dive ? 30 : 0);
-  camera.fov += (targetFov - camera.fov) * Math.min(1, dt * 4);
+  // ---- cinematic camera: speed-FOV, banking, shake, FTL punch ----
+  // FTL jumps punch the FOV way out + shake the rig for a real hyperspace kick.
+  const targetFov = 70 + Math.min(speed, 140) / 140 * 20 + (dive ? 30 : 0) + (flyTarget ? 38 : 0);
+  camera.fov += (targetFov - camera.fov) * Math.min(1, dt * (flyTarget ? 7 : 4));
   camera.updateProjectionMatrix();
   const dYaw = yaw - prevYaw; prevYaw = yaw;
   bank += (Math.max(-0.5, Math.min(0.5, -dYaw * 9)) - bank) * Math.min(1, dt * 6);
-  camShake = Math.max(camShake * Math.exp(-3 * dt), thrust && !introActive ? 0.04 : 0);
+  camShake = Math.max(camShake * Math.exp(-3 * dt), flyTarget ? 0.07 : (thrust && !introActive ? 0.04 : 0));
 
   if (introActive) {
     // sweeping orbit-arc fly-in: spiral around hello.world, settle behind the ship
