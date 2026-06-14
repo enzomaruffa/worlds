@@ -182,6 +182,22 @@ godrayPass = new ShaderPass({
     }`,
 });
 composer.addPass(godrayPass);
+
+// soft cinematic vignette — gently darkens the frame corners for depth + framing
+composer.addPass(new ShaderPass({
+  uniforms: { tDiffuse: { value: null } },
+  vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
+  fragmentShader: `
+    uniform sampler2D tDiffuse; varying vec2 vUv;
+    void main(){
+      vec4 base = texture2D(tDiffuse, vUv);
+      vec2 d = vUv - 0.5;
+      float v = smoothstep(0.85, 0.30, dot(d, d) * 2.0);  // 1 in the center → 0 at the corners
+      base.rgb *= mix(0.82, 1.0, v);                      // corners ~18% darker; center untouched
+      gl_FragColor = base;
+    }`,
+}));
+
 composer.addPass(new OutputPass()); // tone-maps + sRGB at the very end (single pass)
 } catch (e) {
   console.warn("postprocessing unavailable — plain render fallback (Safari?):", e);
@@ -211,6 +227,9 @@ const uTime = { value: 0 };
         col += vec3(0.10, 0.05, 0.18) * smoothstep(0.55, 0.95, n1);   // violet drift
         col += vec3(0.03, 0.09, 0.16) * smoothstep(0.60, 0.95, n2);   // teal drift
         col += vec3(0.16, 0.10, 0.05) * smoothstep(0.78, 1.0, gfbm(vDir*2.2)); // faint amber core
+        // ordered-ish dither: breaks up the 8-bit banding that dark gradients show on most displays
+        float dither = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
+        col += (dither - 0.5) / 255.0;
         gl_FragColor = vec4(col, 1.0);
       }`,
   });
@@ -221,41 +240,54 @@ const uTime = { value: 0 };
 let starMat = null;
 {
   const n = 5000;
-  const pos = new Float32Array(n * 3), phase = new Float32Array(n), mag = new Float32Array(n);
+  const pos = new Float32Array(n * 3), phase = new Float32Array(n), mag = new Float32Array(n), tint = new Float32Array(n * 3);
   const rng = mulberry32(42);
   for (let i = 0; i < n; i++) {
     const r = 1000 + rng() * 1600, th = rng() * Math.PI * 2, ph = Math.acos(2 * rng() - 1);
     pos.set([r * Math.sin(ph) * Math.cos(th), r * Math.cos(ph), r * Math.sin(ph) * Math.sin(th)], i * 3);
     phase[i] = rng() * 6.28;
     mag[i] = 0.6 + rng() * 1.8;
+    // realistic-ish stellar tints: mostly blue-white, with a sprinkling of gold/amber/cyan/rose
+    const u = rng();
+    let cr, cg, cb;
+    if (u < 0.50)      { cr = 0.82; cg = 0.88; cb = 1.00; } // blue-white (most common)
+    else if (u < 0.70) { cr = 1.00; cg = 1.00; cb = 1.00; } // pure white
+    else if (u < 0.84) { cr = 1.00; cg = 0.92; cb = 0.74; } // warm gold
+    else if (u < 0.93) { cr = 1.00; cg = 0.78; cb = 0.52; } // amber
+    else if (u < 0.98) { cr = 0.70; cg = 0.92; cb = 1.00; } // icy cyan
+    else               { cr = 1.00; cg = 0.72; cb = 0.66; } // faint rose
+    tint.set([cr, cg, cb], i * 3);
   }
   const g = new THREE.BufferGeometry();
   g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
   g.setAttribute("phase", new THREE.BufferAttribute(phase, 1));
   g.setAttribute("mag", new THREE.BufferAttribute(mag, 1));
+  g.setAttribute("tint", new THREE.BufferAttribute(tint, 3));
   const mat = new THREE.ShaderMaterial({
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
     uniforms: { uTime, uWarp: { value: 0 } },
     vertexShader: `
-      attribute float phase; attribute float mag; varying float vA; varying float vWarp;
+      attribute float phase; attribute float mag; attribute vec3 tint;
+      varying float vA; varying float vWarp; varying vec3 vTint;
       uniform float uTime; uniform float uWarp;
       void main(){
         vA = 0.35 + 0.65 * abs(sin(uTime * (0.4 + mag*0.3) + phase));
         vWarp = uWarp;
+        vTint = tint;
         vec4 mv = modelViewMatrix * vec4(position,1.0);
         gl_PointSize = mag * 2.6 * (600.0 / -mv.z) * (1.0 + uWarp * 3.0);
         gl_Position = projectionMatrix * mv;
       }`,
     fragmentShader: `
-      varying float vA; varying float vWarp;
+      varying float vA; varying float vWarp; varying vec3 vTint;
       void main(){
         vec2 d2 = gl_PointCoord - 0.5;
         // stretch into long hyperspace streaks as warp ramps up
         d2.x /= (1.0 + vWarp * 7.0);
         float d = length(d2);
         if (d > 0.5) discard;
-        // blue→white hot core during FTL
-        vec3 col = mix(vec3(0.85,0.87,1.0), vec3(0.7,0.85,1.0), vWarp);
+        // each star keeps its own tint; during FTL they all blue-shift to a hot core
+        vec3 col = mix(vTint, vec3(0.78, 0.9, 1.0), vWarp);
         gl_FragColor = vec4(col, (vA + vWarp * 0.9) * smoothstep(0.5, 0.0, d));
       }`,
   });

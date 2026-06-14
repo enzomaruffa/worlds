@@ -31,6 +31,14 @@
   #card .meta { color: #71717a; font-size: 11px; margin-bottom: 10px; }
   #card a { display: inline-block; background: #e5a00d; color: #101012; font-weight: 700; border-radius: 999px; padding: 6px 14px; text-decoration: none; font-size: 12px; }
   #card button { background: none; border: none; color: #71717a; cursor: pointer; font: inherit; float: right; }
+  /* lore: a soft breathing violet glow, and a slow shimmer sweep on the civilization name */
+  #cardLore { text-shadow: 0 0 7px rgba(196,181,253,.30); animation: loreGlow 3.6s ease-in-out infinite; }
+  @keyframes loreGlow { 0%,100% { text-shadow: 0 0 6px rgba(196,181,253,.22); } 50% { text-shadow: 0 0 13px rgba(196,181,253,.55); } }
+  .loreCiv { display: block; font-weight: 700; font-style: normal; letter-spacing: .02em; margin-bottom: 3px;
+    background: linear-gradient(90deg, #a78bfa 0%, #f5f3ff 30%, #a78bfa 60%); background-size: 220% auto;
+    -webkit-background-clip: text; background-clip: text; color: transparent; animation: loreShimmer 4.5s linear infinite; }
+  @keyframes loreShimmer { to { background-position: 220% center; } }
+  .loreCustom { display: block; margin-top: 5px; color: #8b80b3; font-size: 10.5px; }
   #thrust { position: absolute; bottom: 24px; right: 24px; width: 76px; height: 76px; border-radius: 50%; border: 2px solid #e5a00d; background: rgba(229,160,13,.12); color: #e5a00d; font: 700 11px ui-monospace, monospace; pointer-events: auto; display: none; }
   @media (pointer: coarse) { #thrust { display: block; } #hint { display: none; } }
 
