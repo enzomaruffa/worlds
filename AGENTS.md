@@ -4,7 +4,12 @@ This file is for AI agents (Claude Code/Desktop, etc.). Worlds is a self-hostabl
 internal hosting platform: **deploy a folder of static files → `<name>.<your-worlds-host>`**,
 signed-in-only, with a batteries-included client SDK and zero infra.
 
-## If you were asked to "put this online" / "make an internal tool/dashboard/game"
+There are two jobs you might be doing: **(A)** deploying a site (build something), or
+**(B)** working ON the platform itself (extend the server/SDK). Both are below.
+
+---
+
+## (A) "Put this online" / "make an internal tool/dashboard/game"
 
 That's a Worlds site. The full playbook is the **`world-site` skill** in this repo:
 `skills/world-site/SKILL.md` (deploy path + SDK cheat sheet + rules) and
@@ -15,37 +20,111 @@ The 30-second version:
 
 1. A folder with an **`index.html`** at its root. Add `<script src="/worlds.js"></script>`.
 2. Optional `.world.json`: `{"description":"…","category":"games|work|tools|experiments|misc"}`.
-3. Deploy — `worlds deploy`, the MCP `deploy_site` tool (`<your-worlds-host>/mcp`), or drag-drop on your Worlds host.
+3. Deploy — `worlds deploy`, the MCP `deploy_site` tool (`<your-worlds-host>/mcp`), or drag-drop.
 4. Live at `https://<name>.<your-worlds-host>`. Re-deploy to overwrite.
 
-The SDK gives you `worlds.me()`, `worlds.db` (JSONB collections + realtime), `worlds.ai`
-(Gemini), `worlds.uploads`, `worlds.ws` (multiplayer), and `worlds.notify.slack` — no keys,
-no config, all behind the sign-in gate.
+### The SDK (all on the global `worlds`, no keys/config, behind the sign-in gate)
 
-## Live, always-current contract
+- `worlds.me()` → `{email,name,handle,avatar_url}`; `await worlds.ready`; `worlds.site`
+- `worlds.db.collection(name)` — JSONB docs: create/get/update/replace/delete/**increment**/list/**subscribe**; `worlds.db.site(other).collection(c)` for cross-world reads
+- `worlds.ai` — `complete` (incl. `{stream:true,onToken}`), `embed`, `image`, `models`
+- `worlds.uploads` — put/list/delete · `worlds.ws.channel(name)` — publish/subscribe/presence
+- `worlds.notify.slack(channel,text)`
+- **`worlds.lobby(channel,opts)`** — multiplayer waiting room (roster/host/ready/auto-start)
+- **`worlds.room(name,opts)`** — ONE shared authoritative doc (turn-based / board / quiz)
+- building blocks: `worlds.id() colorFor() uniqByHandle() esc() countdown() toast()` + an auto "leave" pill
 
-- `/llms.txt` — machine-readable manifest of the SDK + endpoints.
-- `/docs` — human docs (also `docs/` in this repo: `sdk.md`, `quickstart.md`, `limits.md`).
-- `spec/world-v1.yaml` — the frozen OpenAPI contract. `/api/v1` is additive-only forever.
+**Read the docs, don't guess method names** — the surface is small and stable:
+- `/docs` (human) · `docs/sdk.md`, `docs/quickstart.md`, `docs/limits.md` in this repo
+- `/llms.txt` + `/llms-full.txt` (machine-readable, generated from `docs/`)
+- `spec/world-v1.yaml` — the frozen OpenAPI contract
 
-Prefer these over guessing — the SDK surface is small and stable, but read it rather than
-inventing method names.
+### What Worlds is NOT for
 
-## If you're working ON this repo (not just deploying a site)
+External/public audiences, secrets (no permissions — everyone on your instance can read/overwrite
+any site), heavy/long compute, scheduled jobs, public webhooks. Point those at a real backend.
 
-- **Stack**: Bun + TypeScript, no runtime npm deps. `server/` (one module per concern,
-  `BlobStore` abstracts the cloud), `sdk/src/` (modular → `bun run build:sdk` → the single
-  served `sdk/worlds.js`; never hand-edit `sdk/worlds.js`), `cli/`, `homepage/`,
-  `universe/` (the flagship 3D dogfood — a Worlds site, not part of the image).
-- **Before committing**: `bunx tsc --noEmit` (typecheck) + `bun test` (e2e — needs `bun run db:up`).
-- **The contract is frozen.** Anything under `/api/v1` and the `worlds.js` surface is
-  additive-only: new optional fields, new endpoints, new error codes for new failure modes —
-  never remove/rename/retype. Sites live forever without a rebuild.
-- **Conventions**: one-liner conventional commits; comments only for non-obvious *why*;
-  relative URLs in sites; `type` imports; `bunx tsc --noEmit` + `bun test` before committing.
+---
 
-## What Worlds is NOT for
+## (B) Working ON this repo (extending the platform)
 
-External/public audiences, secrets (no permissions — everyone on your instance can read/overwrite any
-site), heavy/long compute, scheduled jobs, or public webhooks. For those, point at a real
-product surface or your backend.
+**Stack:** Bun + TypeScript, no runtime npm deps. Postgres for state, a `BlobStore` for files.
+
+### Repo map
+
+- `server/` — Bun HTTP + WS server, one module per concern:
+  - `index.ts` routing/static serving · `db.ts`+`dbapi.ts` Postgres collections + change feed
+  - `ws.ts` the ONE multiplexed socket (db subs + channels + presence) · `ai.ts` Gemini proxy
+  - `blobstore.ts` `BlobStore` interface → `Local`/`S3`/`Layered` impls (the cloud seam)
+  - `auth.ts`+`identity.ts`+`profile.ts` identity. **Presence and `me()` both resolve through
+    `profile.ts`**, so a user who renames themselves stays ONE identity (don't regress this).
+  - `uploads.ts` `deploy.ts` `mcp.ts` `sites.ts` `universe.ts` `notify.ts`
+- `sdk/src/` — the SDK, one module per concern (`db ai channels uploads notify lobby room util
+  toast leave socket http error index`). Build → the single served `sdk/worlds.js`.
+  **Never hand-edit `sdk/worlds.js`** — it's generated by `bun run build:sdk`.
+- `examples/games/` — reference Worlds sites (the best way to learn the SDK; see below).
+- `universe/` — the flagship 3D homepage (a Worlds site built on the public SDK; deployed as
+  the `universe` site, NOT bundled in the server image).
+- `homepage/` `cli/` `docs/` `spec/` (frozen OpenAPI) `tests/e2e.test.ts`.
+- `deploy/` — Plex chart + CD. Present only in the `plexinc/worlds` fork (see deploy model).
+
+### Reference apps — read these to see the SDK used well
+
+- **connect4** — `worlds.room` (shared board) + seat matchmaking + abandoned-doc recycle.
+- **spyfall** — `worlds.room` + role dealing + `worlds.countdown`.
+- **trivia** — `worlds.lobby` + `worlds.ai` quiz generation + host-driven db phases.
+- **red-light / paint-arena / racing** — `worlds.lobby` ready-up + `worlds.ws` realtime
+  (racing is full three.js 3D). paint-arena/racing keep their own colors (palette/hex) on purpose.
+- **draw-guess** — multiple ws channels + db. **hangout / quick-poll** — db + subscribe tools.
+
+### Build · test · verify (do this before committing)
+
+```sh
+bun run build:sdk          # after ANY sdk/src/ change → regenerates sdk/worlds.js
+bunx tsc --noEmit          # typecheck
+bun run db:up && bun test  # e2e (Postgres on :5499); all tests must pass
+```
+
+Local run + manual verify:
+
+```sh
+WORLDS_DEV=1 WORLDS_SEED=0 bun server/index.ts   # :8420; identity stubbed as dev@localhost
+# impersonate by passing the x-auth-request-email header; sites at <site>.worlds.localhost:8420
+```
+
+- **Syntax-check a site's inline script** (catches parse errors fast):
+  `bun -e 'const h=require("fs").readFileSync(F,"utf8");for(const m of h.matchAll(/<script(?![^>]*src=)[^>]*>([\s\S]*?)<\/script>/g))new Function(m[1]);console.log("ok")'`
+- **Browser-smoke** a multiplayer/3D site: deploy it to a dev server, load with Playwright,
+  assert 0 console errors and that `window.worlds.<fn>` exist + the scene/lobby rendered.
+  (3D + lobby behavior can't be proven by unit tests — smoke it.)
+
+### Adding / changing an SDK primitive (the recipe)
+
+1. New module `sdk/src/X.ts`; import + expose it on the object in `sdk/src/index.ts`.
+2. `bun run build:sdk` (regenerates `sdk/worlds.js`).
+3. **Document it in `docs/sdk.md`** — this flows to `/llms.txt`, `/docs`, and MCP automatically.
+   The docs ARE the contract; every public method needs a docs anchor. Keep them in sync ALWAYS.
+4. If it's reusable, demonstrate it in an `examples/games/` app.
+5. Additive-only: never remove/rename/retype existing `worlds.js` surface or `/api/v1` shapes.
+
+### Two-repo + deploy model
+
+- **Canonical OSS:** `enzomaruffa/worlds` (this repo's `origin`). Build features HERE.
+- **Plex fork:** `plexinc/worlds` (checkout at `~/Plex/world`, with `source` = the OSS repo).
+  Adds only the deploy (`deploy/` plex-apps chart, Blacksmith CD, gateway auth). Sync it with
+  `git fetch source && git merge source/main` (disjoint files → clean merge). See `deploy/README.md`.
+- **Running instance:** `webrato-remote:~/worlds-kit` (docker compose). To deploy:
+  - `git pull`; **rebuild the image** (`docker compose -f docker-compose.deploy.yml up -d --build worlds`)
+    when `server/` or `sdk/worlds.js` changed — both are served from the image (read fresh per request).
+  - `docs/` are also in the image (served fresh) → `docker cp` the file in, no rebuild needed.
+  - **Example sites live in the blobstore** (`/data/sites/<site>/`), NOT the image → after editing a
+    site, `docker cp` its files into `worlds-kit-worlds-1:/data/sites/<site>/`. The `universe` is a site.
+
+### Golden rules
+
+- One-liner conventional commits. Comments only for non-obvious *why*.
+- `type` imports. Relative URLs in sites (only `/worlds.js` is absolute).
+- Never hand-edit generated files (`sdk/worlds.js`).
+- **Keep `docs/` in sync with every SDK change** — the contract is the docs.
+- `/api/v1` and the `worlds.js` surface are frozen: additive-only, forever. Sites must work in
+  five years without a rebuild.

@@ -36,11 +36,19 @@ await worlds.ai.complete("prompt" | {messages, system, model:"fast"|"smart", max
 await worlds.ai.embed(text) · worlds.ai.image(prompt, {size})   // image → stored upload URL
 
 await worlds.uploads.put(file, {name}) · worlds.uploads.list() · worlds.uploads.delete(name)  // ≤25MB
-const ch = worlds.ws.channel("room"); ch.publish(payload); ch.subscribe(cb); ch.presence(cb) // multiplayer
+const ch = worlds.ws.channel("room"); ch.publish(payload); ch.subscribe(cb); ch.presence(cb) // ephemeral multiplayer
 await worlds.notify.slack("#channel", "text")      // capped + stamped with site & sender
+
+// multiplayer batteries — don't hand-roll these:
+const lobby = worlds.lobby("room", {onUpdate, onStart, onReturn, autoStart, minPlayers})  // waiting room: self-inclusive roster, stable host, ready/auto-start; .setReady .start .returnToLobby .snapshot .isHost
+const game  = worlds.room("ttt", {initial})        // ONE shared authoritative doc: await .ready · .get() .onChange(fn) .set(x) .merge(p) .reset() — handles load-or-create + live sync + ordering
+worlds.id() · worlds.colorFor(handle) · worlds.uniqByHandle(list) · worlds.esc(s) · worlds.toast(msg) · worlds.countdown(endsAt,{onTick,onEnd})  // building blocks
 ```
 
-Every call returns a promise; rejections are `WorldsError` with `{code, message}`.
+Every call returns a promise; rejections are `WorldsError` with `{code, message, retry_after?}`.
+Every site also auto-gets a "◐ Worlds" leave pill (top-left). For a multiplayer game, reach for
+`worlds.lobby` (waiting room) + `worlds.room` (shared state) before `worlds.ws` — see the connect4 /
+trivia / spyfall reference apps.
 
 ## Rules (deliberate — keep sites simple)
 

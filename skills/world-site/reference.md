@@ -175,6 +175,37 @@ site** (deploy it with `worlds deploy` like any other). It uses only public APIs
 Read its `main.js` when you want a worked example of channels + db subscribe + ai together
 at scale. Don't bake heavy engines into the server; load them from a CDN in your site.
 
+### 10. Multiplayer game (lobby + room) — don't hand-roll matchmaking
+
+For a turn-based or party game, compose two primitives instead of rolling your own
+presence/host/state machine: `worlds.lobby` (the waiting room) + `worlds.room` (the
+authoritative shared state). The lobby's roster always includes you (so the host never
+flickers and a fresh joiner is never "everyone left"); the room handles load-or-create,
+live sync, and stale-write ordering.
+
+```js
+const game = worlds.room("tictactoe", { initial: () => ({ board: Array(9).fill(""), turn: "x", winner: null }) });
+const lobby = worlds.lobby("tictactoe", {
+  minPlayers: 2,
+  onUpdate: (s) => renderRoster(s),          // s.members[{handle,name,ready,isMe,isHost}], s.allReady, s.isHost…
+  onStart: () => { if (lobby.isHost) game.reset(); showBoard(); },  // host seeds; everyone shows the board
+  onReturn: () => showLobby(),
+});
+await game.ready;
+game.onChange((s) => drawBoard(s));          // fires on load + every move, for every player
+// a move: only the player whose turn it is writes
+function play(i) {
+  const s = game.get();
+  if (s.turn !== mySymbol || s.board[i]) return;
+  const board = s.board.slice(); board[i] = mySymbol;
+  game.merge({ board, turn: mySymbol === "x" ? "o" : "x" });
+}
+document.getElementById("ready").onclick = () => lobby.toggleReady();
+```
+
+Working references in this repo: **connect4** (room + seats), **trivia** (lobby + AI),
+**spyfall** (room + roles + countdown), **red-light/paint-arena/racing** (lobby + ws realtime).
+
 ---
 
 ## Resources (all CDN / CC0 — sites are static behind the gate, so any CDN works)
