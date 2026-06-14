@@ -127,14 +127,14 @@ composer.addPass(new RenderPass(scene, camera));
 // FTL radial blur — during a jump the whole frame smears outward from center, dragging
 // every star and planet into Star-Wars hyperspace streaks. Off (passthrough) at rest.
 warpBlurPass = new ShaderPass({
-  uniforms: { tDiffuse: { value: null }, uWarp: { value: 0 } },
+  uniforms: { tDiffuse: { value: null }, uWarp: { value: 0 }, uCenter: { value: new THREE.Vector2(0.5, 0.5) } },
   vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
   fragmentShader: `
-    uniform sampler2D tDiffuse; uniform float uWarp; varying vec2 vUv;
+    uniform sampler2D tDiffuse; uniform float uWarp; uniform vec2 uCenter; varying vec2 vUv;
     void main(){
       vec4 base = texture2D(tDiffuse, vUv);
       if (uWarp <= 0.001) { gl_FragColor = base; return; }
-      vec2 dir = vUv - vec2(0.5);
+      vec2 dir = vUv - uCenter;
       float jit = fract(sin(dot(vUv, vec2(12.9898, 78.233))) * 43758.5453);
       vec3 acc = base.rgb; float total = 1.0;
       for (int i = 1; i <= 28; i++) {
@@ -1616,7 +1616,7 @@ let lastThud = 0;
 let wasThrust = false;
 let wasFly = false;
 // reused scratch to avoid per-frame allocations in the hot loop
-const _forward = new THREE.Vector3(), _camGoal = new THREE.Vector3(), _camLook = new THREE.Vector3();
+const _forward = new THREE.Vector3(), _camGoal = new THREE.Vector3(), _camLook = new THREE.Vector3(), _vp = new THREE.Vector3();
 const _pq = new THREE.Quaternion(), _back = new THREE.Vector3();
 function tick() {
   const dt = Math.min(clock.getDelta(), 0.05);
@@ -1669,15 +1669,17 @@ function tick() {
   if (kYaw) yaw += kYaw * 1.7 * dt;
   const kPitch = (keys.has("KeyR") ? 1 : 0) - (keys.has("KeyF") ? 1 : 0);
   if (kPitch) pitch = Math.max(-1.2, Math.min(1.2, pitch + kPitch * 1.4 * dt));
-  // frozen-focus: ease the ship to face the world we clicked/warped to (cinematic)
-  if (focusTarget && !dive) {
-    _faceDir.subVectors(focusTarget.position, ship.position);
+  // ease the ship to face the world/system we clicked or warped to — so an FTL jump
+  // flies toward it head-on (not sliding sideways) and stays centered in frame.
+  const faceTarget = focusTarget || flyTarget;
+  if (faceTarget && faceTarget.position && !dive) {
+    _faceDir.subVectors(faceTarget.position, ship.position);
     if (_faceDir.lengthSq() > 1e-4) {
       _faceDir.normalize();
       const ty = Math.atan2(_faceDir.x, -_faceDir.z);
       const tp = Math.max(-1.2, Math.min(1.2, Math.asin(Math.max(-1, Math.min(1, _faceDir.y)))));
       let d = ty - yaw; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI;
-      const e = 1 - Math.exp(-5 * dt);
+      const e = 1 - Math.exp(-(flyTarget ? 8 : 5) * dt);
       yaw += d * e;
       pitch += (tp - pitch) * e;
     }
@@ -1938,7 +1940,13 @@ function tick() {
     warpField.quaternion.copy(camera.quaternion);
     warpMat.uniforms.uWarp.value = starMat.uniforms.uWarp.value;
   }
-  if (warpBlurPass && starMat) warpBlurPass.uniforms.uWarp.value = starMat.uniforms.uWarp.value;
+  if (warpBlurPass && starMat) {
+    warpBlurPass.uniforms.uWarp.value = starMat.uniforms.uWarp.value;
+    // center the radial streaks on where the nose points (the travel vanishing point)
+    _vp.copy(ship.position).addScaledVector(forward, 1200).project(camera);
+    if (_vp.z < 1) warpBlurPass.uniforms.uCenter.value.set(_vp.x * 0.5 + 0.5, -_vp.y * 0.5 + 0.5);
+    else warpBlurPass.uniforms.uCenter.value.set(0.5, 0.5);
+  }
 
   updateBubbles();
   updateCompass(forward);
