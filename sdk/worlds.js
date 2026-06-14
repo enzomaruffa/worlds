@@ -255,6 +255,188 @@
     slack: (target, text) => call("POST", "/api/v1/notify/slack", { target, text })
   };
 
+  // sdk/src/lobby.ts
+  function lobby(channel, opts = {}) {
+    const room = ws.channel(channel);
+    const cid = globalThis.crypto && typeof globalThis.crypto.randomUUID === "function" ? globalThis.crypto.randomUUID() : `c${Date.now()}-${Math.floor(Math.random() * 1e9)}`;
+    const autoStart = opts.autoStart !== false;
+    const minPlayers = Math.max(1, opts.minPlayers ?? 1);
+    let me = opts.me ? { handle: opts.me.handle, name: opts.me.name || opts.me.handle } : null;
+    let presence = [];
+    let loaded = false;
+    let started = false;
+    let dead = false;
+    const ready = {};
+    function uniq(list) {
+      const seen = new Set;
+      const out = [];
+      for (const m of list || []) {
+        if (m && m.handle && !seen.has(m.handle)) {
+          seen.add(m.handle);
+          out.push({ handle: m.handle, name: m.name || m.handle });
+        }
+      }
+      return out;
+    }
+    function roster() {
+      return uniq([...me ? [me] : [], ...presence]);
+    }
+    function hostHandle() {
+      const r = roster().map((p) => p.handle).sort();
+      return r.length ? r[0] : null;
+    }
+    function isHost() {
+      return !!me && hostHandle() === me.handle;
+    }
+    function readyCount() {
+      return roster().filter((p) => ready[p.handle]).length;
+    }
+    function allReady() {
+      const r = roster();
+      return r.length >= minPlayers && r.every((p) => ready[p.handle]);
+    }
+    function snapshot() {
+      const r = roster();
+      const host = hostHandle();
+      return {
+        me,
+        host: host ? r.find((p) => p.handle === host) ?? null : null,
+        isHost: isHost(),
+        ready: !!(me && ready[me.handle]),
+        readyCount: readyCount(),
+        total: r.length,
+        allReady: allReady(),
+        started,
+        loaded,
+        members: r.map((p) => ({
+          handle: p.handle,
+          name: p.name,
+          ready: !!ready[p.handle],
+          isMe: !!(me && p.handle === me.handle),
+          isHost: p.handle === host
+        }))
+      };
+    }
+    function emit() {
+      if (!dead)
+        opts.onUpdate?.(snapshot());
+    }
+    function pub(msg) {
+      room.publish({ _lobby: 1, cid, ...msg });
+    }
+    function maybeAutoStart() {
+      if (autoStart && isHost() && !started && allReady())
+        start();
+    }
+    function setReady(val) {
+      if (!me)
+        return;
+      ready[me.handle] = !!val;
+      pub({ t: "ready", handle: me.handle, name: me.name, ready: !!val });
+      emit();
+      maybeAutoStart();
+    }
+    function toggleReady() {
+      setReady(!(me && ready[me.handle]));
+    }
+    function start() {
+      if (!isHost() || started)
+        return;
+      if (roster().length < minPlayers)
+        return;
+      started = true;
+      pub({ t: "start", handle: me.handle });
+      opts.onStart?.(snapshot());
+    }
+    function returnToLobby() {
+      started = false;
+      for (const k of Object.keys(ready))
+        ready[k] = false;
+      pub({ t: "return", handle: me?.handle });
+      emit();
+      opts.onReturn?.(snapshot());
+    }
+    function setStarted(val) {
+      started = !!val;
+    }
+    const unsubPresence = room.presence((members) => {
+      presence = uniq(members || []);
+      const live = new Set(roster().map((p) => p.handle));
+      for (const h of Object.keys(ready))
+        if (!live.has(h))
+          delete ready[h];
+      loaded = true;
+      emit();
+      maybeAutoStart();
+    });
+    const unsubMsg = room.subscribe((msg) => {
+      const p = msg && msg.payload;
+      if (!p || !p._lobby || p.cid === cid)
+        return;
+      if (p.t === "ready" && p.handle) {
+        ready[p.handle] = !!p.ready;
+        emit();
+        maybeAutoStart();
+      } else if (p.t === "start") {
+        if (!started) {
+          started = true;
+          opts.onStart?.(snapshot());
+        }
+      } else if (p.t === "return") {
+        started = false;
+        for (const k of Object.keys(ready))
+          ready[k] = false;
+        emit();
+        opts.onReturn?.(snapshot());
+      } else if (p.t === "hello" && p.handle) {
+        if (me)
+          pub({ t: "ready", handle: me.handle, name: me.name, ready: !!ready[me.handle] });
+      }
+    });
+    function announce() {
+      if (!me)
+        return;
+      if (!(me.handle in ready))
+        ready[me.handle] = false;
+      pub({ t: "hello", handle: me.handle, name: me.name });
+      emit();
+      maybeAutoStart();
+    }
+    if (me) {
+      announce();
+    } else {
+      call("GET", "/api/v1/me").then((m) => {
+        if (dead)
+          return;
+        me = { handle: m.handle, name: m.name || m.handle };
+        announce();
+      }).catch(() => {});
+    }
+    return {
+      setReady,
+      toggleReady,
+      start,
+      returnToLobby,
+      setStarted,
+      snapshot,
+      get me() {
+        return me;
+      },
+      get isHost() {
+        return isHost();
+      },
+      destroy() {
+        dead = true;
+        try {
+          unsubPresence?.();
+        } catch {}
+        try {
+          unsubMsg?.();
+        } catch {}
+      }
+    };
+  }
+
   // sdk/src/index.ts
   var worlds = {
     WorldsError,
@@ -267,7 +449,8 @@
     ai,
     uploads,
     ws,
-    notify
+    notify,
+    lobby
   };
   worlds.ready = call("GET", "/api/v1/site").then((s) => {
     worlds.site = s;

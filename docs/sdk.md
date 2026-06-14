@@ -68,6 +68,38 @@ const stop = ch.subscribe(msg => { /* {payload, from: {handle, name}, at} */ });
 ch.presence(list => { /* [{handle, name}] */ });
 ```
 
+## Multiplayer lobby — `worlds.lobby`
+
+A waiting room with batteries included: a live roster, a stable host, ready
+toggles, and a clean start. The roster **always includes you** — even before the
+server echoes your own presence back — so the host never flickers and a fresh
+joiner is never mistaken for "everyone left". State is ephemeral (rides a ws
+channel); keep authoritative game state in `worlds.db`.
+
+```js
+const lobby = worlds.lobby("room", {
+  autoStart: true,            // host starts once everyone is ready (default true)
+  minPlayers: 2,              // smallest roster that may start (default 1)
+  onUpdate: (s) => render(s), // roster/ready/host changed
+  onStart:  (s) => beginGame(s),   // fires on every client when the game starts
+  onReturn: (s) => showLobby(s),   // fires on every client on return-to-lobby
+});
+
+lobby.toggleReady();          // or lobby.setReady(true/false)
+lobby.start();                // host-only; broadcasts start to everyone
+lobby.returnToLobby();        // send everyone back to the waiting room
+lobby.isHost;                 // am I the host (smallest handle)?
+lobby.snapshot();             // current state, same shape as onUpdate(s)
+```
+
+The snapshot `s`: `{ me, members:[{handle,name,ready,isMe,isHost}], host, isHost,
+ready, readyCount, total, allReady, started, loaded }`. `loaded` is `true` once
+presence has reported at least once — gate "opponent left" checks on it.
+
+For db-driven games (authoritative phase in a shared doc), pass `autoStart:false`
+and trigger your own start from `onUpdate` when `s.allReady` — the lobby still
+gives you the self-inclusive roster, host election, and ready sync.
+
 ## Notify — `worlds.notify`
 
 ```js

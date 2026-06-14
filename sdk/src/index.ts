@@ -7,6 +7,7 @@ import { ai } from "./ai";
 import { uploads } from "./uploads";
 import { ws } from "./channels";
 import { notify } from "./notify";
+import { lobby } from "./lobby";
 
 const worlds: any = {
   WorldsError,
@@ -20,6 +21,7 @@ const worlds: any = {
   uploads,
   ws,
   notify,
+  lobby,
 };
 
 // Resolve this site's context once; sites can `await worlds.ready`.
