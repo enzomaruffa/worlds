@@ -7,9 +7,18 @@ import { spaFallback } from "./sites";
 // unchanged bytes 304 even across redeploys, so nothing re-downloads (e.g. the
 // 1.3MB vendored three.js). Binary media (rarely changes) gets a real max-age.
 // NOTE: Cloudflare's Browser-Cache-TTL can rewrite a max-age but respects no-cache.
-const REVALIDATE = /\.(html?|js|mjs|css|json|svg|txt|md|map|xml|webmanifest)$/i;
+const CODE = /\.(js|mjs|css|json|svg|txt|md|map|xml|webmanifest)$/i;
 function cacheControl(path: string): string {
-  return path.endsWith("/") || REVALIDATE.test(path) ? "no-cache" : "public, max-age=3600";
+  // Vendored deps (e.g. three.js under /vendor/) are content-stable → cache long.
+  if (path.includes("/vendor/")) return "public, max-age=86400";
+  // Pages: revalidate. (Cloudflare treats no-cache HTML as dynamic and passes it through.)
+  if (path.endsWith("/") || /\.html?$/i.test(path)) return "no-cache";
+  // App code: Cloudflare edge-caches static extensions (.js/.css) even when the origin
+  // says no-cache, rewriting browser TTL to hours. It DOES honor no-store, so use that
+  // for code so overwrite-deploys are always instant (re-fetch is cheap; files are small).
+  if (CODE.test(path)) return "no-store";
+  // Binary media (images/models/audio/fonts): stable, cacheable.
+  return "public, max-age=3600";
 }
 
 // Content-hash ETags, memoized by (size,mtime) so the hash is computed once per
