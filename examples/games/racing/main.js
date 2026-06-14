@@ -12,7 +12,7 @@ import * as THREE from "three";
 const CHANNEL = "race";
 const LEADERBOARD = "leaderboard";
 const SEND_HZ = 14; // pose broadcasts per second (SDK asks for 12-15)
-const STALE_MS = 5000; // drop a remote kart unheard-from this long
+const STALE_MS = 4000; // drop a remote kart unheard-from this long (aggressive anti-ghost)
 const POSE_LERP = 12; // remote position smoothing rate
 const HEAD_LERP = 10; // remote heading smoothing rate
 
@@ -22,6 +22,19 @@ const clientId =
 
 // ── Player identity (filled from worlds.me, with anonymous fallback) ────────
 const me = { handle: null, name: "you", color: 0xfbbf24 };
+
+// ── Lobby / waiting-room state ───────────────────────────────────────────────
+// Ready-state is shared by piggybacking a `ready` boolean on the pose ping over
+// the "race" channel; the host (lexicographically smallest present handle) can
+// force-start, and we auto-start when every present racer is ready.
+let lobbyActive = true; // overlay shown until the race starts
+let presenceMembers = []; // last presence snapshot from the race channel
+const lobby = {
+  selfReady: false,
+  ready: new Map(), // handle -> bool (remote ready states)
+  seen: new Map(), // handle -> { name, at } (recently-heard roster)
+  started: false, // local guard so we run the countdown once
+};
 
 // ── DOM ─────────────────────────────────────────────────────────────────────
 const $ = (id) => document.getElementById(id);
@@ -39,6 +52,12 @@ const dom = {
   toast: $("toast"),
   countdown: $("countdown"),
   cdNum: $("cdNum"),
+  lobby: $("lobby"),
+  lobbySub: $("lobbySub"),
+  lobbyRoster: $("lobbyRoster"),
+  lobbyHint: $("lobbyHint"),
+  btnReady: $("btnReady"),
+  btnStart: $("btnStart"),
   loader: $("loader"),
   loaderWho: $("loaderWho"),
   loaderErr: $("loaderErr"),
@@ -72,23 +91,29 @@ function colorForHandle(handle) {
 const ROAD_HALF = 7.0; // half-width of drivable road
 const CURB_W = 0.9;
 
-// Hand-placed control points forming a flowing loop with varied turns.
+// Hand-placed control points forming a flowing loop with REAL elevation.
+// Y gives the height profile: rolling hills, a climb to the back ridge, and a
+// satisfying plunge from the high SE corner back down to the start straight.
+// BANK_W[i] (0..1) pairs with each point: how hard to roll the road toward the
+// inside of the curve there (applied to the sharp/banked corners).
 const CONTROL_POINTS = [
-  [0, 0, 60],
-  [42, 0, 52],
-  [62, 0, 18],
-  [50, 0, -22],
-  [70, 0, -54],
-  [40, 0, -78],
-  [-2, 0, -70],
-  [-20, 0, -40],
-  [-50, 0, -48],
-  [-72, 0, -14],
-  [-58, 0, 26],
-  [-30, 0, 30],
-  [-44, 0, 60],
-  [-20, 0, 82],
+  [0, 0.5, 60], // start/finish — flat straight
+  [42, 3.5, 52], // gentle rise into sweeper
+  [62, 7.5, 18], // banked right-hander at the climb's crest
+  [50, 9.5, -22], // ridge
+  [70, 11.5, -54], // highest point — hard banked hairpin
+  [40, 6.0, -78], // big drop begins
+  [-2, 0.5, -70], // bottom of the plunge
+  [-20, 2.5, -40], // banked left kink rising again
+  [-50, 5.5, -48], // banked sweeper
+  [-72, 4.0, -14], // rolling
+  [-58, 1.0, 26], // descending
+  [-30, -2.0, 30], // dip below grade
+  [-44, 1.5, 60], // banked rise
+  [-20, 2.0, 82], // long curve back to start
 ].map((p) => new THREE.Vector3(p[0], p[1], p[2]));
+const BANK_W = [0.0, 0.55, 0.95, 0.5, 1.0, 0.45, 0.2, 0.7, 0.85, 0.6, 0.4, 0.3, 0.6, 0.2];
+const BANK_MAX = 0.32; // max road roll (radians) at a fully-banked corner
 
 const curve = new THREE.CatmullRomCurve3(CONTROL_POINTS, true, "catmullrom", 0.5);
 const TRACK_LEN = curve.getLength();
@@ -98,6 +123,41 @@ const centerPts = curve.getSpacedPoints(SAMPLES); // length SAMPLES+1, closed
 const tangents = [];
 for (let i = 0; i <= SAMPLES; i++) {
   tangents.push(curve.getTangentAt((i % SAMPLES) / SAMPLES).normalize());
+}
+
+// Per-control-point bank as a closed Catmull-Rom over u∈[0,1] so we can read a
+// smooth bank weight at any sample. Reuse it to derive curvature-driven roll.
+const bankCurve = (() => {
+  const pts = BANK_W.map((w, i) => new THREE.Vector3(i / BANK_W.length, w, 0));
+  return new THREE.CatmullRomCurve3(pts, true, "catmullrom", 0.5);
+})();
+function bankWeightAt(u) {
+  // u in [0,1) along the loop → smoothed bank weight in [0,1]
+  return THREE.MathUtils.clamp(bankCurve.getPoint(((u % 1) + 1) % 1).y, 0, 1);
+}
+
+// Per-sample surface frame: side normal rolled by the bank, and the true
+// surface "up" (perpendicular to the banked cross-section). Banking rolls the
+// cross-section toward the inside of the curve, so we need the curve's sign of
+// turn at each sample (cross product of consecutive tangents in XZ).
+const sideNormals = []; // horizontal-ish road-right direction (banked)
+const ups = []; // surface up (banked)
+{
+  const WORLD_UP = new THREE.Vector3(0, 1, 0);
+  for (let i = 0; i <= SAMPLES; i++) {
+    const t = tangents[i % SAMPLES];
+    const flatN = new THREE.Vector3().crossVectors(WORLD_UP, t).normalize();
+    // signed curvature: how the tangent turns over a small step (left/right)
+    const tn = tangents[(i + 4) % SAMPLES];
+    const turnSign = Math.sign(t.x * tn.z - t.z * tn.x) || 0; // +left, -right (XZ)
+    const u = (i % SAMPLES) / SAMPLES;
+    const bank = bankWeightAt(u) * BANK_MAX;
+    // roll the cross-section about the tangent toward the inside of the curve
+    const roll = -turnSign * bank;
+    const q = new THREE.Quaternion().setFromAxisAngle(t, roll);
+    sideNormals.push(flatN.clone().applyQuaternion(q).normalize());
+    ups.push(WORLD_UP.clone().applyQuaternion(q).normalize());
+  }
 }
 
 // progress (0..1) lookup: nearest sample index, used for lap line crossing.
@@ -116,6 +176,52 @@ function nearestSample(x, z) {
     }
   }
   return { index: bi, dist: Math.sqrt(bd) };
+}
+
+// ── Surface query: interpolated height + up + tangent at an XZ point ────────
+// Find the nearest centerline segment and project the point onto it to get a
+// smooth blended frame (so the kart rides the slope, not stair-stepped samples).
+const _segA = new THREE.Vector3();
+const _segB = new THREE.Vector3();
+const _segAB = new THREE.Vector3();
+function surfaceAt(x, z) {
+  const near = nearestSample(x, z);
+  const i = near.index;
+  // pick the better-matching adjacent segment: [i-1,i] or [i,i+1]
+  const iPrev = (i - 1 + SAMPLES) % SAMPLES;
+  const iNext = (i + 1) % SAMPLES;
+  let a = i;
+  let b = iNext;
+  // project onto both candidate segments, keep the one whose param is in range
+  const tFwd = projParam(centerPts[i], centerPts[iNext], x, z);
+  const tBwd = projParam(centerPts[iPrev], centerPts[i], x, z);
+  let frac;
+  if (tFwd >= 0) {
+    a = i;
+    b = iNext;
+    frac = Math.min(1, tFwd);
+  } else {
+    a = iPrev;
+    b = i;
+    frac = Math.max(0, tBwd);
+  }
+  const pa = centerPts[a];
+  const pb = centerPts[b];
+  const y = pa.y + (pb.y - pa.y) * frac;
+  const up = ups[a].clone().lerp(ups[b], frac).normalize();
+  const t = tangents[a].clone().lerp(tangents[b], frac).normalize();
+  const sideN = sideNormals[a].clone().lerp(sideNormals[b], frac).normalize();
+  return { y, up, tangent: t, sideNormal: sideN, index: i, dist: near.dist };
+}
+function projParam(pa, pb, x, z) {
+  _segA.set(pa.x, 0, pa.z);
+  _segB.set(pb.x, 0, pb.z);
+  _segAB.subVectors(_segB, _segA);
+  const lenSq = _segAB.x * _segAB.x + _segAB.z * _segAB.z;
+  if (lenSq < 1e-6) return 0;
+  const px = x - _segA.x;
+  const pz = z - _segA.z;
+  return (px * _segAB.x + pz * _segAB.z) / lenSq;
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -206,36 +312,56 @@ scene.add(sun.target);
     new THREE.MeshLambertMaterial({ color: 0x5d8a43 }),
   );
   g.rotation.x = -Math.PI / 2;
-  g.position.y = -0.02;
+  g.position.y = -3.4; // below the track's lowest dip so banked road never clips
   g.receiveShadow = true;
   scene.add(g);
 }
 
-// ── Build the road ribbon + curbs as one mesh each ──────────────────────────
+// ── Build the road ribbon + curbs as one mesh each (banked, 3D) ─────────────
+// Edges follow the banked side normal so the road tilts; small surface lift
+// along the banked up keeps the ribbon above the grass and the curbs above
+// the road. The grass shoulders fall away from the curbs.
+const ROAD_LIFT = 0.06;
+function edgeAt(i, lateral, lift) {
+  const c = centerPts[i % SAMPLES];
+  const sn = sideNormals[i % SAMPLES];
+  const up = ups[i % SAMPLES];
+  return new THREE.Vector3(
+    c.x + sn.x * lateral + up.x * lift,
+    c.y + sn.y * lateral + up.y * lift,
+    c.z + sn.z * lateral + up.z * lift,
+  );
+}
 function buildTrack() {
-  const up = new THREE.Vector3(0, 1, 0);
   const left = []; // inner edge of road
   const right = []; // outer edge of road
   const curbL = [];
   const curbR = [];
+  const shoulderL = [];
+  const shoulderR = [];
   for (let i = 0; i <= SAMPLES; i++) {
-    const c = centerPts[i % SAMPLES];
-    const t = tangents[i % SAMPLES];
-    const n = new THREE.Vector3().crossVectors(up, t).normalize(); // side normal
-    left.push(c.clone().addScaledVector(n, ROAD_HALF));
-    right.push(c.clone().addScaledVector(n, -ROAD_HALF));
-    curbL.push(c.clone().addScaledVector(n, ROAD_HALF + CURB_W));
-    curbR.push(c.clone().addScaledVector(n, -ROAD_HALF - CURB_W));
+    left.push(edgeAt(i, ROAD_HALF, ROAD_LIFT));
+    right.push(edgeAt(i, -ROAD_HALF, ROAD_LIFT));
+    curbL.push(edgeAt(i, ROAD_HALF + CURB_W, ROAD_LIFT + 0.04));
+    curbR.push(edgeAt(i, -(ROAD_HALF + CURB_W), ROAD_LIFT + 0.04));
+    // shoulder skirt fans outward AND drops to ground grade so the raised road
+    // blends into the grass with no floating lip on hills/banks.
+    const sL = edgeAt(i, ROAD_HALF + CURB_W + 7, 0);
+    const sR = edgeAt(i, -(ROAD_HALF + CURB_W + 7), 0);
+    sL.y = -3.4;
+    sR.y = -3.4;
+    shoulderL.push(sL);
+    shoulderR.push(sR);
   }
 
-  // Road surface: triangle strip between left/right.
+  // Road surface: triangle strip between left/right (true banked Y).
   const roadGeo = new THREE.BufferGeometry();
   const rv = [];
   const ruv = [];
   for (let i = 0; i <= SAMPLES; i++) {
     const a = left[i];
     const b = right[i];
-    rv.push(a.x, 0.01, a.z, b.x, 0.01, b.z);
+    rv.push(a.x, a.y, a.z, b.x, b.y, b.z);
     const v = i / SAMPLES;
     ruv.push(0, v, 1, v);
   }
@@ -255,27 +381,32 @@ function buildTrack() {
   road.receiveShadow = true;
   scene.add(road);
 
-  // Center dashed line via small white quads every few samples.
+  // Center dashed line via small white quads, laid on the banked surface.
   const dashMat = new THREE.MeshBasicMaterial({ color: 0xe8e8ec });
   const dashGeo = new THREE.PlaneGeometry(0.35, 3.2);
-  const dashCount = 90;
+  const dashCount = 110;
   const dash = new THREE.InstancedMesh(dashGeo, dashMat, dashCount);
   const m = new THREE.Matrix4();
   const q = new THREE.Quaternion();
+  const dz = new THREE.Vector3();
   for (let d = 0; d < dashCount; d++) {
     const i = Math.floor((d / dashCount) * SAMPLES);
     const c = centerPts[i];
     const t = tangents[i];
-    q.setFromUnitVectors(new THREE.Vector3(0, 0, 1), t.clone().setY(0).normalize());
-    const flat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2);
-    q.multiply(flat);
-    m.compose(new THREE.Vector3(c.x, 0.03, c.z), q, new THREE.Vector3(1, 1, 1));
+    const up = ups[i];
+    dz.copy(t).normalize();
+    q.setFromRotationMatrix(orientMatrix(dz, up));
+    m.compose(
+      new THREE.Vector3(c.x + up.x * (ROAD_LIFT + 0.02), c.y + up.y * (ROAD_LIFT + 0.02), c.z + up.z * (ROAD_LIFT + 0.02)),
+      q,
+      new THREE.Vector3(1, 1, 1),
+    );
     dash.setMatrixAt(d, m);
   }
   dash.instanceMatrix.needsUpdate = true;
   scene.add(dash);
 
-  // Curbs: alternating red/white strips along both edges.
+  // Curbs: alternating red/white strips along both banked edges.
   function curbRibbon(inner, outer, offsetParity) {
     const geo = new THREE.BufferGeometry();
     const pos = [];
@@ -286,7 +417,7 @@ function buildTrack() {
     for (let i = 0; i <= SAMPLES; i++) {
       const a = inner[i];
       const b = outer[i];
-      pos.push(a.x, 0.04, a.z, b.x, 0.04, b.z);
+      pos.push(a.x, a.y, a.z, b.x, b.y, b.z);
       const stripe = Math.floor(i / 6) % 2 === offsetParity;
       const col = stripe ? cRed : cWhite;
       colors.push(col.r, col.g, col.b, col.r, col.g, col.b);
@@ -306,16 +437,59 @@ function buildTrack() {
   curbRibbon(left, curbL, 0);
   curbRibbon(right, curbR, 1);
 
+  // Grass shoulders: a darker apron skirting each curb down to grade so the
+  // raised/banked road never shows a floating edge against the flat ground.
+  function shoulderRibbon(top, bottom) {
+    const geo = new THREE.BufferGeometry();
+    const pos = [];
+    const idx = [];
+    for (let i = 0; i <= SAMPLES; i++) {
+      const a = top[i];
+      const b = bottom[i];
+      pos.push(a.x, a.y, a.z, b.x, b.y, b.z);
+    }
+    for (let i = 0; i < SAMPLES; i++) {
+      const o = i * 2;
+      idx.push(o, o + 1, o + 2, o + 1, o + 3, o + 2);
+    }
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    geo.setIndex(idx);
+    geo.computeVertexNormals();
+    const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ color: 0x55803d }));
+    mesh.receiveShadow = true;
+    scene.add(mesh);
+  }
+  shoulderRibbon(curbL, shoulderL);
+  shoulderRibbon(curbR, shoulderR);
+
   return { left, right, curbL, curbR };
+}
+
+// Build a rotation that aligns +Z to `forward` and +Y to `up` (for placing
+// flat quads / posts on the banked surface).
+const _ox = new THREE.Vector3();
+const _oy = new THREE.Vector3();
+const _oz = new THREE.Vector3();
+const _om = new THREE.Matrix4();
+function orientMatrix(forward, up) {
+  _oz.copy(forward).normalize();
+  _ox.crossVectors(up, _oz).normalize();
+  _oy.crossVectors(_oz, _ox).normalize();
+  _om.makeBasis(_ox, _oy, _oz);
+  return _om;
 }
 const trackEdges = buildTrack();
 
-// ── Start/finish line: a checkered band laid across the road at sample 0 ────
+// ── Start/finish line: a checkered band laid across the banked road ─────────
+// finishForward/finishNormal stay HORIZONTAL (XZ) — lap-crossing math projects
+// the kart's flat XZ onto these planes, so keeping them planar avoids slope
+// sensitivity. Visuals follow the banked surface frame instead.
 const FINISH_INDEX = 0;
 let finishNormal, finishCenter, finishForward;
 {
   const c = centerPts[FINISH_INDEX];
   const t = tangents[FINISH_INDEX];
+  const up = ups[FINISH_INDEX];
   finishCenter = c.clone();
   finishForward = t.clone().setY(0).normalize();
   finishNormal = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), t).normalize();
@@ -326,35 +500,37 @@ let finishNormal, finishCenter, finishForward;
   const group = new THREE.Group();
   const matA = new THREE.MeshBasicMaterial({ color: 0xf4f4f6 });
   const matB = new THREE.MeshBasicMaterial({ color: 0x18181b });
+  const baseQ = new THREE.Quaternion().setFromRotationMatrix(orientMatrix(t, up));
+  const lay = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2);
   for (let r = 0; r < 2; r++) {
     for (let col = 0; col < cols; col++) {
       const tile = new THREE.Mesh(
         new THREE.PlaneGeometry(tileW, tileL),
         (r + col) % 2 === 0 ? matA : matB,
       );
-      tile.rotation.x = -Math.PI / 2;
-      const along = finishForward.clone().multiplyScalar((r - 0.5) * tileL);
-      const side = finishNormal.clone().multiplyScalar(ROAD_HALF - tileW * (col + 0.5));
-      tile.position.set(c.x + side.x + along.x, 0.05, c.z + side.z + along.z);
-      // align tile rows with track direction
-      tile.rotation.z = Math.atan2(finishNormal.x, finishNormal.z);
+      tile.quaternion.copy(baseQ).multiply(lay);
+      // place on the banked surface: along the tangent, across the side normal
+      const along = t.clone().multiplyScalar((r - 0.5) * tileL);
+      const lateral = ROAD_HALF - tileW * (col + 0.5);
+      const p = edgeAt(FINISH_INDEX, lateral, ROAD_LIFT + 0.04);
+      tile.position.set(p.x + along.x, p.y, p.z + along.z);
       group.add(tile);
     }
   }
   scene.add(group);
 
-  // Start gantry: two posts + banner over the line.
+  // Start gantry: two posts + banner over the line, planted on the banked road.
   const postMat = new THREE.MeshLambertMaterial({ color: 0x27272a });
   const bannerMat = new THREE.MeshLambertMaterial({ color: 0xf59e0b });
   for (const s of [1, -1]) {
     const post = new THREE.Mesh(new THREE.BoxGeometry(0.7, 9, 0.7), postMat);
-    const off = finishNormal.clone().multiplyScalar(s * (ROAD_HALF + 0.6));
-    post.position.set(c.x + off.x, 4.5, c.z + off.z);
+    const base = edgeAt(FINISH_INDEX, s * (ROAD_HALF + 0.6), ROAD_LIFT);
+    post.position.set(base.x, base.y + 4.5, base.z);
     post.castShadow = true;
     scene.add(post);
   }
   const banner = new THREE.Mesh(new THREE.BoxGeometry(ROAD_HALF * 2 + 1.6, 1.8, 0.5), bannerMat);
-  banner.position.set(c.x, 9, c.z);
+  banner.position.set(c.x, c.y + 9, c.z);
   banner.rotation.y = Math.atan2(finishForward.x, finishForward.z);
   banner.castShadow = true;
   scene.add(banner);
@@ -380,9 +556,10 @@ const checkpoints = []; // { index, center:Vector3, forward:Vector3, normal:Vect
     const normal = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), t).normalize();
     checkpoints.push({
       index,
-      center: c.clone(),
-      forward,
-      normal,
+      center: c.clone(), // 3D — for gate placement
+      forward, // horizontal — for plane crossing math
+      normal, // horizontal
+      up: ups[index].clone(),
     });
   }
 }
@@ -400,13 +577,13 @@ function buildCheckpointGates() {
       [1, matA],
       [-1, matB],
     ]) {
-      const off = cp.normal.clone().multiplyScalar(s * (ROAD_HALF + 0.4));
+      const base = edgeAt(cp.index, s * (ROAD_HALF + 0.4), ROAD_LIFT);
       const post = new THREE.Mesh(postGeo, mat);
-      post.position.set(cp.center.x + off.x, 3.5, cp.center.z + off.z);
+      post.position.set(base.x, base.y + 3.5, base.z);
       group.add(post);
     }
     const bar = new THREE.Mesh(new THREE.BoxGeometry(ROAD_HALF * 2 + 0.8, 0.4, 0.4), barMat);
-    bar.position.set(cp.center.x, 6.8, cp.center.z);
+    bar.position.set(cp.center.x, cp.center.y + 6.8, cp.center.z);
     bar.rotation.y = Math.atan2(cp.forward.x, cp.forward.z);
     group.add(bar);
     cp.group = group;
@@ -468,7 +645,7 @@ function addScenery() {
     const edge = k % 2 === 0 ? trackEdges.curbL[i] : trackEdges.curbR[i];
     const off = (k % 2 === 0 ? 1 : -1) * 1.1;
     const n = finishNormalAt(i).multiplyScalar(off);
-    m.makeTranslation(edge.x + n.x, 0.65, edge.z + n.z);
+    m.makeTranslation(edge.x + n.x, edge.y + 0.65, edge.z + n.z);
     cones.setMatrixAt(k, m);
   }
   cones.instanceMatrix.needsUpdate = true;
@@ -497,9 +674,10 @@ function addScenery() {
     const near = nearestSample(x, z);
     if (near.dist < ROAD_HALF + 14) continue; // keep clear of the track
     const s = 0.7 + rng() * 0.9;
-    mt.compose(new THREE.Vector3(x, 1.3 * s, z), new THREE.Quaternion(), new THREE.Vector3(s, s, s));
+    const gy = -3.4; // ground grade
+    mt.compose(new THREE.Vector3(x, gy + 1.3 * s, z), new THREE.Quaternion(), new THREE.Vector3(s, s, s));
     trunks.setMatrixAt(placed, mt);
-    ml.compose(new THREE.Vector3(x, (2.6 + 1.6) * s, z), new THREE.Quaternion(), new THREE.Vector3(s, s, s));
+    ml.compose(new THREE.Vector3(x, gy + (2.6 + 1.6) * s, z), new THREE.Quaternion(), new THREE.Vector3(s, s, s));
     leaves.setMatrixAt(placed, ml);
     leaves.setColorAt(placed, new THREE.Color(leafColors[placed % leafColors.length]));
     placed++;
@@ -518,14 +696,15 @@ function addScenery() {
     const i = spot % SAMPLES;
     const c = centerPts[i];
     const n = finishNormalAt(i).multiplyScalar(ROAD_HALF + 12);
+    const gy = Math.max(0, c.y); // sit on grade, never sink below ground
     const base = new THREE.Mesh(new THREE.BoxGeometry(18, 4, 7), standMat);
-    base.position.set(c.x + n.x, 2, c.z + n.z);
-    base.lookAt(c.x, 2, c.z);
+    base.position.set(c.x + n.x, gy + 2, c.z + n.z);
+    base.lookAt(c.x, gy + 2, c.z);
     base.castShadow = true;
     base.receiveShadow = true;
     const roof = new THREE.Mesh(new THREE.BoxGeometry(18.5, 0.5, 7.5), roofMat);
-    roof.position.set(c.x + n.x, 4.6, c.z + n.z);
-    roof.lookAt(c.x, 4.6, c.z);
+    roof.position.set(c.x + n.x, gy + 4.6, c.z + n.z);
+    roof.lookAt(c.x, gy + 4.6, c.z);
     scene.add(base, roof);
   }
 }
@@ -676,6 +855,8 @@ const player = {
   heading: 0, // radians, 0 = +Z
   vel: 0, // forward signed speed (units/s)
   lateral: 0, // drift slip used for visual lean
+  surfaceY: 0, // smoothed track-surface height under the kart
+  surfaceUp: new THREE.Vector3(0, 1, 0), // smoothed surface up (banked)
   mesh: null,
   label: null,
 };
@@ -683,8 +864,11 @@ const player = {
 // Spawn slightly behind the finish line, facing along the track direction.
 {
   const back = finishForward.clone().multiplyScalar(-6);
-  player.pos.set(finishCenter.x + back.x, 0, finishCenter.z + back.z);
+  player.pos.set(finishCenter.x + back.x, finishCenter.y, finishCenter.z + back.z);
   player.heading = Math.atan2(finishForward.x, finishForward.z);
+  const sf = surfaceAt(player.pos.x, player.pos.z);
+  player.surfaceY = sf.y;
+  player.surfaceUp.copy(sf.up);
 }
 
 const PHYS = {
@@ -700,6 +884,7 @@ const PHYS = {
   offRoadDrag: 34, // strong slow when off the road
   offRoadMax: 16, // speed cap off-road
   gripRecover: 6,
+  gravityFeel: 18, // accel/decel from slope grade (units/s² at full pitch)
 };
 
 function makeSelfKart() {
@@ -710,10 +895,14 @@ function makeSelfKart() {
 }
 
 // ── Remote karts ─────────────────────────────────────────────────────────
-// handle -> { mesh, label, target:{x,z,ry,speed}, name, color, at }
+// Keyed by HANDLE → exactly one kart per distinct player. Each entry also
+// remembers which clientId currently "owns" it; a pose from a DIFFERENT cid for
+// the same handle (rename / reconnect / new tab) REPLACES the owner instead of
+// spawning a ghost. Label updates live on rename.
+// handle -> { mesh, label, name, color, cid, cur, target, ..., at }
 const remotes = new Map();
 
-function ensureRemote(handle, name, colorHex) {
+function ensureRemote(handle, name, colorHex, cid) {
   let r = remotes.get(handle);
   if (!r) {
     const mesh = makeKart(colorHex);
@@ -725,8 +914,11 @@ function ensureRemote(handle, name, colorHex) {
       label,
       name,
       color: colorHex,
+      cid: cid || null,
       cur: new THREE.Vector3(),
       target: new THREE.Vector3(),
+      surfaceY: 0,
+      surfaceUp: new THREE.Vector3(0, 1, 0),
       curHeading: 0,
       targetHeading: 0,
       speed: 0,
@@ -737,11 +929,21 @@ function ensureRemote(handle, name, colorHex) {
   }
   return r;
 }
+function setRemoteLabel(r, text) {
+  if (r.label) {
+    r.mesh.remove(r.label);
+    r.label.material.map?.dispose();
+    r.label.material.dispose();
+  }
+  const label = makeLabel(text);
+  r.mesh.add(label);
+  r.label = label;
+}
 function removeRemote(handle) {
   const r = remotes.get(handle);
   if (!r) return;
   scene.remove(r.mesh);
-  r.label.material.map?.dispose();
+  r.label?.material.map?.dispose();
   remotes.delete(handle);
 }
 
@@ -966,6 +1168,11 @@ function onCrossFinish(forward, now) {
 let lastFrame = performance.now();
 const tmpCamPos = new THREE.Vector3();
 const tmpLook = new THREE.Vector3();
+const WORLD_UP = new THREE.Vector3(0, 1, 0);
+const _kfwd = new THREE.Vector3();
+const _kquat = new THREE.Quaternion();
+const _kquat2 = new THREE.Quaternion();
+const _keuler = new THREE.Euler();
 
 function frame(now) {
   const dt = Math.min(0.05, (now - lastFrame) / 1000);
@@ -988,8 +1195,10 @@ function frame(now) {
 
 function stepPhysics(dt, now) {
   // ── longitudinal ──
-  const throttling = input.up;
-  const braking = input.down;
+  // while the lobby is up, karts idle at the start line — ignore drive input.
+  const throttling = lobbyActive ? false : input.up;
+  const braking = lobbyActive ? false : input.down;
+  if (lobbyActive) player.vel *= Math.max(0, 1 - 4 * dt); // settle to a stop
   if (throttling) {
     player.vel += PHYS.accel * dt;
   } else if (braking) {
@@ -1016,7 +1225,7 @@ function stepPhysics(dt, now) {
   player.vel = THREE.MathUtils.clamp(player.vel, PHYS.maxReverse, PHYS.maxSpeed);
 
   // ── steering (scales down with speed; needs motion to turn) ──
-  const steer = (input.left ? 1 : 0) - (input.right ? 1 : 0);
+  const steer = lobbyActive ? 0 : (input.left ? 1 : 0) - (input.right ? 1 : 0);
   const speedFrac = Math.min(1, Math.abs(player.vel) / PHYS.maxSpeed);
   const turnScale = 1 - PHYS.turnSpeedFalloff * speedFrac;
   // motion gate: barely turns when nearly stopped (arcade but believable)
@@ -1035,6 +1244,17 @@ function stepPhysics(dt, now) {
   player.pos.x += fx * player.vel * dt;
   player.pos.z += fz * player.vel * dt;
 
+  // ── gravity feel: sample surface height a step ahead vs behind along the
+  // heading; the height delta is the grade. Downhill (+) speeds up, uphill (−)
+  // slows down. Subtle by design — keeps the arcade feel.
+  {
+    const STEP = 3;
+    const aheadY = surfaceAt(player.pos.x + fx * STEP, player.pos.z + fz * STEP).y;
+    const behindY = surfaceAt(player.pos.x - fx * STEP, player.pos.z - fz * STEP).y;
+    const grade = (behindY - aheadY) / (2 * STEP); // >0 means going downhill
+    player.vel += THREE.MathUtils.clamp(grade, -0.6, 0.6) * PHYS.gravityFeel * dt;
+  }
+
   // ── track containment ("soft wall" at the road edge) ──
   // Past the road half-width + margin, push back toward the centerline and
   // kill the outward velocity component. Forgiving enough to clip curbs.
@@ -1043,15 +1263,31 @@ function stepPhysics(dt, now) {
   // ── kart-to-kart collisions (local player vs remotes; XZ circle test) ──
   resolveKartCollisions(fx, fz);
 
+  // ── stick to the track surface: set Y to the interpolated surface height and
+  // orient the kart to the banked/sloped surface frame, then layer the arcade
+  // turn-lean + accel-pitch on top. Smoothed so crests/banks feel fluid.
+  const sf = surfaceAt(player.pos.x, player.pos.z);
+  const onGround = sf.dist < ROAD_HALF + CURB_W + 3;
+  const targetY = onGround ? sf.y : Math.max(-3.4 + 0.05, player.surfaceY); // off-track: hold last grade
+  player.surfaceY += (targetY - player.surfaceY) * Math.min(1, 12 * dt);
+  player.surfaceUp.lerp(onGround ? sf.up : WORLD_UP, Math.min(1, 8 * dt)).normalize();
+  player.pos.y = player.surfaceY;
+
   // mesh transform
   if (player.mesh) {
-    player.mesh.position.set(player.pos.x, 0, player.pos.z);
-    player.mesh.rotation.y = player.heading;
-    // body roll on turns
-    player.mesh.rotation.z = -player.lateral * 0.18;
-    // tiny pitch under accel/brake
+    player.mesh.position.set(player.pos.x, player.surfaceY, player.pos.z);
+    // base orientation: align kart up to surface up, forward to heading
+    const fwd = _kfwd.set(fx, 0, fz);
+    // tilt forward into the surface plane so pitch tracks the slope
+    const upS = player.surfaceUp;
+    fwd.addScaledVector(upS, -(fwd.dot(upS))).normalize();
+    _kquat.setFromRotationMatrix(orientMatrix(fwd, upS));
+    player.mesh.quaternion.copy(_kquat);
+    // arcade lean (roll) + accel/brake pitch, applied in the kart's local frame
+    const lean = -player.lateral * 0.18;
     const pitch = (throttling ? -0.04 : braking ? 0.05 : 0) * speedFrac;
-    player.mesh.rotation.x = pitch;
+    _kquat2.setFromEuler(_keuler.set(pitch, 0, lean, "ZYX"));
+    player.mesh.quaternion.multiply(_kquat2);
     // spin wheels
     const spin = player.vel * dt * 2.2;
     for (const w of player.mesh.userData.allWheels) w.rotation.x += spin;
@@ -1124,8 +1360,17 @@ function stepRemotes(dt) {
     while (dh > Math.PI) dh -= Math.PI * 2;
     while (dh < -Math.PI) dh += Math.PI * 2;
     r.curHeading += dh * Math.min(1, HEAD_LERP * dt);
-    r.mesh.position.set(r.cur.x, 0, r.cur.z);
-    r.mesh.rotation.y = r.curHeading;
+    // ride the surface too: prefer the sender's reported y when present, else
+    // sample so remotes don't float over hills.
+    const sf = surfaceAt(r.cur.x, r.cur.z);
+    const ty = isFinite(r.target.y) ? r.target.y : sf.y;
+    r.surfaceY += (ty - r.surfaceY) * Math.min(1, 12 * dt);
+    r.surfaceUp.lerp(sf.up, Math.min(1, 8 * dt)).normalize();
+    r.mesh.position.set(r.cur.x, r.surfaceY, r.cur.z);
+    const fwd = _kfwd.set(Math.sin(r.curHeading), 0, Math.cos(r.curHeading));
+    const upS = r.surfaceUp;
+    fwd.addScaledVector(upS, -(fwd.dot(upS))).normalize();
+    r.mesh.quaternion.copy(_kquat.setFromRotationMatrix(orientMatrix(fwd, upS)));
     const spin = r.speed * dt * 2.2;
     for (const w of r.mesh.userData.allWheels) w.rotation.x += spin;
   }
@@ -1135,101 +1380,174 @@ function updateCamera(dt) {
   if (!player.mesh) return;
   const fx = Math.sin(player.heading);
   const fz = Math.cos(player.heading);
-  // chase position: behind + above the kart
+  // chase position: behind + above the kart, riding its surface height so
+  // cresting a hill / dropping reads naturally. Look a bit further ahead at the
+  // surface height THERE so the camera tips down on descents and up on climbs.
   const speedZoom = 1 + Math.min(1, Math.abs(player.vel) / PHYS.maxSpeed) * 0.4;
   const back = 10.5 * speedZoom * camZoom;
   const height = 4 + 2.2 * camZoom;
+  const baseY = player.surfaceY;
   tmpCamPos.set(
     player.pos.x - fx * back,
-    height,
+    baseY + height,
     player.pos.z - fz * back,
   );
   // smooth follow (lag)
   const follow = 1 - Math.pow(0.0009, dt); // frame-rate independent smoothing
   camera.position.lerp(tmpCamPos, follow);
-  // look slightly ahead of the kart
-  tmpLook.set(player.pos.x + fx * 5, 1.4, player.pos.z + fz * 5);
+  // look slightly ahead of the kart, at that point's surface height
+  const aheadX = player.pos.x + fx * 7;
+  const aheadZ = player.pos.z + fz * 7;
+  const aheadY = surfaceAt(aheadX, aheadZ).y;
+  tmpLook.set(aheadX, aheadY + 1.4, aheadZ);
   camera.lookAt(tmpLook);
   // keep the sun shadow frustum centered on the action
-  sun.position.set(player.pos.x + 70, 120, player.pos.z + 50);
-  sun.target.position.set(player.pos.x, 0, player.pos.z);
+  sun.position.set(player.pos.x + 70, baseY + 120, player.pos.z + 50);
+  sun.target.position.set(player.pos.x, baseY, player.pos.z);
 }
 
 function pruneRemotes(now) {
   for (const [h, r] of remotes) {
-    if (now - r.at > STALE_MS) removeRemote(h);
+    if (now - r.at > STALE_MS) {
+      removeRemote(h);
+      lobby.seen.delete(h);
+      lobby.ready.delete(h);
+    }
+  }
+  // also expire lobby roster entries we haven't heard a pose from recently
+  for (const [h, s] of lobby.seen) {
+    if (h !== me.handle && now - s.at > STALE_MS) {
+      lobby.seen.delete(h);
+      lobby.ready.delete(h);
+    }
   }
   updateRacerCount();
 }
 
 // ───────────────────────────────────────────────────────────────────────────
 // MULTIPLAYER — ws channel "race"
-//   pose message: { cid, t:"pose", handle, name, x, z, ry, speed, color }
+//   pose  message: { cid, t:"pose", handle, name, x, y, z, ry, speed, color, ready }
+//                  (y + ready are additive; old peers omitting them still work)
+//   start message: { cid, t:"start", handle, at }  — host/auto-start signal
 // ───────────────────────────────────────────────────────────────────────────
 let room = null;
 let lastSendAt = 0;
+
+function buildPosePayload() {
+  return {
+    cid: clientId,
+    t: "pose",
+    handle: me.handle,
+    name: me.name,
+    x: round3(player.pos.x),
+    y: round3(player.pos.y),
+    z: round3(player.pos.z),
+    ry: round3(player.heading),
+    speed: round3(player.vel),
+    color: me.color,
+    ready: lobby.selfReady, // lobby ready-state piggybacks on the pose ping
+  };
+}
+
+function publishPose() {
+  if (!room) return;
+  try {
+    room.publish(buildPosePayload());
+  } catch (_) {
+    /* SDK buffers / reconnects */
+  }
+}
 
 function maybeSendPose(now) {
   if (!room) return;
   if (now - lastSendAt < 1000 / SEND_HZ) return;
   lastSendAt = now;
-  try {
-    room.publish({
-      cid: clientId,
-      t: "pose",
-      handle: me.handle,
-      name: me.name,
-      x: round3(player.pos.x),
-      z: round3(player.pos.z),
-      ry: round3(player.heading),
-      speed: round3(player.vel),
-      color: me.color,
-    });
-  } catch (_) {
-    /* SDK buffers / reconnects */
-  }
+  publishPose();
 }
 
 function onPose(msg) {
   const p = msg && msg.payload;
   if (!p || typeof p !== "object") return;
   if (p.cid === clientId) return; // our own echo
+  if (p.t === "start") {
+    onStartMessage();
+    return;
+  }
   if (p.t !== "pose") return;
   const handle = p.handle || (msg.from && msg.from.handle);
   if (!handle || handle === me.handle) return; // never render our own handle
+  const cid = typeof p.cid === "string" ? p.cid : null;
   const name = typeof p.name === "string" ? p.name : (msg.from && msg.from.name) || handle;
   const colorHex = typeof p.color === "number" ? p.color : colorForHandle(handle);
-  const r = ensureRemote(handle, name, colorHex);
-  // (re)apply color/name if changed
+
+  // lobby ready-state piggybacks on the pose ping
+  if (typeof p.ready === "boolean") lobby.ready.set(handle, p.ready);
+  lobby.seen.set(handle, { name, at: performance.now() });
+
+  const r = ensureRemote(handle, name, colorHex, cid);
+  // DEDUP: if this pose is from a different clientId than the one we have, the
+  // person renamed / reconnected / opened a new tab — take over this single
+  // kart rather than spawning a second. Reset interpolation owner.
+  if (cid && r.cid && r.cid !== cid) {
+    r.cid = cid;
+  } else if (cid && !r.cid) {
+    r.cid = cid;
+  }
+  // live name update on rename
+  if (r.name !== name) {
+    r.name = name;
+    setRemoteLabel(r, name);
+  }
+  // (re)apply color if changed
   if (r.color !== colorHex) {
     r.color = colorHex;
     r.mesh.userData.bodyMat.color.setHex(colorHex);
   }
   const x = num(p.x, r.target.x);
   const z = num(p.z, r.target.z);
+  const y = num(p.y, NaN); // optional; sampled when absent
   const ry = num(p.ry, r.targetHeading);
-  r.target.set(x, 0, z);
+  r.target.set(x, isFinite(y) ? y : surfaceAt(x, z).y, z);
   r.targetHeading = ry;
   r.speed = num(p.speed, 0);
   r.at = performance.now();
   if (!r.init) {
-    // first packet: snap so we don't lerp from origin
+    // first packet: snap so we don't lerp from origin, and orient to the banked
+    // surface (matches stepRemotes) so it doesn't flash flat for one frame.
     r.cur.copy(r.target);
     r.curHeading = ry;
-    r.mesh.position.set(x, 0, z);
-    r.mesh.rotation.y = ry;
+    const sf0 = surfaceAt(x, z);
+    r.surfaceY = r.target.y;
+    r.surfaceUp.copy(sf0.up);
+    r.mesh.position.set(x, r.target.y, z);
+    const fwd0 = _kfwd.set(Math.sin(ry), 0, Math.cos(ry));
+    fwd0.addScaledVector(sf0.up, -(fwd0.dot(sf0.up))).normalize();
+    r.mesh.quaternion.setFromRotationMatrix(orientMatrix(fwd0, sf0.up));
     r.init = true;
   }
   updateRacerCount();
+  if (lobbyActive) {
+    renderLobby();
+    maybeAutoStart();
+  }
 }
 
 function onPresence(members) {
   if (!Array.isArray(members)) return;
+  presenceMembers = members.slice();
   const present = new Set(members.map((m) => m && m.handle).filter(Boolean));
   for (const h of [...remotes.keys()]) {
     if (!present.has(h)) removeRemote(h);
   }
+  // prune lobby bookkeeping for anyone who left presence
+  for (const h of [...lobby.seen.keys()]) {
+    if (!present.has(h) && h !== me.handle) {
+      lobby.seen.delete(h);
+      lobby.ready.delete(h);
+    }
+  }
   updateRacerCount();
+  if (lobbyActive) renderLobby();
 }
 
 function updateRacerCount() {
@@ -1383,6 +1701,142 @@ function escapeHtml(s) {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
+// LOBBY — waiting room with live roster + per-player Ready, host start, and
+// auto-start when everyone present is ready (min 1, so solo still works).
+//   ws "race": ready piggybacks on the pose ping ({...,ready:bool});
+//              start is its own message ({cid,t:"start",at}).
+// Host = lexicographically smallest handle among everyone currently present.
+// ───────────────────────────────────────────────────────────────────────────
+function rosterHandles() {
+  // everyone we currently know is around: self + recently-heard remotes +
+  // anyone in the latest presence snapshot.
+  const set = new Set();
+  if (me.handle) set.add(me.handle);
+  for (const h of lobby.seen.keys()) set.add(h);
+  for (const m of presenceMembers) if (m && m.handle) set.add(m.handle);
+  return [...set];
+}
+function hostHandle() {
+  const all = rosterHandles();
+  if (!all.length) return me.handle;
+  return all.slice().sort()[0];
+}
+function isHost() {
+  return me.handle && hostHandle() === me.handle;
+}
+function isReady(handle) {
+  if (handle === me.handle) return lobby.selfReady;
+  return lobby.ready.get(handle) === true;
+}
+function everyoneReady() {
+  const all = rosterHandles();
+  if (!all.length) return false;
+  return all.every((h) => isReady(h));
+}
+
+function renderLobby() {
+  if (!lobbyActive) return;
+  const all = rosterHandles().sort((a, b) => {
+    // self first, then by name
+    if (a === me.handle) return -1;
+    if (b === me.handle) return 1;
+    return a.localeCompare(b);
+  });
+  const host = hostHandle();
+  const readyN = all.filter((h) => isReady(h)).length;
+  dom.lobbySub.innerHTML =
+    `${all.length} racer${all.length === 1 ? "" : "s"} here · ${readyN}/${all.length} ready · host <span class="host">${escapeHtml(nameFor(host))}</span>`;
+
+  dom.lobbyRoster.innerHTML = all
+    .map((h) => {
+      const mine = h === me.handle;
+      const rdy = isReady(h);
+      const nm = escapeHtml(nameFor(h).slice(0, 18));
+      const tags = [];
+      if (mine) tags.push("you");
+      if (h === host) tags.push("host");
+      const tag = tags.length ? `<span class="tag">${tags.join(" · ")}</span>` : "";
+      return `<li class="${mine ? "me " : ""}${rdy ? "ready" : ""}"><span class="dot"></span><span class="nm">${nm}${tag}</span><span class="st">${rdy ? "ready" : "…"}</span></li>`;
+    })
+    .join("");
+
+  dom.btnReady.classList.toggle("on", lobby.selfReady);
+  dom.btnReady.textContent = lobby.selfReady ? "Ready ✓" : "I'm ready";
+
+  const canStart = isHost() || everyoneReady();
+  dom.btnStart.disabled = !canStart;
+  if (everyoneReady()) {
+    dom.lobbyHint.textContent = "Everyone's ready — starting…";
+  } else if (isHost()) {
+    dom.lobbyHint.textContent = "You're the host — start any time, or wait for all ready.";
+  } else {
+    dom.lobbyHint.textContent = `Waiting for ${escapeHtml(nameFor(host))} to start (or all ready).`;
+  }
+}
+
+function nameFor(handle) {
+  if (handle === me.handle) return me.name;
+  const r = remotes.get(handle);
+  if (r && r.name) return r.name;
+  const s = lobby.seen.get(handle);
+  if (s && s.name) return s.name;
+  const pm = presenceMembers.find((m) => m && m.handle === handle);
+  if (pm && pm.name) return pm.name;
+  return handle;
+}
+
+function toggleSelfReady() {
+  lobby.selfReady = !lobby.selfReady;
+  publishPose(); // broadcast the new ready state immediately
+  renderLobby();
+  maybeAutoStart();
+}
+
+let autoStartTimer = null;
+function maybeAutoStart() {
+  if (!lobbyActive || lobby.started) return;
+  if (everyoneReady()) {
+    // small grace so a just-arrived peer can register before we fire
+    if (!autoStartTimer) {
+      autoStartTimer = setTimeout(() => {
+        autoStartTimer = null;
+        if (lobbyActive && !lobby.started && everyoneReady()) beginRace(true);
+      }, 600);
+    }
+  } else if (autoStartTimer) {
+    clearTimeout(autoStartTimer);
+    autoStartTimer = null;
+  }
+}
+
+function hostStart() {
+  if (!lobbyActive || lobby.started) return;
+  if (!(isHost() || everyoneReady())) return;
+  beginRace(true);
+}
+
+function beginRace(broadcast) {
+  if (lobby.started) return;
+  lobby.started = true;
+  lobbyActive = false;
+  if (broadcast && room) {
+    try {
+      room.publish({ cid: clientId, t: "start", handle: me.handle, at: Date.now() });
+    } catch (_) {}
+  }
+  dom.lobby.classList.add("hide");
+  document.body.classList.remove("lobby");
+  setTimeout(() => { dom.lobby.style.display = "none"; }, 420);
+  runCountdown();
+}
+
+function onStartMessage() {
+  // a peer pressed start (or auto-start fired on their side) — follow along.
+  if (lobby.started) return;
+  beginRace(false);
+}
+
+// ───────────────────────────────────────────────────────────────────────────
 // COUNTDOWN — 3 · 2 · 1 · GO before lap timing begins
 // ───────────────────────────────────────────────────────────────────────────
 function runCountdown() {
@@ -1467,17 +1921,7 @@ resize();
     room.subscribe(onPose);
     room.presence(onPresence);
     // announce our presence immediately so peers spawn us before first throttle tick
-    room.publish({
-      cid: clientId,
-      t: "pose",
-      handle: me.handle,
-      name: me.name,
-      x: round3(player.pos.x),
-      z: round3(player.pos.z),
-      ry: round3(player.heading),
-      speed: 0,
-      color: me.color,
-    });
+    publishPose();
   } catch (_) {
     /* still drivable solo */
   }
@@ -1485,9 +1929,15 @@ resize();
   // leaderboard (non-blocking)
   initLeaderboard();
 
-  // start render loop + hide loader + countdown
+  // lobby wiring
+  dom.btnReady.addEventListener("click", toggleSelfReady);
+  dom.btnStart.addEventListener("click", hostStart);
+  lobby.seen.set(me.handle, { name: me.name, at: performance.now() });
+  document.body.classList.add("lobby");
+  renderLobby();
+
+  // start render loop + reveal lobby (karts idle at the start line until start)
   lastFrame = performance.now();
   requestAnimationFrame(frame);
   setTimeout(() => dom.loader.classList.add("hide"), 350);
-  setTimeout(runCountdown, 700);
 })();
