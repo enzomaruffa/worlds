@@ -119,9 +119,34 @@ document.body.appendChild(renderer.domElement);
 // so the universe still loads (just without the glow) instead of going blank.
 let composer = null;
 let godrayPass = null;
+let warpBlurPass = null;
 try {
 composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
+
+// FTL radial blur — during a jump the whole frame smears outward from center, dragging
+// every star and planet into Star-Wars hyperspace streaks. Off (passthrough) at rest.
+warpBlurPass = new ShaderPass({
+  uniforms: { tDiffuse: { value: null }, uWarp: { value: 0 } },
+  vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
+  fragmentShader: `
+    uniform sampler2D tDiffuse; uniform float uWarp; varying vec2 vUv;
+    void main(){
+      vec4 base = texture2D(tDiffuse, vUv);
+      if (uWarp <= 0.001) { gl_FragColor = base; return; }
+      vec2 dir = vUv - vec2(0.5);
+      float jit = fract(sin(dot(vUv, vec2(12.9898, 78.233))) * 43758.5453);
+      vec3 acc = base.rgb; float total = 1.0;
+      for (int i = 1; i <= 28; i++) {
+        float t = (float(i) - jit) / 28.0;
+        vec3 s = texture2D(tDiffuse, vUv - dir * t * uWarp * 0.6).rgb;
+        float w = 1.0 - t;
+        acc += s * w; total += w;
+      }
+      gl_FragColor = vec4(acc / total, base.a);
+    }`,
+});
+composer.addPass(warpBlurPass);
 composer.addPass(new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.8, 0.8, 0.78));
 
 // shader-based volumetric god rays (radial light scatter from the nearest star)
@@ -162,6 +187,7 @@ composer.addPass(new OutputPass()); // tone-maps + sRGB at the very end (single 
   console.warn("postprocessing unavailable — plain render fallback (Safari?):", e);
   composer = null;
   godrayPass = null;
+  warpBlurPass = null;
 }
 
 scene.add(new THREE.HemisphereLight(0x404a66, 0x080810, 1.4));
@@ -235,6 +261,56 @@ let starMat = null;
   });
   starMat = mat;
   scene.add(new THREE.Points(g, mat));
+}
+
+// ---------- hyperspace: a Star-Wars streak tunnel that screams past during FTL ----------
+// A camera-locked tube of light-lines. At rest they're invisible; as warp ramps they
+// stretch into long streaks rushing past the whole screen (radiating from straight ahead).
+let warpMat = null, warpField = null;
+{
+  const N = 1700;
+  const seed = new Float32Array(N * 2 * 3);  // per-vertex base: (x, y, zPhase)
+  const along = new Float32Array(N * 2);     // 0 = head, 1 = tail
+  for (let i = 0; i < N; i++) {
+    const ang = Math.random() * Math.PI * 2;
+    const rad = 4 + Math.random() * 120;
+    const x = Math.cos(ang) * rad, y = Math.sin(ang) * rad;
+    const zph = Math.random();
+    for (let v = 0; v < 2; v++) {
+      const idx = i * 2 + v;
+      seed[idx * 3] = x; seed[idx * 3 + 1] = y; seed[idx * 3 + 2] = zph;
+      along[idx] = v;
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(N * 2 * 3), 3)); // placeholder
+  geo.setAttribute("seed", new THREE.BufferAttribute(seed, 3));
+  geo.setAttribute("along", new THREE.BufferAttribute(along, 1));
+  warpMat = new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending,
+    uniforms: { uTime, uWarp: { value: 0 } },
+    vertexShader: `
+      attribute vec3 seed; attribute float along;
+      uniform float uTime; uniform float uWarp; varying float vA;
+      void main(){
+        float span = 700.0, speed = 1100.0;
+        // head scrolls toward the camera along local -Z (forward); tail trails behind it
+        float headZ = -span + mod(seed.z * span + uTime * speed, span);
+        float len = 6.0 + uWarp * 420.0;
+        float z = headZ - along * len;
+        float depth = clamp((-z) / span, 0.0, 1.0);
+        // fade in past the near plane, fade out toward the far end; tail dimmer than head
+        vA = uWarp * smoothstep(0.0, 0.05, depth) * smoothstep(1.0, 0.6, depth) * (along < 0.5 ? 1.0 : 0.3);
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(seed.xy, z, 1.0);
+      }`,
+    fragmentShader: `
+      varying float vA;
+      void main(){ if (vA <= 0.002) discard; gl_FragColor = vec4(0.82, 0.9, 1.0, vA); }`,
+  });
+  warpField = new THREE.LineSegments(geo, warpMat);
+  warpField.frustumCulled = false;
+  warpField.renderOrder = 5;
+  scene.add(warpField);
 }
 
 // ---------- the core: a MASSIVE golden black hole at the edge of known space ----------
@@ -1854,6 +1930,15 @@ function tick() {
     camera.lookAt(_camLook.copy(ship.position).addScaledVector(forward, 10));
     camera.rotateZ(bank + (dive ? dive.t * 3.2 : 0)); // bank into turns, barrel-roll the dive
   }
+
+  // hyperspace: tunnel rides the camera, radial-blur pass drags the whole frame —
+  // both share the warp ramp
+  if (warpField && starMat) {
+    warpField.position.copy(camera.position);
+    warpField.quaternion.copy(camera.quaternion);
+    warpMat.uniforms.uWarp.value = starMat.uniforms.uWarp.value;
+  }
+  if (warpBlurPass && starMat) warpBlurPass.uniforms.uWarp.value = starMat.uniforms.uWarp.value;
 
   updateBubbles();
   updateCompass(forward);
