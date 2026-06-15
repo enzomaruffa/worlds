@@ -1297,13 +1297,7 @@ function updateCodex() {
   const key = inRange?.title ?? null;
   if (key === nearSystem) return;
   nearSystem = key;
-  if (inRange && inRange.codex && !introActive && !cardSite) {
-    const c = `#${new THREE.Color(inRange.hot).getHexString()}`;
-    toast(
-      `<b style="color:${c};letter-spacing:.06em">✦ ${esc(inRange.title.toUpperCase())}</b> · <i style="color:#a1a1aa">${esc(inRange.tag)}</i><br><span style="color:#c4b5fd">${esc(inRange.codex)}</span>`,
-      6500, { wide: true },
-    );
-  }
+  if (inRange && inRange.codex && !introActive && !cardSite) revealCodex(inRange);
 }
 
 // ---------- ambient "intercepted transmissions": flavor chatter that drifts in over time ----------
@@ -1347,11 +1341,19 @@ const txWorld = () => { const n = [...planets.keys()]; return n.length ? `${rand
 const txPilot = () => { const p = [...pilots.values()]; return p.length ? `@${p[Math.floor(Math.random() * p.length)].group.userData.handle}` : "a silent pilot"; };
 function showTx(text) { toast(`📡 <span style="color:#7dd3fc">intercepted transmission</span><br><span style="color:#cbd5e1">${esc(text)}</span>`, 6500, { wide: true }); }
 async function emitTransmission() {
-  // occasionally splurge on a fresh AI line about a real world (cached so it's a one-time cost)
-  if (Math.random() < 0.2 && planets.size) {
+  const names = [...planets.keys()];
+  // sometimes a fresh AI rumor linking two real worlds (relationship lore)
+  if (names.length >= 2 && Math.random() < 0.22) {
     try {
-      const w = randOf([...planets.keys()]);
-      const tx = await transmissionFor(w);
+      const a = randOf(names); let b = randOf(names), guard = 0;
+      while (b === a && guard++ < 6) b = randOf(names);
+      if (b !== a) { const r = await rumorFor(a, b); if (r) return showTx(r); }
+    } catch { /* fall through */ }
+  }
+  // or a fresh AI line about a single real world (cached so it's a one-time cost)
+  if (names.length && Math.random() < 0.28) {
+    try {
+      const tx = await transmissionFor(randOf(names));
       if (tx) return showTx(tx);
     } catch { /* fall through to the curated pool */ }
   }
@@ -1365,6 +1367,66 @@ function updateTransmissions(dt) {
   if (nextTx > 0) return;
   nextTx = 55 + Math.random() * 45; // then every ~55–100s
   emitTransmission();
+}
+
+// ---------- more AI lore: cached generators for codex, world hails, rumors, pilot dossiers ----------
+// One helper for all of them: check memory → check worlds.db → generate once → persist. Keyed so
+// the model is billed at most once per subject, ever (and every pilot reads the same canon back).
+async function cachedAI(store, cache, key, rec, prompt, maxTokens = 50) {
+  if (cache.has(key)) return cache.get(key);
+  try {
+    const stored = (await store.list({ filter: rec, limit: 1 })).items[0];
+    if (stored?.data?.text) { cache.set(key, stored.data.text); return stored.data.text; }
+  } catch { /* db down → just generate */ }
+  let text = "";
+  try {
+    const res = await worlds.ai.complete({ prompt, model: "fast", max_tokens: maxTokens });
+    text = (res.text || "").trim().replace(/^["']|["']$/g, "");
+  } catch { /* AI down → caller falls back */ }
+  if (text) { cache.set(key, text); store.create({ ...rec, text }).catch(() => {}); }
+  return text;
+}
+
+// AI-deepened star-system codex (falls back to the hand-written blurb if AI is unavailable)
+const codexStore = worlds.db.collection("codex"), codexCache = new Map();
+function codexFor(b) {
+  return cachedAI(codexStore, codexCache, b.title, { system: b.title },
+    `Expand this star-system codex into 1–2 vivid, in-universe sentences. System: "${b.title}" (${b.tag}). Seed: ${b.codex} Keep the playful sci-fi tone. No preamble, no quotes.`, 90)
+    .then((t) => t || b.codex);
+}
+
+// a civilization's greeting, hailed as you approach one of its worlds (once per world per session)
+const hailStore = worlds.db.collection("hail"), hailCache = new Map(), hailed = new Set();
+let lastHail = -99;
+function hailFor(site) {
+  const biome = site.universe?.biome || "lush";
+  return cachedAI(hailStore, hailCache, site.name, { world: site.name },
+    `A pilot is approaching the planet "${site.name}.world" (a ${biome} world). Write the short in-character greeting its inhabitants broadcast to arriving ships. Max 14 words, playful sci-fi, no preamble, no quotes.`, 50);
+}
+
+// a juicy rumor linking two real worlds (relationship lore)
+const rumorStore = worlds.db.collection("rumor"), rumorCache = new Map();
+function rumorFor(a, c) {
+  const key = [a, c].sort().join("~");
+  return cachedAI(rumorStore, rumorCache, key, { pair: key },
+    `Invent a short, juicy rumor about the relationship between two planets, "${a}.world" and "${c}.world", in a playful sci-fi galaxy. Max 18 words, no preamble, no quotes.`, 60);
+}
+
+// an AI "pilot dossier" (a callsign + a wry detail) for a pilot who just dropped in
+const dossierStore = worlds.db.collection("dossier"), dossierCache = new Map();
+function dossierFor(handle) {
+  return cachedAI(dossierStore, dossierCache, handle, { handle },
+    `Invent a one-line sci-fi pilot dossier — a callsign plus one wry detail — for a pilot called "@${handle}". Max 14 words, no preamble, no quotes.`, 45);
+}
+
+// resolve a system's codex (cached AI, or its static seed) then surface it — bailing if the
+// pilot already drifted on to another system before the model answered.
+function revealCodex(b) {
+  const c = `#${new THREE.Color(b.hot).getHexString()}`, title = b.title, tag = b.tag;
+  codexFor(b).then((text) => {
+    if (nearSystem !== title) return;
+    toast(`<b style="color:${c};letter-spacing:.06em">✦ ${esc(title.toUpperCase())}</b> · <i style="color:#a1a1aa">${esc(tag)}</i><br><span style="color:#c4b5fd">${esc(text)}</span>`, 7000, { wide: true });
+  });
 }
 
 // ---------- live deploy supernova (dogfoods worlds.db realtime) ----------
@@ -1434,6 +1496,12 @@ worlds.db.site("home").collection("sites").subscribe((ev) => {
     playSfx("warp", 0.6);
   }, 80);
   toast(`✦ <b style="color:#e5a00d">@${ev.doc.creator?.handle ?? "someone"}</b> just launched <b style="color:#e5a00d">${ev.doc.name}.world</b> — ${randOf(["the sky gained a star", "a new world ignites", "another light in the dark", "the galaxy just got bigger"])}`);
+  // a beat later, the newborn world's first lore drifts in (reuses the cached AI civilization lore)
+  setTimeout(() => {
+    loadLore({ universe: null, ...ev.doc }).then((L) => {
+      if (L?.civ) toast(`✦ <span style="color:#e5a00d">first signal · ${esc(ev.doc.name)}.world</span><br><b style="color:#c4b5fd">${esc(L.civ)}</b><br><span style="color:#cbd5e1">${esc(L.lore)}</span>`, 7000, { wide: true });
+    }).catch(() => {});
+  }, 2600);
 });
 
 // ---------- other pilots, live over worlds.ws ----------
@@ -1489,6 +1557,8 @@ shipsChannel.subscribe((msg) => {
     rosterDirty = true;
     updatePilotCount();
     toast(`▸ <b style="color:#7dd3fc">@${esc(msg.from.handle)}</b> ${randOf(["entered the universe", "dropped out of warp", "materialized from the void", "took the helm", "is now adrift among the stars"])}`);
+    // a beat later, an AI "dossier" on the new arrival (cached per handle; the await spaces it out)
+    dossierFor(msg.from.handle).then((d) => { if (d) toast(`🛰 <span style="color:#7dd3fc">dossier · @${esc(msg.from.handle)}</span><br><span style="color:#cbd5e1">${esc(d)}</span>`, 6500, { wide: true }); });
   }
   p.target = { p: d.p, q: d.q };
   p.seen = performance.now();
@@ -2008,6 +2078,14 @@ function tick() {
       nearPlanet = bp;
       divePrompt.style.display = "block";
       divePrompt.textContent = `↵ DIVE INTO ${bp.userData.site.name.toUpperCase()}`;
+      // first close pass to a world → its people hail you (once per world, throttled so a dense
+      // cluster doesn't spam the model — cached to worlds.db so repeat visits are free)
+      const site = bp.userData.site;
+      if (!hailed.has(site.name) && t - lastHail > 6) {
+        hailed.add(site.name); lastHail = t;
+        const c = `#${new THREE.Color((SYSTEMS[site.category] ?? SYSTEMS.misc).hot).getHexString()}`;
+        hailFor(site).then((h) => { if (h && nearPlanet === bp) toast(`📡 <span style="color:${c}">${esc(site.name)}.world hails you</span><br><span style="color:#cbd5e1">“${esc(h)}”</span>`, 6000, { wide: true }); });
+      }
     } else { nearPlanet = null; divePrompt.style.display = "none"; }
   } else if (!dive) {
     nearPlanet = null; divePrompt.style.display = "none";
