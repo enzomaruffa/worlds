@@ -516,6 +516,27 @@ describe("realtime actors", () => {
     expect(ev.from.handle).toBe("dev");
     expect(cGot).toBe(false);
   });
+
+  test("observer: sees the zone but stays invisible to peers (and can't write)", async () => {
+    const a = mk(), o = mk();
+    await Promise.all([opened(a), opened(o)]);
+    sub(a, "a1", "A", "z1");
+    set(a, "A", { x: 1 }, "z1");
+    await Bun.sleep(80);
+    let aSawO = false;
+    a.onmessage = (m) => {
+      const f = JSON.parse(String(m.data));
+      if ((f.op === "actors" || f.op === "actors_snapshot") && JSON.stringify(f).includes('"O"')) aSawO = true;
+    };
+    const snapP = waitFor(o, (f) => f.op === "actors_snapshot");
+    o.send(JSON.stringify({ op: "sub", id: "o1", kind: "actors", channel: "arena", zone: "z1", cid: "O", observer: true }));
+    const snap = await snapP;
+    o.send(JSON.stringify({ op: "set", id: "set", channel: "arena", cid: "O", state: { x: 9 }, zone: "z1" })); // ignored
+    await Bun.sleep(250);
+    a.close(); o.close();
+    expect(snap.actors.some((x: any) => x.id === "A")).toBe(true); // observer sees the zone
+    expect(aSawO).toBe(false); // peers never see the observer, even after it tries to set
+  });
 });
 
 describe("mcp", () => {
