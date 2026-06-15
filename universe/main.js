@@ -106,7 +106,10 @@ const GLSL_NOISE = /* glsl */ `
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.1, 6000);
 const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+// Cap at 1.5: on a retina display (DPR 2–3) the full post-processing chain (bloom +
+// god rays + the planet shaders) is fill-rate bound, and 1.5 cuts ~45% of that fragment
+// work for a barely-perceptible softening. The single biggest perf lever here.
+renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
 renderer.setSize(innerWidth, innerHeight);
 // ACES filmic tone mapping: compresses HDR highlights so flying close to a star
 // rolls off smoothly instead of blowing out to pure white.
@@ -207,6 +210,15 @@ composer.addPass(new OutputPass()); // tone-maps + sRGB at the very end (single 
 }
 
 scene.add(new THREE.HemisphereLight(0x404a66, 0x080810, 1.4));
+
+// Shared bits for orbits: axes + a flat-ring quaternion + ONE material for every orbit
+// path (74 worlds → 1 material instead of 74). Reused by planet build + the tick loop.
+const _X = new THREE.Vector3(1, 0, 0);
+const _Y = new THREE.Vector3(0, 1, 0);
+const _flatX = new THREE.Quaternion().setFromAxisAngle(_X, Math.PI / 2);
+const _orb = new THREE.Vector3();
+const orbitLineMat = new THREE.MeshBasicMaterial({ color: 0x52525b, transparent: true, opacity: 0.22 });
+const FTL_DIST = 700; // farther than this when you click a world → hyperspace; nearer → just glide
 
 const uTime = { value: 0 };
 
@@ -784,18 +796,20 @@ function makePlanet(site) {
   clouds.userData.spin = 0.02 + rng() * 0.03;
   group.add(clouds);
 
-  const recent = site.updated_at && Date.now() - new Date(site.updated_at).getTime() < 7 * 864e5;
+  // a thin highlight halo for worlds shipped in the last ~3 days — kept subtle + rare so
+  // it reads as a "freshly shipped" cue, not yet another planetary ring
+  const recent = site.updated_at && Date.now() - new Date(site.updated_at).getTime() < 3 * 864e5;
   if (recent) {
     const ring = new THREE.Mesh(
-      new THREE.RingGeometry(radius * 1.6, radius * 2.0, 64),
-      new THREE.MeshBasicMaterial({ color: 0xe5a00d, side: THREE.DoubleSide, transparent: true, opacity: 0.5 }),
+      new THREE.RingGeometry(radius * 1.72, radius * 1.9, 48),
+      new THREE.MeshBasicMaterial({ color: 0xe5a00d, side: THREE.DoubleSide, transparent: true, opacity: 0.38 }),
     );
     ring.rotation.x = Math.PI / 2.4;
     group.add(ring);
   }
 
-  // big worlds get a banded Saturn ring (its own shader)
-  if (radius > 8.5 && rng() < 0.7) {
+  // only the largest, most-visited worlds get a banded Saturn ring — rare by design
+  if (radius > 13 && rng() < 0.4) {
     const ring = makePlanetRing(radius, biome.atmo);
     ring.rotation.x = Math.PI / 2 + (rng() - 0.5) * 0.6;
     ring.rotation.y = (rng() - 0.5) * 0.4;
@@ -815,20 +829,21 @@ function makePlanet(site) {
   nameLabel.scale.set(lw, lw * 0.19, 1);
   group.add(nameLabel);
 
-  // planets orbit their category's star (biome stays a visual trait)
+  // Each world orbits its category's star on its OWN tilted plane — a random
+  // inclination + ascending node, so the system has real 3D depth instead of a flat disk.
   const [px, , pz] = u.pos;
   const orbitR = 170 + Math.hypot(px, pz) * 200; // spread well clear of the stars — room to fly
   const angle = Math.atan2(pz, px) + rng() * 0.3;
-  group.userData = { site, sys, orbitR, angle, speed: 0.016 / Math.sqrt(orbitR / 40), spin: 0.08 + rng() * 0.16, y: (rng() - 0.5) * 20, scaleIn: 0, spinner, clouds, bodyR: radius * 1.3, mass: radius * 1.4 };
+  const inc = (rng() - 0.5) * 1.1;  // orbital tilt, up to ~±31°
+  const node = rng() * Math.PI * 2; // which way the tilt leans (ascending node)
+  const orbitQuat = new THREE.Quaternion().setFromAxisAngle(_Y, node).multiply(new THREE.Quaternion().setFromAxisAngle(_X, inc));
+  group.userData = { site, sys, orbitR, angle, orbitQuat, speed: 0.016 / Math.sqrt(orbitR / 40), spin: 0.08 + rng() * 0.16, scaleIn: 0, spinner, clouds, bodyR: radius * 1.3, mass: radius * 1.4 };
   group.scale.setScalar(0.001);
 
-  const line = new THREE.Mesh(
-    new THREE.TorusGeometry(orbitR, 0.05, 6, 160),
-    new THREE.MeshBasicMaterial({ color: 0x52525b, transparent: true, opacity: 0.25 }),
-  );
-  line.rotation.x = Math.PI / 2;
+  // the orbit path, tilted to match the plane the planet actually rides (shared material)
+  const line = new THREE.Mesh(new THREE.TorusGeometry(orbitR, 0.06, 4, 120), orbitLineMat);
+  line.quaternion.copy(orbitQuat).multiply(_flatX);
   line.position.copy(sys.pos);
-  line.position.y += group.userData.y;
   scene.add(line);
 
   scene.add(group);
@@ -1068,6 +1083,7 @@ const joy = { x: 0, y: 0, active: false };
 const raycaster = new THREE.Raycaster();
 const card = document.getElementById("card");
 let flyTarget = null;
+let flyFTL = false;              // is the active fly a long-range hyperspace jump (vs a short glide)?
 let focusTarget = null;          // a world we're "frozen" facing (card open, gravity paused)
 const _faceDir = new THREE.Vector3();
 
@@ -1092,8 +1108,10 @@ function pick(cx, cy) {
   showCard(o.userData.site);
   flyTarget = o;
   focusTarget = o;       // glide in, then freeze facing it
+  // only a genuinely distant world is an FTL jump; a nearby one just glides into focus
+  flyFTL = ship.position.distanceTo(o.position) > FTL_DIST;
   blip();
-  warpSound();
+  if (flyFTL) warpSound();
 }
 
 // AI-generated "civilization lore" per world (worlds.ai, with a rich local fallback).
@@ -2007,11 +2025,9 @@ function tick() {
   for (const g of planets.values()) {
     const d = g.userData;
     d.angle += d.speed * dt;
-    g.position.set(
-      d.sys.pos.x + Math.cos(d.angle) * d.orbitR,
-      d.sys.pos.y + d.y,
-      d.sys.pos.z + Math.sin(d.angle) * d.orbitR,
-    );
+    // position on the orbit's own (tilted) plane, then offset from the star
+    _orb.set(Math.cos(d.angle) * d.orbitR, 0, Math.sin(d.angle) * d.orbitR).applyQuaternion(d.orbitQuat);
+    g.position.copy(d.sys.pos).add(_orb);
     if (d.spinner) d.spinner.rotation.y += d.spin * dt;
     if (d.clouds) d.clouds.rotation.y += d.clouds.userData.spin * dt;
     if (d.scaleIn < 1) {
@@ -2093,7 +2109,7 @@ function tick() {
       const br = flyTarget.userData.bodyR ?? 6;
       goal = _goal.set(flyTarget.position.x, flyTarget.position.y + br * 0.5, flyTarget.position.z + br + shipRadius + 10);
     }
-    const k = ship.position.distanceTo(goal) > 120 ? 0.9 : 1.6;
+    const k = flyFTL ? 3.6 : 1.6; // FTL jumps snap across fast; short glides stay gentle
     ship.position.lerp(goal, 1 - Math.exp(-k * dt));
     vel.multiplyScalar(Math.exp(-4 * dt)); // bleed residual momentum
     if (ship.position.distanceTo(goal) < 2) flyTarget = null;
@@ -2241,12 +2257,14 @@ function tick() {
   }
   if (thrust && !wasThrust) playSfx("thrust", 0.4);
   wasThrust = thrust;
-  // FTL: an active jump (flyTarget) forces the star-streak on; fast manual flight ramps it too.
-  if (flyTarget && !wasFly) { if (flashEl) { flashEl.style.opacity = "0.32"; setTimeout(() => { flashEl.style.opacity = "0"; }, 110); } }
-  wasFly = !!flyTarget;
+  // FTL streaks fire ONLY on a long-range jump (clicking a remote world) — not on every
+  // click and not on fast manual flight. A short hop into a nearby world just glides.
+  const ftlActive = !!flyTarget && flyFTL;
+  if (ftlActive && !wasFly) { if (flashEl) { flashEl.style.opacity = "0.32"; setTimeout(() => { flashEl.style.opacity = "0"; }, 110); } }
+  wasFly = ftlActive;
   if (starMat) {
-    const targetWarp = flyTarget ? 0.62 : Math.max(0, Math.min((speed - 110) / 260, 1));
-    const rate = flyTarget ? 5 : 4;
+    const targetWarp = ftlActive ? 0.85 : 0;
+    const rate = flyFTL ? 9 : 6; // ramp on hard + bleed off fast so the jump is brief
     starMat.uniforms.uWarp.value += (targetWarp - starMat.uniforms.uWarp.value) * Math.min(1, dt * rate);
   }
   // follow badge: visible while trailing another pilot; clears if they leave
@@ -2314,11 +2332,12 @@ function tick() {
       }
     }
     godrayPass.uniforms.uIntensity.value += (gi - godrayPass.uniforms.uIntensity.value) * Math.min(1, dt * 5);
+    godrayPass.enabled = godrayPass.uniforms.uIntensity.value > 0.003; // skip the 48-tap pass when no star is near
   }
 
   // ---- cinematic camera: speed-FOV, banking, shake, FTL punch ----
   // FTL jumps punch the FOV way out + shake the rig for a real hyperspace kick.
-  const targetFov = 70 + Math.min(speed, 140) / 140 * 20 + (dive ? 30 : 0) + (flyTarget ? 15 : 0);
+  const targetFov = 70 + Math.min(speed, 140) / 140 * 20 + (dive ? 30 : 0) + (ftlActive ? 18 : 0);
   camera.fov += (targetFov - camera.fov) * Math.min(1, dt * (flyTarget ? 5 : 4));
   camera.updateProjectionMatrix();
   const dYaw = yaw - prevYaw; prevYaw = yaw;
@@ -2353,6 +2372,7 @@ function tick() {
   }
   if (warpBlurPass && starMat) {
     warpBlurPass.uniforms.uWarp.value = starMat.uniforms.uWarp.value;
+    warpBlurPass.enabled = warpBlurPass.uniforms.uWarp.value > 0.003; // skip the radial-blur pass unless mid-jump
     // center the radial streaks on where the nose points (the travel vanishing point)
     _vp.copy(ship.position).addScaledVector(forward, 1200).project(camera);
     if (_vp.z < 1) warpBlurPass.uniforms.uCenter.value.set(_vp.x * 0.5 + 0.5, -_vp.y * 0.5 + 0.5);
