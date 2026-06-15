@@ -1505,9 +1505,12 @@ worlds.db.site("home").collection("sites").subscribe((ev) => {
 });
 
 // ---------- other pilots, live over worlds.ws ----------
-const pilotId = Math.random().toString(36).slice(2, 8); // distinguishes tabs sharing one identity
-const pilots = new Map(); // pilotKey -> {group, label, target:{p,q}, seen}
-const shipsChannel = worlds.ws.channel("ships");
+const pilotId = worlds.id(); // stable per-tab id — also the ships-actor cid, so comms can match a ship
+const pilots = new Map(); // cid -> {group, label, target:{p,q}, seen}
+// Ship poses ride worlds.actors (one zone, the whole universe): a joiner gets an
+// instant snapshot of everyone flying, and the server coalesces + rate-caps the
+// fan-out instead of every pilot blasting every other on a raw channel.
+const shipsNet = worlds.actors("ships", { rate: 8 });
 
 function pilotShip(handle, key) {
   const g = new THREE.Group();
@@ -1544,24 +1547,33 @@ function pilotShip(handle, key) {
   return { group: g, color, label: nameSprite, trail: { line, geo, pos, age, head: 0 }, lastHi: 0 };
 }
 
-shipsChannel.subscribe((msg) => {
-  const d = msg.payload;
-  if (!d || d.id === pilotId || !Object.keys(ASSETS).length) return;
-  const key = `${msg.from.handle}:${d.id}`;
-  let p = pilots.get(key);
+// A pilot (id = its cid = its pilotId) updated its pose. The SDK filters our own.
+shipsNet.onChange((cid, d, meta) => {
+  if (!d || !d.p || !Object.keys(ASSETS).length) return;
+  const handle = (meta && meta.handle) || cid;
+  let p = pilots.get(cid);
   if (!p) {
-    p = pilotShip(msg.from.handle, key);
+    p = pilotShip(handle, cid);
     p.target = { p: d.p, q: d.q };
     p.group.position.fromArray(d.p);
-    pilots.set(key, p);
+    pilots.set(cid, p);
     rosterDirty = true;
     updatePilotCount();
-    toast(`▸ <b style="color:#7dd3fc">@${esc(msg.from.handle)}</b> ${randOf(["entered the universe", "dropped out of warp", "materialized from the void", "took the helm", "is now adrift among the stars"])}`);
+    toast(`▸ <b style="color:#7dd3fc">@${esc(handle)}</b> ${randOf(["entered the universe", "dropped out of warp", "materialized from the void", "took the helm", "is now adrift among the stars"])}`);
     // a beat later, an AI "dossier" on the new arrival (cached per handle; the await spaces it out)
-    dossierFor(msg.from.handle).then((d) => { if (d) toast(`🛰 <span style="color:#7dd3fc">dossier · @${esc(msg.from.handle)}</span><br><span style="color:#cbd5e1">${esc(d)}</span>`, 6500, { wide: true }); });
+    dossierFor(handle).then((d) => { if (d) toast(`🛰 <span style="color:#7dd3fc">dossier · @${esc(handle)}</span><br><span style="color:#cbd5e1">${esc(d)}</span>`, 6500, { wide: true }); });
   }
   p.target = { p: d.p, q: d.q };
   p.seen = performance.now();
+});
+// A pilot disconnected (or left) — tear down its ship.
+shipsNet.onLeave((cid) => {
+  const p = pilots.get(cid);
+  if (!p) return;
+  scene.remove(p.group); scene.remove(p.trail.line);
+  pilots.delete(cid);
+  rosterDirty = true;
+  updatePilotCount();
 });
 
 function updatePilotCount() {
@@ -1573,7 +1585,7 @@ let lastBroadcast = 0;
 function broadcastShip(now) {
   if (now - lastBroadcast < 120) return;
   lastBroadcast = now;
-  shipsChannel.publish({ id: pilotId, p: ship.position.toArray(), q: ship.quaternion.toArray() });
+  shipsNet.set({ p: ship.position.toArray(), q: ship.quaternion.toArray() });
 }
 
 // ---------- comms: chat, emotes, pings, follow (all over worlds.ws) ----------
@@ -1631,8 +1643,8 @@ function updateBeacons(dt) {
 commsChannel.subscribe((msg) => {
   const d = msg.payload;
   if (!d || d.id === pilotId) return; // own messages are shown locally
-  const key = [...pilots.keys()].find((k) => k.endsWith(":" + d.id));
-  const getPos = key ? () => pilots.get(key)?.group.position ?? ship.position : null;
+  // comms `id` is the sender's pilotId === its ships-actor cid, so look the ship up directly.
+  const getPos = pilots.has(d.id) ? () => pilots.get(d.id)?.group.position ?? ship.position : null;
   if (d.type === "chat" && getPos) showBubble(getPos, `<b>@${esc(msg.from.handle)}</b>${esc(d.text)}`, false, 5200);
   else if (d.type === "emote" && getPos) showBubble(getPos, d.emoji, true, 2400);
   else if (d.type === "ping" && Array.isArray(d.p)) dropBeacon(new THREE.Vector3().fromArray(d.p), msg.from.handle);
