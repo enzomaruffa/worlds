@@ -419,7 +419,7 @@ function applyRoom(s) {
 
 async function tryAdvance() {
   if (advancing || !lvlRoom) return;
-  const cur = lvlRoom.get();
+  const cur = lvlRoom.state;
   if (!cur) return;
   advancing = true;
   const next = (cur.levelIndex | 0) + 1;
@@ -628,7 +628,7 @@ function frame(now) {
   // rotation: any client past the deadline tries to advance (conflict-guarded)
   if (now - rotCheck > 400) {
     rotCheck = now;
-    if (lvlRoom && lvlRoom.get() && Date.now() >= endsAt) tryAdvance();
+    if (lvlRoom && lvlRoom.state && Date.now() >= endsAt) tryAdvance();
   }
 
   renderer.render(scene, camera);
@@ -661,8 +661,8 @@ async function boot() {
   // global level clock
   lvlRoom = worlds.room(ROOM, { initial: () => ({ levelIndex: 1, seed: seedFor(1), endsAt: Date.now() + LEVEL_MS }) });
   try { await lvlRoom.ready; } catch (_) {}
-  lvlRoom.onChange(applyRoom);
-  applyRoom(lvlRoom.get() || { levelIndex: 1, seed: seedFor(1), endsAt: Date.now() + LEVEL_MS });
+  lvlRoom.onChange((s) => applyRoom(s && s.state));
+  applyRoom(lvlRoom.state || { levelIndex: 1, seed: seedFor(1), endsAt: Date.now() + LEVEL_MS });
 
   // ghosts
   net = worlds.actors(ACTORS, { zoneKey: (s) => s.lvl + ":" + s.seg, rate: 15 });

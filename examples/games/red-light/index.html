@@ -1201,7 +1201,7 @@
         onReturn: () => returnToLobby(),
       });
 
-      try { snap = await lobby.opened; } catch (_) {}
+      try { snap = await lobby.ready; } catch (_) {}
       if (snap) onRoomChange(snap);
 
       updatePlayerCount();

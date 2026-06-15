@@ -1844,7 +1844,7 @@ resize();
   dom.btnStart.addEventListener("click", hostStart);
   document.body.classList.add("lobby");
   if (lobby) {
-    lobby.opened.then(() => renderLobby(lobby.snapshot())).catch(() => {});
+    lobby.ready.then(() => renderLobby(lobby.snapshot())).catch(() => {});
   } else {
     // no room (offline): show a minimal solo lobby that starts on Ready
     dom.btnReady.removeEventListener("click", toggleSelfReady);

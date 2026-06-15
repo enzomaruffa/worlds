@@ -1093,7 +1093,7 @@
         },
         onReturn: (s) => { lobbySnap = s; showLobby(); },
       });
-      try { lobbySnap = await lobby.opened; } catch (_) {}
+      try { lobbySnap = await lobby.ready; } catch (_) {}
 
       // land in the lobby, not a live round
       showLobby();
