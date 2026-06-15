@@ -143,6 +143,28 @@
     background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px;
   }
 
+  /* ── Tables (lobby browser) ── */
+  .tables { padding: 18px; }
+  .tables h2 { margin: 2px 0 4px; font-size: 19px; }
+  .tables .hint { color: var(--muted); font-size: 13px; margin: 0 0 16px; line-height: 1.5; }
+  .tablelist { list-style: none; margin: 0 0 16px; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+  .tablerow {
+    display: flex; align-items: center; gap: 12px;
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 13px; padding: 12px 14px;
+  }
+  .tablerow .meta { flex: 1; min-width: 0; }
+  .tablerow .nm { font-weight: 600; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tablerow .sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .tablerow .code { font-family: ui-monospace, monospace; letter-spacing: 1px; color: var(--gold); }
+  .tables .empty-note { color: var(--muted); font-size: 13px; font-style: italic; padding: 18px 4px; text-align: center; }
+  .tablebar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .tablebar input {
+    flex: 1; min-width: 120px; font-family: inherit; font-size: 13px; color: var(--ink);
+    background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; text-transform: uppercase; letter-spacing: 1px;
+  }
+  .lobby .tablehead { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+  .lobby .tablehead .code { font-family: ui-monospace, monospace; font-size: 12px; color: var(--gold); letter-spacing: 1px; }
+
   /* ── Game ── */
   .game { padding: 16px; }
   .statusbar {
@@ -238,8 +260,27 @@
 
     <div id="boot" class="card">Connecting to Worlds…</div>
 
+    <!-- ── TABLES (lobby browser) ── -->
+    <section id="screenTables" class="card tables hidden">
+      <h2>Open tables</h2>
+      <p class="hint">Each table is its own 1v1 match. Start a new one, join an open table below, or punch in a private code a friend shared.</p>
+      <ul class="tablelist" id="tableList"></ul>
+      <div class="actions">
+        <button class="primary" id="btnNewTable">New table</button>
+        <button class="ghost" id="btnNewPrivate">New private table</button>
+      </div>
+      <div class="tablebar" style="margin-top:14px">
+        <input id="codeInput" maxlength="4" placeholder="CODE" />
+        <button id="btnJoinCode">Join by code</button>
+      </div>
+    </section>
+
     <!-- ── LOBBY ── -->
     <section id="screenLobby" class="card lobby hidden">
+      <div class="tablehead">
+        <button class="ghost" id="btnLeaveTable">← Tables</button>
+        <span class="code" id="tableCode"></span>
+      </div>
       <h2>Lobby</h2>
       <p class="hint">First two players to take a seat play. Smaller handle is <b>Red</b> and moves first. Anyone else watches live and is up next. Drop a disc into a column — get <b>four in a row</b> (across, down, or diagonal) to win.</p>
 
@@ -310,21 +351,23 @@
     // ── DOM ──────────────────────────────────────────────────
     const $ = (id) => document.getElementById(id);
     const boot = $("boot");
-    const screens = { lobby: $("screenLobby"), game: $("screenGame") };
+    const screens = { tables: $("screenTables"), lobby: $("screenLobby"), game: $("screenGame") };
     const boardEl = $("board");
     const colBtnsEl = $("colBtns");
     const boardWrap = $("boardWrap");
 
     // ── Worlds handles ───────────────────────────────────────
-    // The board is one shared, authoritative doc (worlds.room handles load-or-
-    // create, live sync, and monotonic ordering); presence rides a ws channel.
-    const ROOM = worlds.room("connect4", { initial: blankGame });
-    const chan = worlds.ws.channel("connect4");
+    // Many concurrent tables: worlds.rooms is the directory (lobby browser + join
+    // codes); each table is one worlds.room carrying the board (load-or-create +
+    // live sync + ordering) AND the live roster (self-inclusive presence).
+    const hall = worlds.rooms("connect4", { initial: blankGame });
 
     // ── Runtime state ────────────────────────────────────────
     let me = null;                 // {handle,name}
+    let ROOM = null;               // the joined table (worlds.room) or null
+    let unsubRoom = null;          // teardown for the joined table's onChange
     let game = null;               // ROOM state (normalized)
-    let presence = [];             // [{handle,name}]
+    let presence = [];             // [{handle,name}] — the table roster
     let presenceLoaded = false;    // has the presence roster reported at least once?
     let busy = false;              // re-entrancy guard for writes
     let lastRenderSig = "";        // dedupe identical renders (for drop animation control)
@@ -756,12 +799,82 @@
       }
     }
 
+    // ── Tables browser (worlds.rooms directory) ──────────────
+    function renderTables(list) {
+      const ul = $("tableList");
+      ul.innerHTML = "";
+      if (!list.length) {
+        ul.innerHTML = '<li class="empty-note">No open tables yet — start one!</li>';
+        return;
+      }
+      for (const t of list) {
+        const li = document.createElement("li");
+        li.className = "tablerow";
+        const who = t.count === 1 ? "1 here" : `${t.count} here`;
+        li.innerHTML =
+          `<div class="meta"><div class="nm">${esc(t.name)}</div>` +
+          `<div class="sub">${who} · <span class="code">${esc(t.code)}</span></div></div>`;
+        const btn = document.createElement("button");
+        btn.className = "primary";
+        btn.textContent = "Join";
+        btn.addEventListener("click", () => joinTable(() => hall.join(t.id)));
+        li.appendChild(btn);
+        ul.appendChild(li);
+      }
+    }
+
+    // Mount a table: bind the board + roster to this room instance and show its lobby.
+    function mountRoom(room) {
+      if (unsubRoom) { try { unsubRoom(); } catch (_) {} }
+      ROOM = room;
+      game = null; presence = []; presenceLoaded = false; lastRenderSig = "";
+      location.hash = room.code;
+      $("tableCode").textContent = "code " + room.code;
+      $("inviteLink").value = location.origin + location.pathname + "#" + room.code;
+      showScreen("lobby");
+      // One subscription delivers BOTH the live board (s.state) and the roster (s.members).
+      unsubRoom = room.onChange((s) => {
+        game = normalize(s.state);
+        presence = uniqByHandle(s.members || []);
+        presenceLoaded = s.loaded;
+        render();
+        maybeResetAbandoned();
+      });
+    }
+
+    async function joinTable(fn) {
+      try { mountRoom(await fn()); }
+      catch (e) {
+        toast(e && e.code === "conflict" ? "That table is full." : "Couldn't join that table.");
+        console.error("[connect4] join failed", e);
+      }
+    }
+
+    function leaveTable() {
+      if (unsubRoom) { try { unsubRoom(); } catch (_) {} unsubRoom = null; }
+      hall.leave().catch(() => {});
+      ROOM = null; game = null; presence = []; presenceLoaded = false;
+      history.replaceState(null, "", location.pathname);
+      showScreen("tables");
+    }
+
     // ── Wiring ───────────────────────────────────────────────
     $("btnSit").addEventListener("click", takeSeat);
     $("btnLeaveSeat").addEventListener("click", leaveSeat);
     $("btnSpectate").addEventListener("click", spectate);
     $("btnRematch").addEventListener("click", rematch);
     $("btnToLobby").addEventListener("click", toLobby);
+    $("btnLeaveTable").addEventListener("click", leaveTable);
+    $("btnNewTable").addEventListener("click", () =>
+      joinTable(() => hall.create({ name: `${me.name || me.handle}'s table` })));
+    $("btnNewPrivate").addEventListener("click", () =>
+      joinTable(() => hall.create({ name: `${me.name || me.handle}'s table`, private: true })));
+    $("btnJoinCode").addEventListener("click", () => {
+      const code = $("codeInput").value.trim().toUpperCase();
+      if (code.length < 4) { toast("Enter the 4-letter code."); return; }
+      joinTable(() => hall.joinByCode(code));
+    });
+    $("codeInput").addEventListener("keydown", (e) => { if (e.key === "Enter") $("btnJoinCode").click(); });
     $("btnCopy").addEventListener("click", async () => {
       const link = $("inviteLink").value;
       try { await navigator.clipboard.writeText(link); toast("Invite link copied!"); }
@@ -774,23 +887,17 @@
         await worlds.ready;
         me = await worlds.me();
         $("meName").textContent = me.name || me.handle;
-        $("inviteLink").value = location.href;
 
-        // shared board: worlds.room delivers load + every live change (own + remote)
-        await ROOM.ready;
-        ROOM.onChange((s) => {
-          game = normalize(s);
-          render();
-          maybeResetAbandoned();
-        });
+        hall.onList(renderTables);
 
-        // live roster via presence
-        chan.presence((members) => {
-          presence = uniqByHandle(members || []);
-          presenceLoaded = true;
-          render();
-          maybeResetAbandoned();
-        });
+        // Deep link: #CODE drops you straight into a shared table.
+        const code = (location.hash || "").replace(/^#/, "").trim().toUpperCase();
+        if (code.length >= 4) {
+          await joinTable(() => hall.joinByCode(code));
+          if (!ROOM) showScreen("tables");
+        } else {
+          showScreen("tables");
+        }
       } catch (e) {
         boot.classList.remove("hidden");
         boot.textContent = "Couldn't connect to Worlds. Refresh to retry.";
