@@ -218,7 +218,7 @@ const _Y = new THREE.Vector3(0, 1, 0);
 const _flatX = new THREE.Quaternion().setFromAxisAngle(_X, Math.PI / 2);
 const _orb = new THREE.Vector3();
 const orbitLineMat = new THREE.MeshBasicMaterial({ color: 0x52525b, transparent: true, opacity: 0.22 });
-const FTL_DIST = 700; // farther than this when you click a world → hyperspace; nearer → just glide
+const FTL_DIST = 460; // farther than this when you click a world → hyperspace; nearer → just glide
 
 const uTime = { value: 0 };
 
@@ -555,31 +555,32 @@ function screenLabel(text, colorHex) {
 }
 
 // ---------- atmosphere + ocean shaders ----------
-function atmosphere(radius, colorHex) {
+function atmosphere(radius, colorHex, scale, intensity) {
+  scale = scale ?? 1.3; intensity = intensity ?? 1.0; // thick on gas giants, faint on thin-air worlds
   return new THREE.Mesh(
-    new THREE.SphereGeometry(radius * 1.3, 40, 40),
+    new THREE.SphereGeometry(radius * scale, 40, 40),
     new THREE.ShaderMaterial({
       side: THREE.BackSide, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
-      uniforms: { uColor: { value: new THREE.Color(colorHex) } },
+      uniforms: { uColor: { value: new THREE.Color(colorHex) }, uI: { value: intensity } },
       vertexShader: `varying vec3 vN; varying vec3 vW;
         void main(){ vec4 wp = modelMatrix * vec4(position,1.0); vW = wp.xyz; vN = normalize(mat3(modelMatrix)*normal); gl_Position = projectionMatrix * viewMatrix * wp; }`,
-      fragmentShader: `varying vec3 vN; varying vec3 vW; uniform vec3 uColor;
+      fragmentShader: `varying vec3 vN; varying vec3 vW; uniform vec3 uColor; uniform float uI;
         void main(){
           vec3 v = normalize(cameraPosition - vW);
           // wider, brighter halo + a soft inner wash so worlds glow against the void
           float rim = pow(1.0 - abs(dot(vN, v)), 2.1);
-          gl_FragColor = vec4(uColor * (rim * 1.5 + 0.05), rim * 1.05);
+          gl_FragColor = vec4(uColor * (rim * 1.5 + 0.05) * uI, rim * 1.05 * uI);
         }`,
     }),
   );
 }
 
-function oceanShell(radius, colorHex) {
+function oceanShell(radius, colorHex, lava) {
   return new THREE.Mesh(
     new THREE.SphereGeometry(radius * 1.003, 48, 48),
     new THREE.ShaderMaterial({
       transparent: true,
-      uniforms: { uTime, uColor: { value: new THREE.Color(colorHex) } },
+      uniforms: { uTime, uColor: { value: new THREE.Color(lava ? 0xff5a1e : colorHex) }, uLava: { value: lava ? 1 : 0 } },
       vertexShader: `
         ${GLSL_NOISE}
         uniform float uTime; varying vec3 vN; varying vec3 vW;
@@ -591,13 +592,19 @@ function oceanShell(radius, colorHex) {
         }`,
       fragmentShader: `
         ${GLSL_NOISE}
-        uniform float uTime; uniform vec3 uColor; varying vec3 vN; varying vec3 vW;
+        uniform float uTime; uniform vec3 uColor; uniform float uLava; varying vec3 vN; varying vec3 vW;
         void main(){
           vec3 v = normalize(cameraPosition - vW);
+          float sparkle = smoothstep(0.72, 1.0, vnoise(vW*1.4 + uTime*0.7));
+          if (uLava > 0.5) {                              // molten sea: self-lit, flowing cracks
+            float flow = vnoise(vW*0.8 + uTime*0.5);
+            vec3 lc = mix(uColor, vec3(1.0,0.85,0.3), smoothstep(0.5,0.95,flow));
+            gl_FragColor = vec4(lc * (1.1 + 0.5*sparkle), 0.94);
+            return;
+          }
           vec3 lightDir = normalize(-vW);                 // the sun sits at the origin
           float fres = pow(1.0 - abs(dot(vN, v)), 2.0);
           float spec = pow(max(dot(reflect(-lightDir, vN), v), 0.0), 40.0);
-          float sparkle = smoothstep(0.72, 1.0, vnoise(vW*1.4 + uTime*0.7));
           vec3 col = uColor * (0.55 + 0.45 * max(dot(vN, lightDir), 0.0));
           col += vec3(1.0) * spec * 0.7 + uColor * fres * 0.6 + vec3(0.9) * sparkle * 0.08;
           gl_FragColor = vec4(col, 0.62);
@@ -657,10 +664,11 @@ const BIOME_TREES = {
 };
 
 // shared elevation field — terrain, sea level, tree placement and dishes all agree
-function elevation(noise, dir) {
-  const continents = fbm(noise, dir.clone().multiplyScalar(1.7), 5);
-  const mountains = fbm(noise, dir.clone().multiplyScalar(4.3), 4);
-  return Math.min(continents * 0.78 + mountains * 0.30, 0.999);
+function elevation(noise, dir, tp) {
+  const cf = tp ? tp.cf : 1.7, mf = tp ? tp.mf : 4.3, mw = tp ? tp.mw : 0.30;
+  const continents = fbm(noise, dir.clone().multiplyScalar(cf), 5);
+  const mountains = fbm(noise, dir.clone().multiplyScalar(mf), 4);
+  return Math.min(continents * 0.78 + mountains * mw, 0.999);
 }
 const landFrac = (e, sea) => Math.max(0, (e - sea) / (1 - sea));
 function heightAt(radius, e, sea) {
@@ -688,16 +696,76 @@ function plantForest(spinner, samples, biomeName, rng, radius) {
   for (const [name, mats] of buckets) if (mats.length) instancedFromGLB(ASSETS[name], mats, spinner);
 }
 
+// ---- per-world DIVERSITY ----------------------------------------------------------
+// The server hands us a biome + seed; everything that makes two worlds look different
+// is derived HERE from the seed: an archetype (gas giant / barren rock / ocean / lava /
+// terran), a per-world jittered palette (so two "lush" worlds aren't identical), varied
+// terrain character, polar caps, and axial tilt.
+const BARREN_PAL = { sea: 0x3a3a40, beach: 0x6b6b73, mid: 0x8a8a93, high: 0x55555c, peak: 0xcfcfd8, ocean: 0.03, atmo: 0x9aa0b0, treeDensity: 0 };
+
+function pickKind(rng, biomeName, radius, activity) {
+  const r = rng();
+  if (radius > 14.5 && r < 0.55) return "gas";               // the biggest worlds → gas giants
+  if (biomeName === "volcanic" && r < 0.6) return "lava";    // volcanic worlds often run molten
+  if (activity < 0.04 && rng() < 0.5) return "barren";       // long-dormant worlds → dead rock
+  if ((biomeName === "archipelago" || biomeName === "lush") && rng() < 0.22) return "ocean";
+  return "terran";
+}
+function shiftColor(hex, dh, ds, dl) {
+  const c = new THREE.Color(hex), hsl = {}; c.getHSL(hsl);
+  c.setHSL((hsl.h + dh + 1) % 1, Math.min(1, Math.max(0.03, hsl.s + ds)), Math.min(0.97, Math.max(0.04, hsl.l + dl)));
+  return c.getHex();
+}
+function paletteFor(kind, base, rng) {
+  const src = kind === "barren" ? BARREN_PAL : base;
+  const dh = (rng() - 0.5) * 0.13, ds = (rng() - 0.5) * 0.22, dl = (rng() - 0.5) * 0.14; // per-world hue/sat/lum drift
+  const j = (hex) => shiftColor(hex, dh, ds, dl);
+  return { sea: j(src.sea), beach: j(src.beach), mid: j(src.mid), high: j(src.high), peak: j(src.peak), atmo: j(src.atmo), ocean: src.ocean, treeDensity: src.treeDensity };
+}
+// a banded gas giant: horizontal cloud belts + a storm oval, lit from the origin star
+function makeGasGiant(radius, pal, rng) {
+  const seed = rng() * 12.0, stormLat = (rng() - 0.5) * 0.8, stormLon = rng() * 6.283;
+  return new THREE.Mesh(new THREE.SphereGeometry(radius * 1.12, 56, 56), new THREE.ShaderMaterial({
+    uniforms: { uTime, uC1: { value: new THREE.Color(pal.mid) }, uC2: { value: new THREE.Color(pal.high) }, uC3: { value: new THREE.Color(pal.peak) }, uStorm: { value: new THREE.Vector2(stormLon, stormLat) }, uSeed: { value: seed } },
+    vertexShader: `varying vec3 vN; varying vec3 vW; varying vec3 vP; void main(){ vec4 wp=modelMatrix*vec4(position,1.0); vW=wp.xyz; vN=normalize(mat3(modelMatrix)*normal); vP=normalize(position); gl_Position=projectionMatrix*viewMatrix*wp; }`,
+    fragmentShader: `${GLSL_NOISE}
+      uniform float uTime,uSeed; uniform vec3 uC1,uC2,uC3; uniform vec2 uStorm; varying vec3 vN; varying vec3 vW; varying vec3 vP;
+      void main(){
+        float lat = vP.y;
+        float warp = vnoise(vec3(uSeed, lat*5.0, vP.x*2.0)) * 0.5;
+        float bands = sin(lat*16.0 + warp*4.0 + uTime*0.04);
+        float t = bands*0.5 + 0.5;
+        vec3 col = mix(uC1, uC2, smoothstep(0.25,0.75,t));
+        col = mix(col, uC3, smoothstep(0.72,1.0,t)*0.7);
+        col *= 0.82 + 0.18*vnoise(vP*7.0 + uTime*0.02);
+        float lon = atan(vP.z, vP.x);
+        float dlat = (lat - uStorm.y), dlon = mod(lon - uStorm.x + 3.14159, 6.2832) - 3.14159;
+        float storm = smoothstep(0.26, 0.0, sqrt(dlat*dlat*3.0 + dlon*dlon*0.6));
+        col = mix(col, vec3(0.96,0.55,0.42), storm*0.85);
+        float lit = 0.32 + 0.68*max(dot(vN, normalize(-vW)), 0.0);
+        gl_FragColor = vec4(col*lit, 1.0);
+      }`,
+  }));
+}
+
 function makePlanet(site) {
   const u = site.universe ?? { seed: 1, biome: "lush", pos: [0.5, 0, 0.5] };
   const rng = mulberry32(u.seed);
   const noise = noise3(u.seed);
   const biomeName = u.biome ?? "lush";
-  const biome = BIOMES[biomeName] ?? BIOMES.lush;
-  const sea = biome.ocean;
+  const baseBiome = BIOMES[biomeName] ?? BIOMES.lush;
   const radius = 7.5 + Math.min((site.visits_30d ?? 0) / 40, 9) + rng() * 2.5; // bigger, chunkier worlds
   const activity = Math.min((site.visits_30d ?? 0) / 200, 1);
   const sys = SYSTEMS[site.category] ?? SYSTEMS.misc; // the star this world orbits
+
+  // per-world character from an isolated rng (keeps the main rng stream stable)
+  const kRng = mulberry32((u.seed ^ 0x85ebca6b) >>> 0);
+  const kind = pickKind(kRng, biomeName, radius, activity);
+  const biome = paletteFor(kind, baseBiome, kRng); // jittered palette — used as `biome` below, so the rest is unchanged
+  const sea = kind === "ocean" ? 0.72 : kind === "barren" ? 0.03 : biome.ocean;
+  const tp = { cf: 1.7 * (0.78 + kRng() * 0.7), mf: 4.3 * (0.8 + kRng() * 0.6), mw: 0.22 + kRng() * 0.2 }; // terrain character
+  const capLat = (kind === "barren" || kind === "lava") ? 1.1 : 0.92 - kRng() * 0.22 - (biomeName === "ice" ? 0.16 : 0); // ice→big caps; barren/lava→none
+  const tilt = (kRng() - 0.5) * 1.7; // axial tilt — some worlds roll on their side
 
   // terrain mesh
   const geo = new THREE.IcosahedronGeometry(radius, 6);
@@ -708,11 +776,11 @@ function makePlanet(site) {
   for (let i = 0; i < posAttr.count; i++) {
     v.fromBufferAttribute(posAttr, i);
     const dir = v.clone().normalize();
-    const e = elevation(noise, dir);
+    const e = elevation(noise, dir, tp);
     v.copy(dir).multiplyScalar(heightAt(radius, e, sea));
     posAttr.setXYZ(i, v.x, v.y, v.z);
     const lf = landFrac(e, sea);
-    const polar = Math.abs(dir.y) > 0.82;
+    const polar = Math.abs(dir.y) > capLat; // ice caps sized per-world (none on barren/lava)
     if (e < sea) col.setHex(biome.sea).multiplyScalar(0.7 + 0.3 * (e / sea)); // depth shading
     else if (lf < 0.05) col.setHex(biome.beach);
     else if (polar || lf > 0.72) col.setHex(biome.peak);
@@ -729,7 +797,7 @@ function makePlanet(site) {
   const wanted = Math.floor(200 * biome.treeDensity * (0.55 + activity));
   for (let a = 0; treeSamples.length < wanted && a < wanted * 8; a++) {
     const dir = randomUnit(tRng);
-    const e = elevation(noise, dir);
+    const e = elevation(noise, dir, tp);
     if (e < sea) continue;                       // never on water
     const lf = landFrac(e, sea);
     if (lf < 0.07 || lf > 0.6) continue;         // skip beaches' edge and rocky peaks
@@ -740,61 +808,85 @@ function makePlanet(site) {
   const group = new THREE.Group();
   group.userData.site = site;
 
-  // spinner: everything fixed to the surface rotates together
+  // spinner holds the body + surface detail and carries the world's axial tilt
   const spinner = new THREE.Group();
-  const terrainMat = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.92 });
-  // busy worlds glow with city lights on their night side
-  if ((site.visits_30d ?? 0) > 30) {
-    terrainMat.onBeforeCompile = (sh) => {
-      sh.uniforms.uSun = { value: sys.pos };
-      sh.uniforms.uTime = uTime;
-      sh.vertexShader = "varying vec3 vWPos; varying vec3 vWNorm;\n" +
-        sh.vertexShader.replace("#include <begin_vertex>",
-          "#include <begin_vertex>\n vWPos = (modelMatrix*vec4(transformed,1.0)).xyz; vWNorm = mat3(modelMatrix)*normal;");
-      sh.fragmentShader = "uniform vec3 uSun; uniform float uTime; varying vec3 vWPos; varying vec3 vWNorm;\n" +
-        GLSL_NOISE +
-        sh.fragmentShader.replace("#include <dithering_fragment>",
-          `#include <dithering_fragment>
-           { vec3 sd = normalize(uSun - vWPos);
-             float night = smoothstep(0.12, -0.28, dot(normalize(vWNorm), sd));
-             float land = step(0.16, vColor.g);
-             float cities = smoothstep(0.80, 0.96, vnoise(vWPos * 2.3)) * land;
-             float flick = 0.7 + 0.3 * sin(uTime * 3.0 + vWPos.x * 12.0);
-             gl_FragColor.rgb += vec3(1.0, 0.82, 0.45) * night * cities * 1.7 * flick; }`);
-    };
-  }
-  const terrain = new THREE.Mesh(geo, terrainMat);
-  spinner.add(terrain);
-  spinner.add(oceanShell(radius, biome.sea));
-  plantForest(spinner, treeSamples, biomeName, rng, radius);
+  spinner.rotation.z = tilt;
 
-  // busy worlds earn a satellite dish, seated on real land
-  if ((site.visits_30d ?? 0) > 50 && ASSETS.satelliteDish_detailed && treeSamples.length) {
-    const dish = ASSETS.satelliteDish_detailed.clone();
-    const spot = treeSamples[Math.floor(rng() * treeSamples.length)];
-    dish.scale.setScalar((radius * 0.18) / modelHeight("satelliteDish_detailed"));
-    dish.position.copy(spot.point);
-    dish.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), spot.dir);
-    spinner.add(dish);
-  }
-  group.add(spinner);
+  if (kind === "gas") {
+    spinner.add(makeGasGiant(radius, biome, kRng)); // banded body — no terrain/ocean/trees
+    group.add(spinner);
+  } else {
+    const terrainMat = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: kind === "barren" ? 1.0 : 0.92 });
+    if (kind === "lava") {
+      // molten worlds glow from their darkest, lowest crust (day or night), pulsing
+      terrainMat.onBeforeCompile = (sh) => {
+        sh.uniforms.uTime = uTime;
+        sh.vertexShader = "varying vec3 vWPos;\n" +
+          sh.vertexShader.replace("#include <begin_vertex>", "#include <begin_vertex>\n vWPos = (modelMatrix*vec4(transformed,1.0)).xyz;");
+        sh.fragmentShader = "varying vec3 vWPos; uniform float uTime;\n" +
+          sh.fragmentShader.replace("#include <dithering_fragment>",
+            `#include <dithering_fragment>
+             { float hot = 1.0 - smoothstep(0.12, 0.45, (vColor.r + vColor.g) * 0.5);
+               float pulse = 0.6 + 0.4 * sin(uTime * 2.0 + vWPos.x * 0.6);
+               gl_FragColor.rgb += vec3(1.0, 0.35, 0.05) * hot * pulse * 1.6; }`);
+      };
+    } else if ((site.visits_30d ?? 0) > 30) {
+      // busy worlds glow with city lights on their night side
+      terrainMat.onBeforeCompile = (sh) => {
+        sh.uniforms.uSun = { value: sys.pos };
+        sh.uniforms.uTime = uTime;
+        sh.vertexShader = "varying vec3 vWPos; varying vec3 vWNorm;\n" +
+          sh.vertexShader.replace("#include <begin_vertex>",
+            "#include <begin_vertex>\n vWPos = (modelMatrix*vec4(transformed,1.0)).xyz; vWNorm = mat3(modelMatrix)*normal;");
+        sh.fragmentShader = "uniform vec3 uSun; uniform float uTime; varying vec3 vWPos; varying vec3 vWNorm;\n" +
+          GLSL_NOISE +
+          sh.fragmentShader.replace("#include <dithering_fragment>",
+            `#include <dithering_fragment>
+             { vec3 sd = normalize(uSun - vWPos);
+               float night = smoothstep(0.12, -0.28, dot(normalize(vWNorm), sd));
+               float land = step(0.16, vColor.g);
+               float cities = smoothstep(0.80, 0.96, vnoise(vWPos * 2.3)) * land;
+               float flick = 0.7 + 0.3 * sin(uTime * 3.0 + vWPos.x * 12.0);
+               gl_FragColor.rgb += vec3(1.0, 0.82, 0.45) * night * cities * 1.7 * flick; }`);
+      };
+    }
+    const terrain = new THREE.Mesh(geo, terrainMat);
+    spinner.add(terrain);
+    if (kind !== "barren") spinner.add(oceanShell(radius, biome.sea, kind === "lava")); // barren is bone-dry; lava gets a molten sea
+    if (kind === "terran" || kind === "ocean") plantForest(spinner, treeSamples, biomeName, rng, radius); // only living worlds grow forests
 
-  group.add(atmosphere(radius, biome.atmo));
-
-  // clouds: low-poly puffs that drift above the peaks, sized to the planet
-  const cloudCount = 4 + Math.floor(rng() * 6);
-  const cloudMat = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.8, flatShading: true });
-  const clouds = new THREE.InstancedMesh(CLOUD_GEO, cloudMat, cloudCount);
-  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3();
-  for (let i = 0; i < cloudCount; i++) {
-    const dir = new THREE.Vector3(rng() - 0.5, (rng() - 0.5) * 0.7, rng() - 0.5).normalize();
-    q.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
-    s.set(radius * (0.18 + rng() * 0.12), radius * 0.05, radius * (0.12 + rng() * 0.08));
-    m.compose(dir.multiplyScalar(radius * 1.36), q, s);
-    clouds.setMatrixAt(i, m);
+    // busy worlds earn a satellite dish, seated on real land
+    if ((site.visits_30d ?? 0) > 50 && kind !== "barren" && ASSETS.satelliteDish_detailed && treeSamples.length) {
+      const dish = ASSETS.satelliteDish_detailed.clone();
+      const spot = treeSamples[Math.floor(rng() * treeSamples.length)];
+      dish.scale.setScalar((radius * 0.18) / modelHeight("satelliteDish_detailed"));
+      dish.position.copy(spot.point);
+      dish.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), spot.dir);
+      spinner.add(dish);
+    }
+    group.add(spinner);
   }
-  clouds.userData.spin = 0.02 + rng() * 0.03;
-  group.add(clouds);
+
+  // atmosphere: thick on gas giants, none on airless rock, normal elsewhere
+  if (kind !== "barren") group.add(atmosphere(radius, biome.atmo, kind === "gas" ? 1.5 : 1.3, kind === "gas" ? 1.4 : 1.0));
+
+  // clouds: ocean worlds cloudiest, lava gets sparse ember wisps, gas/barren get none
+  let clouds = null; // stored on userData (drifts in the tick loop) — null for gas/barren
+  if (kind !== "gas" && kind !== "barren") {
+    const cloudCount = kind === "ocean" ? 8 + Math.floor(rng() * 6) : kind === "lava" ? 2 + Math.floor(rng() * 3) : 3 + Math.floor(rng() * 6);
+    const cloudMat = new THREE.MeshStandardMaterial({ color: kind === "lava" ? 0x3a2418 : 0xffffff, transparent: true, opacity: kind === "lava" ? 0.7 : 0.8, flatShading: true });
+    clouds = new THREE.InstancedMesh(CLOUD_GEO, cloudMat, cloudCount);
+    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3();
+    for (let i = 0; i < cloudCount; i++) {
+      const dir = new THREE.Vector3(rng() - 0.5, (rng() - 0.5) * 0.7, rng() - 0.5).normalize();
+      q.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+      s.set(radius * (0.18 + rng() * 0.12), radius * 0.05, radius * (0.12 + rng() * 0.08));
+      m.compose(dir.multiplyScalar(radius * 1.36), q, s);
+      clouds.setMatrixAt(i, m);
+    }
+    clouds.userData.spin = 0.02 + rng() * 0.03;
+    group.add(clouds);
+  }
 
   // a thin highlight halo for worlds shipped in the last ~3 days — kept subtle + rare so
   // it reads as a "freshly shipped" cue, not yet another planetary ring
@@ -808,8 +900,8 @@ function makePlanet(site) {
     group.add(ring);
   }
 
-  // only the largest, most-visited worlds get a banded Saturn ring — rare by design
-  if (radius > 13 && rng() < 0.4) {
+  // big worlds — especially gas giants — can wear a banded Saturn ring; rare elsewhere
+  if ((kind === "gas" || radius > 13) && rng() < (kind === "gas" ? 0.65 : 0.4)) {
     const ring = makePlanetRing(radius, biome.atmo);
     ring.rotation.x = Math.PI / 2 + (rng() - 0.5) * 0.6;
     ring.rotation.y = (rng() - 0.5) * 0.4;
@@ -870,7 +962,7 @@ const ship = new THREE.Group();
 ship.position.set(0, 14, 120);
 scene.add(ship);
 let enginePoint = new THREE.Vector3(0, 0, 1.2); // rear nozzle, ship-local
-let flameMesh = null, innerFlame = null, engineLight = null;
+let flameMesh = null, innerFlame = null, engineLight = null, engineGlow = null;
 const navLights = [];
 let shipRadius = 1.5; // for collisions
 
@@ -897,7 +989,10 @@ function buildShip() {
   // rear of the hull is +Z, behind the nose at -Z
   enginePoint = new THREE.Vector3(0, 0, size.z * 0.42);
 
-  const glow = new THREE.Mesh(new THREE.SphereGeometry(0.18, 12, 12), new THREE.MeshBasicMaterial({ color: 0x9fe8ff }));
+  // engine core glow — additive + thrust-driven so it fades to near-nothing at rest
+  // (a full-bright sphere here blooms into a blinding blob that hides the ship)
+  const glow = (engineGlow = new THREE.Mesh(new THREE.SphereGeometry(0.2, 12, 12),
+    new THREE.MeshBasicMaterial({ color: 0x9fe8ff, transparent: true, opacity: 0.05, blending: THREE.AdditiveBlending, depthWrite: false })));
   glow.position.copy(enginePoint);
 
   // layered thruster flame: cyan outer + white-hot inner core
@@ -1043,7 +1138,11 @@ const vel = new THREE.Vector3();
 let pitch = -0.08, yaw = 0;
 
 const keys = new Set();
-addEventListener("keydown", (e) => { initAudio(); keys.add(e.code); });
+addEventListener("keydown", (e) => {
+  if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return; // don't fly while typing
+  initAudio(); keys.add(e.code);
+  if (["Space", "KeyW", "KeyS", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.code)) e.preventDefault();
+});
 addEventListener("keyup", (e) => keys.delete(e.code));
 let dragging = null;
 renderer.domElement.addEventListener("pointerdown", (e) => { initAudio(); dragging = { x: e.clientX, y: e.clientY, moved: 0 }; });
@@ -2067,7 +2166,7 @@ function tick() {
   // keyboard flight: WASD (A/D turn, W/S thrust+reverse) + R/F pitch + arrows — fly with no mouse
   const kYaw = (keys.has("KeyA") || keys.has("ArrowLeft") ? 1 : 0) - (keys.has("KeyD") || keys.has("ArrowRight") ? 1 : 0);
   if (kYaw) yaw += kYaw * 1.7 * dt;
-  const kPitch = (keys.has("KeyR") ? 1 : 0) - (keys.has("KeyF") ? 1 : 0);
+  const kPitch = (keys.has("KeyW") || keys.has("ArrowUp") ? 1 : 0) - (keys.has("KeyS") || keys.has("ArrowDown") ? 1 : 0);
   if (kPitch) pitch = Math.max(-1.2, Math.min(1.2, pitch + kPitch * 1.4 * dt));
   // ease the ship to face the world/system we clicked or warped to — so an FTL jump
   // flies toward it head-on (not sliding sideways) and stays centered in frame.
@@ -2089,7 +2188,7 @@ function tick() {
   _quat.setFromEuler(_euler);
   ship.quaternion.slerp(_quat, 1 - Math.exp(-8 * dt));
   const forward = _forward.set(0, 0, -1).applyQuaternion(ship.quaternion);
-  const keyThrust = keys.has("KeyW") || keys.has("Space") || keys.has("ArrowUp");
+  const keyThrust = keys.has("Space"); // W/S now pitch the nose; Space drives forward
   const driveAmt = Math.max(keyThrust ? 1 : 0, joy.active ? Math.min(Math.hypot(joy.x, joy.y), 1) : 0);
   const thrust = driveAmt > 0.12;
 
@@ -2109,7 +2208,7 @@ function tick() {
       const br = flyTarget.userData.bodyR ?? 6;
       goal = _goal.set(flyTarget.position.x, flyTarget.position.y + br * 0.5, flyTarget.position.z + br + shipRadius + 10);
     }
-    const k = flyFTL ? 3.6 : 1.6; // FTL jumps snap across fast; short glides stay gentle
+    const k = flyFTL ? 2.7 : 1.6; // FTL jumps cross fast but last ~2s so the hyperspace reads; short glides stay gentle
     ship.position.lerp(goal, 1 - Math.exp(-k * dt));
     vel.multiplyScalar(Math.exp(-4 * dt)); // bleed residual momentum
     if (ship.position.distanceTo(goal) < 2) flyTarget = null;
@@ -2232,13 +2331,17 @@ function tick() {
   // thruster flame layers + engine light follow thrust
   const burning = thrust || flyTarget || dive;
   if (flameMesh) {
-    const target = burning ? 1.0 + Math.sin(t * 40) * 0.28 : 0.22;
+    const target = burning ? 1.0 + Math.sin(t * 40) * 0.28 : 0.1;
     flameMesh.scale.y += (target - flameMesh.scale.y) * Math.min(1, dt * 14);
     innerFlame.scale.y += (target * 0.8 - innerFlame.scale.y) * Math.min(1, dt * 16);
-    flameMesh.material.opacity = burning ? 0.85 : 0.3;
-    innerFlame.material.opacity = burning ? 0.95 : 0.4;
+    flameMesh.material.opacity = burning ? 0.85 : 0.05;
+    innerFlame.material.opacity = burning ? 0.95 : 0.05;
   }
-  if (engineLight) engineLight.intensity += ((burning ? 9 : 2.5) - engineLight.intensity) * Math.min(1, dt * 10);
+  if (engineGlow) { // core glow + cast light both fade to ~0 at rest so the ship is visible
+    engineGlow.material.opacity += ((burning ? 0.95 : 0.04) - engineGlow.material.opacity) * Math.min(1, dt * 9);
+    engineGlow.scale.setScalar(burning ? 1.0 : 0.4);
+  }
+  if (engineLight) engineLight.intensity += ((burning ? 9 : 0.12) - engineLight.intensity) * Math.min(1, dt * 10);
   // navigation blinkers
   for (let i = 0; i < navLights.length; i++) {
     const on = (Math.sin(t * 3 + i * Math.PI) > 0.4) ? 1 : 0.06;
@@ -2263,8 +2366,8 @@ function tick() {
   if (ftlActive && !wasFly) { if (flashEl) { flashEl.style.opacity = "0.32"; setTimeout(() => { flashEl.style.opacity = "0"; }, 110); } }
   wasFly = ftlActive;
   if (starMat) {
-    const targetWarp = ftlActive ? 0.85 : 0;
-    const rate = flyFTL ? 9 : 6; // ramp on hard + bleed off fast so the jump is brief
+    const targetWarp = ftlActive ? 0.95 : 0; // punchier streak tunnel during a jump
+    const rate = flyFTL ? 8 : 6;
     starMat.uniforms.uWarp.value += (targetWarp - starMat.uniforms.uWarp.value) * Math.min(1, dt * rate);
   }
   // follow badge: visible while trailing another pilot; clears if they leave
