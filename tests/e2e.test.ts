@@ -230,6 +230,39 @@ describe("worlds.db", () => {
   });
 });
 
+// worlds.rooms (the multi-instance lobby browser) is pure client SDK, but it
+// rides this exact db contract: one collection holds directory docs (`_dir:1`)
+// alongside each room's state doc (`_room:"inst:<id>"`), discovered by filter.
+// These lock that shape down so the SDK's create/list/joinByCode/cleanup hold.
+describe("worlds.rooms registry", () => {
+  test("directory docs and instance state docs coexist and filter apart", async () => {
+    const open = await (await req("POST", "/api/v1/db/chess", {
+      body: { _dir: 1, id: "aaa", code: "K7QF", name: "Open table", private: false, status: "open", count: 1 },
+    })).json();
+    await req("POST", "/api/v1/db/chess", { body: { _dir: 1, id: "bbb", code: "M3PQ", name: "Private", private: true, status: "open", count: 1 } });
+    await req("POST", "/api/v1/db/chess", { body: { _room: "inst:aaa", _rev: 0, board: [] } });
+
+    // list() reads only the directory entries, never the instance state docs.
+    const dir = await (await req("GET", `/api/v1/db/chess?filter=${encodeURIComponent('{"_dir":1}')}`)).json();
+    expect(dir.items.map((d: { data: { code: string } }) => d.data.code).sort()).toEqual(["K7QF", "M3PQ"]);
+
+    // joinByCode() is an AND filter on the directory entry.
+    const byCode = await (await req("GET", `/api/v1/db/chess?filter=${encodeURIComponent('{"_dir":1,"code":"K7QF"}')}`)).json();
+    expect(byCode.items.length).toBe(1);
+    expect(byCode.items[0].data.name).toBe("Open table");
+
+    // a room loads its own state doc by its instance key, ignoring directory docs.
+    const state = await (await req("GET", `/api/v1/db/chess?filter=${encodeURIComponent('{"_room":"inst:aaa"}')}`)).json();
+    expect(state.items.length).toBe(1);
+    expect(state.items[0].data._room).toBe("inst:aaa");
+
+    // leave()/sweep() removes the directory entry, dropping it from the list.
+    await req("DELETE", `/api/v1/db/chess/${open.id}`);
+    const after = await (await req("GET", `/api/v1/db/chess?filter=${encodeURIComponent('{"_dir":1}')}`)).json();
+    expect(after.items.map((d: { data: { code: string } }) => d.data.code)).toEqual(["M3PQ"]);
+  });
+});
+
 describe("uploads", () => {
   test("put, list, serve, delete", async () => {
     const form = new FormData();
