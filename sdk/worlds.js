@@ -98,6 +98,8 @@
           sub.onSnapshot(f.actors || []);
         } else if (f.op === "actors" && sub.onActors) {
           sub.onActors(f.updates || []);
+        } else if (f.op === "actor_event" && sub.onActorEvent) {
+          sub.onActorEvent(f.from, f.payload);
         } else if (f.op === "actors_leave" && sub.onActorLeave) {
           sub.onActorLeave(f.ids || []);
         } else if (f.op === "error" && f.error?.code === "replay_expired" && sub.onExpired) {
@@ -511,7 +513,7 @@
       return snapshot();
     })();
     return {
-      opened,
+      ready: opened,
       setReady,
       toggleReady,
       start,
@@ -916,6 +918,7 @@
     const cid = id();
     const states = new Map;
     const changeFns = new Set;
+    const eventFns = new Set;
     const leaveFns = new Set;
     let zone = opts.zone != null ? String(opts.zone) : "";
     let stopped = false;
@@ -931,18 +934,34 @@
           fn(peer);
         } catch {}
     }
+    function emitEvent(from, payload) {
+      for (const fn of eventFns)
+        try {
+          fn(from.id, payload, from);
+        } catch {}
+    }
     function ingest(list) {
       if (!Array.isArray(list))
         return;
       for (const a of list) {
         if (!a || typeof a.id !== "string" || a.id === cid)
           continue;
-        const rec = { id: a.id, handle: a.handle || a.id, name: a.name || a.handle || a.id, state: a.state };
-        states.set(rec.id, rec);
+        let rec = states.get(a.id);
+        if (!rec)
+          rec = { id: a.id, handle: a.handle || a.id, name: a.handle || a.id, state: undefined, metadata: {} };
+        if (a.handle)
+          rec.handle = a.handle;
+        if (a.name)
+          rec.name = a.name;
+        if (a.state !== undefined)
+          rec.state = a.state;
+        if (a.meta)
+          rec.metadata = { ...rec.metadata, ...a.meta };
+        states.set(a.id, rec);
         emitChange(rec);
       }
     }
-    const stopSub = sock.subscribe({ op: "sub", kind: "actors", channel: name, zone, cid, rate: opts.rate }, () => {}, {
+    const stopSub = sock.subscribe({ op: "sub", kind: "actors", channel: name, zone, cid, rate: opts.rate, meta: opts.metadata }, () => {}, {
       onSnapshot: (list) => {
         const keep = new Set((list || []).map((a) => a && a.id).filter(Boolean));
         for (const peer of [...states.keys()])
@@ -953,6 +972,10 @@
         ingest(list);
       },
       onActors: (list) => ingest(list),
+      onActorEvent: (from, payload) => {
+        if (from && from.id !== cid)
+          emitEvent(from, payload);
+      },
       onActorLeave: (ids) => {
         if (!Array.isArray(ids))
           return;
@@ -969,22 +992,37 @@
           zone = String(opts.zoneKey(state));
         sock.send({ op: "set", id: "set", channel: name, cid, state, zone });
       },
+      setMetadata(patch) {
+        if (stopped || !patch)
+          return;
+        sock.send({ op: "ameta", id: "ameta", channel: name, cid, meta: patch });
+      },
+      send(payload) {
+        if (stopped)
+          return;
+        sock.send({ op: "aevent", id: "aevent", channel: name, cid, payload });
+      },
       others: () => [...states.values()],
       onChange(fn) {
         changeFns.add(fn);
         return () => changeFns.delete(fn);
       },
+      onEvent(fn) {
+        eventFns.add(fn);
+        return () => eventFns.delete(fn);
+      },
       onLeave(fn) {
         leaveFns.add(fn);
         return () => leaveFns.delete(fn);
       },
-      stop() {
+      destroy() {
         stopped = true;
         try {
           stopSub();
         } catch {}
         states.clear();
         changeFns.clear();
+        eventFns.clear();
         leaveFns.clear();
       }
     };

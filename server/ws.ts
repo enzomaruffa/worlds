@@ -29,8 +29,10 @@ interface ActorEntry {
   cid: string; // stable per-tab id — the actor's identity to its peers
   who: Identity;
   zone: string;
-  state: unknown; // undefined until the member's first set
-  dirty: boolean; // changed since the last flush
+  state: unknown; // last-value frame state (undefined until the member's first set)
+  meta: Record<string, unknown>; // infrequent per-member metadata (team, level, status…)
+  stateDirty: boolean; // state changed since the last flush
+  metaDirty: boolean; // metadata changed since the last flush
 }
 interface ActorRoom {
   members: Map<string, ActorEntry>; // cid -> entry
@@ -92,6 +94,10 @@ function sendErr(ws: WS, id: string | undefined, code: string, message: string):
 
 // ── actors helpers ──
 
+function hasKeys(o: Record<string, unknown> | undefined): boolean {
+  return !!o && Object.keys(o).length > 0;
+}
+
 // The actors sub ids a given socket holds for this room (a socket can hold more
 // than one, though games use one) — used to stamp the right `id` on each frame.
 function actorSubIds(ws: WS, key: string): string[] {
@@ -109,8 +115,12 @@ function sendActorSnapshot(ws: WS, key: string, subId: string, zone: string, sel
   if (!room) return;
   const actors = [];
   for (const e of room.members.values()) {
-    if (e.cid === selfCid || e.zone !== zone || e.state === undefined) continue;
-    actors.push({ id: e.cid, handle: e.who.handle, name: e.who.name, state: e.state });
+    if (e.cid === selfCid || e.zone !== zone) continue;
+    if (e.state === undefined && !hasKeys(e.meta)) continue; // nothing to show yet
+    const a: Record<string, unknown> = { id: e.cid, handle: e.who.handle, name: e.who.name };
+    if (e.state !== undefined) a.state = e.state;
+    if (hasKeys(e.meta)) a.meta = e.meta;
+    actors.push(a);
   }
   ws.send(JSON.stringify({ op: "actors_snapshot", id: subId, actors }));
 }
@@ -136,7 +146,7 @@ function flushActorRoom(key: string): void {
   if (!room) return;
   const dirtyByZone = new Map<string, ActorEntry[]>();
   for (const e of room.members.values()) {
-    if (!e.dirty || e.state === undefined) continue;
+    if (!e.stateDirty && !e.metaDirty) continue;
     let arr = dirtyByZone.get(e.zone);
     if (!arr) dirtyByZone.set(e.zone, (arr = []));
     arr.push(e);
@@ -148,14 +158,18 @@ function flushActorRoom(key: string): void {
     const updates = [];
     for (const e of dirty) {
       if (e.cid === recipient.cid) continue;
-      updates.push({ id: e.cid, handle: e.who.handle, name: e.who.name, state: e.state });
+      const u: Record<string, unknown> = { id: e.cid, handle: e.who.handle, name: e.who.name };
+      if (e.stateDirty && e.state !== undefined) u.state = e.state; // only the parts that changed
+      if (e.metaDirty) u.meta = e.meta;
+      if (u.state === undefined && u.meta === undefined) continue;
+      updates.push(u);
     }
     if (updates.length === 0) continue;
     for (const subId of actorSubIds(recipient.ws, key)) {
       recipient.ws.send(JSON.stringify({ op: "actors", id: subId, updates }));
     }
   }
-  for (const e of room.members.values()) e.dirty = false;
+  for (const e of room.members.values()) { e.stateDirty = false; e.metaDirty = false; }
 }
 
 function ensureActorTimer(key: string): void {
@@ -230,7 +244,8 @@ async function handleSub(ws: WS, id: string, frame: Record<string, unknown>): Pr
       room = { members: new Map(), rate, timer: null };
       actorRooms.set(key, room);
     }
-    room.members.set(cid, { ws, cid, who: ws.data.who, zone, state: undefined, dirty: false });
+    const meta = frame.meta && typeof frame.meta === "object" ? (frame.meta as Record<string, unknown>) : {};
+    room.members.set(cid, { ws, cid, who: ws.data.who, zone, state: undefined, meta, stateDirty: false, metaDirty: hasKeys(meta) });
     ensureActorTimer(key);
     ws.send(JSON.stringify({ op: "ack", id }));
     sendActorSnapshot(ws, key, id, zone, cid); // instant last-value snapshot of the zone
@@ -262,7 +277,48 @@ function handleSet(ws: WS, frame: Record<string, unknown>): void {
     notifyZoneLeave(key, oldZone, cid); // old zone drops me
     for (const subId of actorSubIds(ws, key)) sendActorSnapshot(ws, key, subId, newZone, cid);
   }
-  e.dirty = true; // delivered to the (new) zone on the next flush
+  e.stateDirty = true; // delivered to the (new) zone on the next flush
+}
+
+// `ameta` shallow-merges a metadata patch — infrequent per-member fields (team,
+// level, status) kept apart from the frame-rate `state` so they don't resync every tick.
+function handleSetMeta(ws: WS, frame: Record<string, unknown>): void {
+  const cid = typeof frame.cid === "string" ? frame.cid : null;
+  if (!cid) return;
+  const patch = frame.meta && typeof frame.meta === "object" ? (frame.meta as Record<string, unknown>) : null;
+  if (!patch) return;
+  if (JSON.stringify(patch).length > LIMITS.wsPayloadBytes) {
+    sendErr(ws, undefined, "payload_too_large", "actor metadata over 16KB");
+    return;
+  }
+  const room = actorRooms.get(presenceKey(ws.data.site, String(frame.channel ?? "")));
+  const e = room && room.members.get(cid);
+  if (!e || e.ws !== ws) return;
+  e.meta = { ...e.meta, ...patch };
+  e.metaDirty = true;
+}
+
+// `aevent` is a discrete one-off event (a horn, a hit, a ping) — fanned out to
+// in-zone peers immediately (no coalescing, no storage). The flexible-payload tier
+// on top of last-value state, so games stop pairing actors with a second channel.
+function handleActorEvent(ws: WS, frame: Record<string, unknown>): void {
+  const cid = typeof frame.cid === "string" ? frame.cid : null;
+  if (!cid) return;
+  if (JSON.stringify(frame.payload ?? null).length > LIMITS.wsPayloadBytes) {
+    sendErr(ws, undefined, "payload_too_large", "actor event over 16KB");
+    return;
+  }
+  const key = presenceKey(ws.data.site, String(frame.channel ?? ""));
+  const room = actorRooms.get(key);
+  const e = room && room.members.get(cid);
+  if (!e || e.ws !== ws) return;
+  const from = { id: cid, handle: e.who.handle, name: e.who.name };
+  for (const peer of room.members.values()) {
+    if (peer.cid === cid || peer.zone !== e.zone) continue;
+    for (const subId of actorSubIds(peer.ws, key)) {
+      peer.ws.send(JSON.stringify({ op: "actor_event", id: subId, from, payload: frame.payload }));
+    }
+  }
 }
 
 function handleUnsub(ws: WS, id: string): void {
@@ -327,6 +383,8 @@ export const websocket = {
     if (frame.op === "unsub") return handleUnsub(ws, id);
     if (frame.op === "pub") return handlePub(ws, id, frame);
     if (frame.op === "set") return handleSet(ws, frame);
+    if (frame.op === "ameta") return handleSetMeta(ws, frame);
+    if (frame.op === "aevent") return handleActorEvent(ws, frame);
     // Unknown ops are ignored (forward-compat rule).
   },
 

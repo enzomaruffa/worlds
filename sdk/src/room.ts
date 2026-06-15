@@ -62,7 +62,7 @@ export interface RoomOptions<T = any> {
 type Person = { handle: string; name: string };
 
 export interface Room<T = any> {
-  opened: Promise<RoomSnapshot<T>>;
+  ready: Promise<RoomSnapshot<T>>;
   // roster
   setReady(val: boolean): void;
   toggleReady(): void;
@@ -316,8 +316,8 @@ export function room<T extends Record<string, any> = any>(name: string, opts: Ro
     maybeAutoStart();
   }
 
-  // Resolve identity, seed state, announce — then `opened` settles with the first
-  // full snapshot so callers can `await room.opened` before reading state/roster.
+  // Resolve identity, seed state, announce — then `ready` settles with the first
+  // full snapshot so callers can `await room.ready` before reading state/roster.
   const opened: Promise<RoomSnapshot<T>> = (async () => {
     if (!me) {
       try {
@@ -335,7 +335,7 @@ export function room<T extends Record<string, any> = any>(name: string, opts: Ro
   })();
 
   return {
-    opened,
+    ready: opened,
     setReady,
     toggleReady,
     start,

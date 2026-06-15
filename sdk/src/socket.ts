@@ -10,6 +10,7 @@ interface Sub {
   onExpired?: () => void;
   onSnapshot?: (actors: any[]) => void; // actors: full in-zone state (join / zone switch)
   onActors?: (updates: any[]) => void; // actors: batched per-flush updates
+  onActorEvent?: (from: any, payload: any) => void; // actors: a peer's one-off event
   onActorLeave?: (ids: string[]) => void; // actors: members who left the zone
 }
 
@@ -53,6 +54,8 @@ export const sock = {
         sub.onSnapshot(f.actors || []);
       } else if (f.op === "actors" && sub.onActors) {
         sub.onActors(f.updates || []);
+      } else if (f.op === "actor_event" && sub.onActorEvent) {
+        sub.onActorEvent(f.from, f.payload);
       } else if (f.op === "actors_leave" && sub.onActorLeave) {
         sub.onActorLeave(f.ids || []);
       } else if (f.op === "error" && f.error?.code === "replay_expired" && sub.onExpired) {
