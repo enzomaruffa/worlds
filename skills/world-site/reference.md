@@ -175,36 +175,53 @@ site** (deploy it with `worlds deploy` like any other). It uses only public APIs
 Read its `main.js` when you want a worked example of channels + db subscribe + ai together
 at scale. Don't bake heavy engines into the server; load them from a CDN in your site.
 
-### 10. Multiplayer game (lobby + room) — don't hand-roll matchmaking
+### 10. Multiplayer game (one room) — don't hand-roll matchmaking
 
-For a turn-based or party game, compose two primitives instead of rolling your own
-presence/host/state machine: `worlds.lobby` (the waiting room) + `worlds.room` (the
-authoritative shared state). The lobby's roster always includes you (so the host never
-flickers and a fresh joiner is never "everyone left"); the room handles load-or-create,
-live sync, and stale-write ordering.
+For a turn-based or party game, use ONE primitive instead of rolling your own
+presence/host/state machine: `worlds.room`. It gives you the roster (self-inclusive, so
+the host never flickers and a fresh joiner is never "everyone left") AND, when you pass
+`initial`, the authoritative shared state (load-or-create, live sync, stale-write ordering).
 
 ```js
-const game = worlds.room("tictactoe", { initial: () => ({ board: Array(9).fill(""), turn: "x", winner: null }) });
-const lobby = worlds.lobby("tictactoe", {
+const r = worlds.room("tictactoe", {
   minPlayers: 2,
-  onUpdate: (s) => renderRoster(s),          // s.members[{handle,name,ready,isMe,isHost}], s.allReady, s.isHost…
-  onStart: () => { if (lobby.isHost) game.reset(); showBoard(); },  // host seeds; everyone shows the board
+  initial: () => ({ board: Array(9).fill(""), turn: "x", winner: null }),
+  onChange: (s) => render(s),                // s.members[{handle,name,ready,isMe,isHost}], s.allReady, s.isHost, s.state…
+  onStart: () => { if (r.isHost) r.reset(); showBoard(); },  // host seeds; everyone shows the board
   onReturn: () => showLobby(),
 });
-await game.ready;
-game.onChange((s) => drawBoard(s));          // fires on load + every move, for every player
+await r.opened;
+r.onChange((s) => { renderRoster(s); if (s.state) drawBoard(s.state); });  // fires on load + every roster/move change
 // a move: only the player whose turn it is writes
 function play(i) {
-  const s = game.get();
+  const s = r.state;
   if (s.turn !== mySymbol || s.board[i]) return;
   const board = s.board.slice(); board[i] = mySymbol;
-  game.merge({ board, turn: mySymbol === "x" ? "o" : "x" });
+  r.merge({ board, turn: mySymbol === "x" ? "o" : "x" });
 }
-document.getElementById("ready").onclick = () => lobby.toggleReady();
+document.getElementById("ready").onclick = () => r.toggleReady();
 ```
 
-Working references in this repo: **connect4** (room + seats), **trivia** (lobby + AI),
-**spyfall** (room + roles + countdown), **red-light/paint-arena/racing** (lobby + ws realtime).
+### 10b. Many concurrent rooms (a lobby browser with join codes) — `worlds.rooms`
+
+Need more than one match at once (many tables, private party rooms)? The plural,
+`worlds.rooms`, is a live directory: browse open rooms, create one, or join by code. Each
+`create`/`join`/`joinByCode` returns a normal `worlds.room` (same API as above).
+
+```js
+const hall = worlds.rooms("tictactoe", {
+  minPlayers: 2, maxPlayers: 2,
+  initial: () => ({ board: Array(9).fill(""), turn: "x", winner: null }),
+  onList: (rooms) => render(rooms.map(x => `${x.name} — ${x.count}/${x.max||"∞"} ${x.status}`)),
+});
+async function newTable() { mount(await hall.create({ name: `${me.name}'s table` })); }   // r.code is the shareable code
+async function joinTable(id) { mount(await hall.join(id)); }
+async function joinCode(code) { mount(await hall.joinByCode(code)); }   // works for private rooms too
+function mount(r) { /* same r.onChange / r.merge / r.toggleReady as recipe 10 */ }
+```
+
+Working references in this repo: **connect4 / trivia / spyfall / draw-guess** (`worlds.rooms` —
+multi-table with codes), **red-light / paint-arena / racing** (single `worlds.room` + ws realtime).
 
 ---
 

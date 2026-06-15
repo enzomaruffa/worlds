@@ -89,60 +89,92 @@ const stop = ch.subscribe(msg => { /* {payload, from: {handle, name}, at} */ });
 ch.presence(list => { /* [{handle, name}] */ });
 ```
 
-## Multiplayer lobby — `worlds.lobby`
+## Rooms — `worlds.room` / `worlds.rooms`
 
-A waiting room with batteries included: a live roster, a stable host, ready
-toggles, and a clean start. The roster **always includes you** — even before the
-server echoes your own presence back — so the host never flickers and a fresh
-joiner is never mistaken for "everyone left". State is ephemeral (rides a ws
-channel); keep authoritative game state in `worlds.db`.
+A **room** is one named shared space for everyone on the site. It rolls the two
+things every multiplayer app re-implements into one primitive:
+
+- **the roster** — a live list of who's here, a stable host, ready toggles, and a
+  clean start / return-to-lobby. The roster **always includes you**, even before
+  the server echoes your own presence back, so the host never flickers and a fresh
+  joiner is never mistaken for "everyone left".
+- **the state** — pass `initial` and the room also carries ONE authoritative
+  document (a board, a quiz, a round): load-or-created, kept live, and guarded
+  against out-of-order writes by a hidden `_rev`.
+
+A waiting room is just a room with no `initial`. A board game is a room with one.
 
 ```js
-const lobby = worlds.lobby("room", {
-  autoStart: true,            // host starts once everyone is ready (default true)
-  minPlayers: 2,              // smallest roster that may start (default 1)
-  onUpdate: (s) => render(s), // roster/ready/host changed
+const r = worlds.room("chess", {
+  minPlayers: 2,             // smallest roster that may start (default 1)
+  maxPlayers: 2,             // roster cap → fills `full` (default 0 = unlimited)
+  autoStart: true,           // host starts once everyone is ready (default true)
+  initial: () => ({ board: blank(), turn: "x" }),  // omit for a roster-only room
+  onChange: (s) => render(s),      // roster OR state changed
   onStart:  (s) => beginGame(s),   // fires on every client when the game starts
   onReturn: (s) => showLobby(s),   // fires on every client on return-to-lobby
 });
 
-lobby.toggleReady();          // or lobby.setReady(true/false)
-lobby.start();                // host-only; broadcasts start to everyone
-lobby.returnToLobby();        // send everyone back to the waiting room
-lobby.isHost;                 // am I the host (smallest handle)?
-lobby.snapshot();             // current state, same shape as onUpdate(s)
+await r.opened;               // resolves once loaded/created + identity is known
+r.toggleReady();              // or r.setReady(true/false)
+r.start();                    // host-only; broadcasts start to everyone
+r.returnToLobby();            // send everyone back to the waiting room
+r.isHost;                     // am I the host (smallest handle)?
+r.members;                    // [{handle,name,ready,isMe,isHost}]
+
+r.state;                      // current shared doc (null if no `initial`)
+await r.set(next);            // full replace, monotonic
+await r.merge({ turn: "o" }); // shallow-merge onto current, then write
+await r.reset();              // back to initial (+ optional overrides)
+r.onChange((s) => render(s)); // ONE subscription; fires on roster OR state change
+r.leave();                    // alias r.destroy()
 ```
 
-The snapshot `s`: `{ me, members:[{handle,name,ready,isMe,isHost}], host, isHost,
-ready, readyCount, total, allReady, started, loaded }`. `loaded` is `true` once
-presence has reported at least once — gate "opponent left" checks on it.
+The snapshot `s` (from `r.snapshot()` and `onChange(s)`): `{ me,
+members:[{handle,name,ready,isMe,isHost}], host, isHost, ready, readyCount, total,
+allReady, full, started, loaded, state }`. `ready` is whether **you** are ready;
+`loaded` is `true` once presence has reported at least once (gate "opponent left"
+checks on it); `state` is the shared doc.
 
-For db-driven games (authoritative phase in a shared doc), pass `autoStart:false`
-and trigger your own start from `onUpdate` when `s.allReady` — the lobby still
-gives you the self-inclusive roster, host election, and ready sync.
+`set`/`merge` return `false` on a write conflict — call `r.refetch()` and retry.
+Two clients writing the newest `_rev` is last-write-wins (fine for toys; add your
+own turn/seat gating for stricter games — see the connect4 example). For a
+db-driven start, pass `autoStart:false` and trigger your own start from `onChange`
+when `s.allReady`.
 
-## Shared room state — `worlds.room`
+`key` (advanced) lets one collection hold more than one room's doc — defaults to
+`${name}-main`; `worlds.rooms` uses it under the hood to pack many rooms into a
+single collection.
 
-ONE shared, authoritative document for the whole site, kept live for everyone —
-the turn-based / single-board / single-quiz pattern. It load-or-creates the doc,
-subscribes, and guards ordering for you (a hidden `_rev` drops stale/out-of-order
-writes), so you just describe state transitions. Use `worlds.lobby` for the
-pre-game waiting room, `worlds.ws` for ephemeral per-frame data, and `worlds.room`
-when there's a single source of truth that must survive reloads.
+### Many rooms — `worlds.rooms`
+
+The plural is a live **directory** of concurrent rooms — a lobby browser with
+private join codes. Each `create`/`join`/`joinByCode` hands back a normal
+`worlds.room` scoped to its own instance. Reach for it when a site needs more than
+one match at a time (many chess tables, several quizzes, private party rooms).
 
 ```js
-const board = worlds.room("connect4", { initial: () => ({ cells: [], turn: "x" }) });
-await board.ready;                 // loaded or freshly created
-board.get();                       // current state
-board.onChange((s) => render(s));  // fires on load + every change (incl. your own writes)
-await board.set(next);             // full replace, monotonic
-await board.merge({ turn: "o" });  // shallow-merge onto current, then write
-await board.reset();               // back to initial (+ optional overrides)
+const hall = worlds.rooms("chess", {
+  minPlayers: 2, maxPlayers: 2,
+  initial: () => ({ board: blank(), turn: "x" }),  // each room gets its own state
+  onList: (rooms) => renderTables(rooms),          // public list changed (live)
+});
+
+hall.list();                                  // RoomInfo[] of open rooms right now
+const r = await hall.create({ name: "Enzo's table" });   // make one, join it
+const r = await hall.join(roomId);            // join a listed room
+const r = await hall.joinByCode("K7QF");      // join by code (works for private)
+await hall.create({ private: true });         // hidden from the list, code-only
+await hall.leave();                           // leave; the host closes empty rooms
+hall.current;                                 // the joined room (or null)
 ```
 
-Returns `false` from `set`/`merge` on a write conflict — call `board.refetch()`
-and retry. Two clients writing the newest `_rev` is last-write-wins (fine for toys;
-add your own turn/seat gating for stricter games — see the connect4 example).
+Each returned room also carries `r.id` and `r.code` (show the code so others can
+join). `RoomInfo`: `{ id, code, name, host, members, count, max, status:"open"|
+"playing", full, private, createdAt, updatedAt }`. The room's host mirrors its
+roster into the directory and heartbeats it; rooms whose host goes quiet for
+`ttlMs` (default 45s) are swept, so the list self-heals after crashes and closed
+tabs.
 
 ## Utility building blocks
 

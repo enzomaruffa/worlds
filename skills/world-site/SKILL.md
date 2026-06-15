@@ -40,15 +40,15 @@ const ch = worlds.ws.channel("room"); ch.publish(payload); ch.subscribe(cb); ch.
 await worlds.notify.slack("#channel", "text")      // capped + stamped with site & sender
 
 // multiplayer batteries — don't hand-roll these:
-const lobby = worlds.lobby("room", {onUpdate, onStart, onReturn, autoStart, minPlayers})  // waiting room: self-inclusive roster, stable host, ready/auto-start; .setReady .start .returnToLobby .snapshot .isHost
-const game  = worlds.room("ttt", {initial})        // ONE shared authoritative doc: await .ready · .get() .onChange(fn) .set(x) .merge(p) .reset() — handles load-or-create + live sync + ordering
+const r = worlds.room("ttt", {initial, minPlayers, maxPlayers, autoStart, onChange, onStart, onReturn})  // ONE room = roster + host + ready/auto-start (self-inclusive, no flicker) AND optional authoritative state (pass `initial`). await .opened · .members .isHost .setReady .start .returnToLobby · .state .set(x) .merge(p) .reset() .onChange(fn) — load-or-create + live sync + ordering. Omit `initial` for a pure waiting room.
+const hall = worlds.rooms("ttt", {initial, minPlayers, maxPlayers, onList})  // MANY concurrent rooms = lobby browser + private join codes: hall.list() .onList(fn) · await .create({name,private}) .join(id) .joinByCode("K7QF") .leave(); each returns a worlds.room with .id/.code
 worlds.id() · worlds.colorFor(handle) · worlds.uniqByHandle(list) · worlds.esc(s) · worlds.toast(msg) · worlds.countdown(endsAt,{onTick,onEnd})  // building blocks
 ```
 
 Every call returns a promise; rejections are `WorldsError` with `{code, message, retry_after?}`.
 Every site also auto-gets a "◐ Worlds" leave pill (top-left). For a multiplayer game, reach for
-`worlds.lobby` (waiting room) + `worlds.room` (shared state) before `worlds.ws` — see the connect4 /
-trivia / spyfall reference apps.
+`worlds.room` (one shared room: roster + state) — or `worlds.rooms` for many concurrent tables with
+join codes — before `worlds.ws` — see the connect4 / trivia / spyfall reference apps.
 
 ## Rules (deliberate — keep sites simple)
 
