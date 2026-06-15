@@ -8,6 +8,9 @@ interface Sub {
   cursor: string | null;
   onPresence?: (members: unknown[]) => void;
   onExpired?: () => void;
+  onSnapshot?: (actors: any[]) => void; // actors: full in-zone state (join / zone switch)
+  onActors?: (updates: any[]) => void; // actors: batched per-flush updates
+  onActorLeave?: (ids: string[]) => void; // actors: members who left the zone
 }
 
 export const sock = {
@@ -46,6 +49,12 @@ export const sock = {
         sub.handler({ payload: f.payload, from: f.from, at: f.at });
       } else if (f.op === "presence" && sub.onPresence) {
         sub.onPresence(f.members);
+      } else if (f.op === "actors_snapshot" && sub.onSnapshot) {
+        sub.onSnapshot(f.actors || []);
+      } else if (f.op === "actors" && sub.onActors) {
+        sub.onActors(f.updates || []);
+      } else if (f.op === "actors_leave" && sub.onActorLeave) {
+        sub.onActorLeave(f.ids || []);
       } else if (f.op === "error" && f.error?.code === "replay_expired" && sub.onExpired) {
         sub.cursor = null;
         sub.onExpired();

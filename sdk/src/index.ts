@@ -9,6 +9,7 @@ import { ws } from "./channels";
 import { notify } from "./notify";
 import { room } from "./room";
 import { rooms } from "./rooms";
+import { actors } from "./actors";
 import { id, colorFor, uniqByHandle, esc, countdown } from "./util";
 import { toast } from "./toast";
 import { mountLeave } from "./leave";
@@ -27,6 +28,7 @@ const worlds: any = {
   notify,
   room,
   rooms,
+  actors,
   // batteries: small building blocks every multiplayer/collab site needs
   id,
   colorFor,

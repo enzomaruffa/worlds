@@ -94,6 +94,12 @@
           sub.handler({ payload: f.payload, from: f.from, at: f.at });
         } else if (f.op === "presence" && sub.onPresence) {
           sub.onPresence(f.members);
+        } else if (f.op === "actors_snapshot" && sub.onSnapshot) {
+          sub.onSnapshot(f.actors || []);
+        } else if (f.op === "actors" && sub.onActors) {
+          sub.onActors(f.updates || []);
+        } else if (f.op === "actors_leave" && sub.onActorLeave) {
+          sub.onActorLeave(f.ids || []);
         } else if (f.op === "error" && f.error?.code === "replay_expired" && sub.onExpired) {
           sub.cursor = null;
           sub.onExpired();
@@ -905,6 +911,85 @@
     return { stop };
   }
 
+  // sdk/src/actors.ts
+  function actors(name, opts = {}) {
+    const cid = id();
+    const states = new Map;
+    const changeFns = new Set;
+    const leaveFns = new Set;
+    let zone = opts.zone != null ? String(opts.zone) : "";
+    let stopped = false;
+    function emitChange(rec) {
+      for (const fn of changeFns)
+        try {
+          fn(rec.id, rec.state, rec);
+        } catch {}
+    }
+    function emitLeave(peer) {
+      for (const fn of leaveFns)
+        try {
+          fn(peer);
+        } catch {}
+    }
+    function ingest(list) {
+      if (!Array.isArray(list))
+        return;
+      for (const a of list) {
+        if (!a || typeof a.id !== "string" || a.id === cid)
+          continue;
+        const rec = { id: a.id, handle: a.handle || a.id, name: a.name || a.handle || a.id, state: a.state };
+        states.set(rec.id, rec);
+        emitChange(rec);
+      }
+    }
+    const stopSub = sock.subscribe({ op: "sub", kind: "actors", channel: name, zone, cid, rate: opts.rate }, () => {}, {
+      onSnapshot: (list) => {
+        const keep = new Set((list || []).map((a) => a && a.id).filter(Boolean));
+        for (const peer of [...states.keys()])
+          if (!keep.has(peer)) {
+            states.delete(peer);
+            emitLeave(peer);
+          }
+        ingest(list);
+      },
+      onActors: (list) => ingest(list),
+      onActorLeave: (ids) => {
+        if (!Array.isArray(ids))
+          return;
+        for (const peer of ids)
+          if (states.delete(peer))
+            emitLeave(peer);
+      }
+    });
+    return {
+      set(state) {
+        if (stopped)
+          return;
+        if (opts.zoneKey)
+          zone = String(opts.zoneKey(state));
+        sock.send({ op: "set", id: "set", channel: name, cid, state, zone });
+      },
+      others: () => [...states.values()],
+      onChange(fn) {
+        changeFns.add(fn);
+        return () => changeFns.delete(fn);
+      },
+      onLeave(fn) {
+        leaveFns.add(fn);
+        return () => leaveFns.delete(fn);
+      },
+      stop() {
+        stopped = true;
+        try {
+          stopSub();
+        } catch {}
+        states.clear();
+        changeFns.clear();
+        leaveFns.clear();
+      }
+    };
+  }
+
   // sdk/src/toast.ts
   var el = null;
   var timer = null;
@@ -988,6 +1073,7 @@
     notify,
     room,
     rooms,
+    actors,
     id,
     colorFor,
     uniqByHandle,
