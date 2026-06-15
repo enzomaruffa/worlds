@@ -9,7 +9,7 @@ import type { Identity } from "./identity";
 export interface SocketData {
   who: Identity;
   site: string;
-  subs: Map<string, { kind: "db" | "channel"; key: string }>;
+  subs: Map<string, { kind: "db" | "channel" | "actors"; key: string; cid?: string }>;
 }
 
 type WS = ServerWebSocket<SocketData>;
@@ -18,6 +18,27 @@ const channelMembers = new Map<string, Map<WS, Identity>>();
 const dbSubs = new Map<string, Map<WS, string>>(); // scopeKey -> ws -> subId
 
 const MAX_SUBS_PER_SOCKET = 100;
+
+// ── Actors: per-member live STATE with zone interest-management + coalesced flush.
+// A third realtime tier beside channels (ephemeral events) and db subs. Each member
+// keeps ONE last-value state; the server fans it out only to same-zone peers, batched
+// at a fixed flush rate — turning per-tick N² fan-out into N·(zone size). Joiners get
+// an immediate in-zone snapshot; nobody can melt a room by publishing faster.
+interface ActorEntry {
+  ws: WS;
+  cid: string; // stable per-tab id — the actor's identity to its peers
+  who: Identity;
+  zone: string;
+  state: unknown; // undefined until the member's first set
+  dirty: boolean; // changed since the last flush
+}
+interface ActorRoom {
+  members: Map<string, ActorEntry>; // cid -> entry
+  rate: number; // flush Hz (the first subscriber sets it, clamped)
+  timer: ReturnType<typeof setInterval> | null;
+}
+const actorRooms = new Map<string, ActorRoom>(); // scopeKey -> room
+const MAX_ACTOR_RATE = 20;
 
 // Drop a socket from a scoped registry, pruning the scope entry when it empties
 // (otherwise the outer map grows one entry per (site, collection|channel) forever).
@@ -69,6 +90,94 @@ function sendErr(ws: WS, id: string | undefined, code: string, message: string):
   ws.send(JSON.stringify({ op: "error", id, error: { code, message } }));
 }
 
+// ── actors helpers ──
+
+// The actors sub ids a given socket holds for this room (a socket can hold more
+// than one, though games use one) — used to stamp the right `id` on each frame.
+function actorSubIds(ws: WS, key: string): string[] {
+  const ids: string[] = [];
+  for (const [subId, sub] of ws.data.subs) {
+    if (sub.kind === "actors" && sub.key === key) ids.push(subId);
+  }
+  return ids;
+}
+
+// Send `ws` the current state of every OTHER member in `zone` — the last-value
+// snapshot a joiner (or zone-switcher) gets so it sees the world immediately.
+function sendActorSnapshot(ws: WS, key: string, subId: string, zone: string, selfCid: string): void {
+  const room = actorRooms.get(key);
+  if (!room) return;
+  const actors = [];
+  for (const e of room.members.values()) {
+    if (e.cid === selfCid || e.zone !== zone || e.state === undefined) continue;
+    actors.push({ id: e.cid, handle: e.who.handle, name: e.who.name, state: e.state });
+  }
+  ws.send(JSON.stringify({ op: "actors_snapshot", id: subId, actors }));
+}
+
+// Tell everyone still in `zone` that `cid` is gone from it (left the room, or moved
+// to another zone) so they can drop its ghost.
+function notifyZoneLeave(key: string, zone: string, cid: string): void {
+  const room = actorRooms.get(key);
+  if (!room) return;
+  for (const e of room.members.values()) {
+    if (e.cid === cid || e.zone !== zone) continue;
+    for (const subId of actorSubIds(e.ws, key)) {
+      e.ws.send(JSON.stringify({ op: "actors_leave", id: subId, ids: [cid] }));
+    }
+  }
+}
+
+// One flush tick: send each member a single batched frame of the in-zone peers that
+// changed since the last tick. Coalescing (multiple sets collapse to the latest) +
+// interest management (zone filter) + batching all happen here.
+function flushActorRoom(key: string): void {
+  const room = actorRooms.get(key);
+  if (!room) return;
+  const dirtyByZone = new Map<string, ActorEntry[]>();
+  for (const e of room.members.values()) {
+    if (!e.dirty || e.state === undefined) continue;
+    let arr = dirtyByZone.get(e.zone);
+    if (!arr) dirtyByZone.set(e.zone, (arr = []));
+    arr.push(e);
+  }
+  if (dirtyByZone.size === 0) return;
+  for (const recipient of room.members.values()) {
+    const dirty = dirtyByZone.get(recipient.zone);
+    if (!dirty) continue;
+    const updates = [];
+    for (const e of dirty) {
+      if (e.cid === recipient.cid) continue;
+      updates.push({ id: e.cid, handle: e.who.handle, name: e.who.name, state: e.state });
+    }
+    if (updates.length === 0) continue;
+    for (const subId of actorSubIds(recipient.ws, key)) {
+      recipient.ws.send(JSON.stringify({ op: "actors", id: subId, updates }));
+    }
+  }
+  for (const e of room.members.values()) e.dirty = false;
+}
+
+function ensureActorTimer(key: string): void {
+  const room = actorRooms.get(key);
+  if (!room || room.timer) return;
+  room.timer = setInterval(() => flushActorRoom(key), 1000 / room.rate);
+}
+
+// Remove a member and stop the room's flush timer once it empties.
+function dropActor(ws: WS, key: string, cid: string): void {
+  const room = actorRooms.get(key);
+  if (!room) return;
+  const e = room.members.get(cid);
+  if (!e || e.ws !== ws) return;
+  room.members.delete(cid);
+  notifyZoneLeave(key, e.zone, cid);
+  if (room.members.size === 0) {
+    if (room.timer) clearInterval(room.timer);
+    actorRooms.delete(key);
+  }
+}
+
 async function handleSub(ws: WS, id: string, frame: Record<string, unknown>): Promise<void> {
   if (ws.data.subs.size >= MAX_SUBS_PER_SOCKET && !ws.data.subs.has(id)) {
     sendErr(ws, id, "invalid_request", `too many subscriptions (max ${MAX_SUBS_PER_SOCKET})`);
@@ -108,7 +217,52 @@ async function handleSub(ws: WS, id: string, frame: Record<string, unknown>): Pr
     broadcastPresence(key);
     return;
   }
-  sendErr(ws, id, "invalid_request", "kind must be db or channel");
+  if (frame.kind === "actors") {
+    const key = presenceKey(ws.data.site, String(frame.channel ?? ""));
+    const cid = typeof frame.cid === "string" && frame.cid ? frame.cid : id;
+    const zone = typeof frame.zone === "string" ? frame.zone : "";
+    ws.data.subs.set(id, { kind: "actors", key, cid });
+    let room = actorRooms.get(key);
+    if (!room) {
+      // The first subscriber fixes the flush rate (clamped) — a later fast joiner
+      // can't push the room past the cap.
+      const rate = Math.max(1, Math.min(MAX_ACTOR_RATE, Number(frame.rate) || 15));
+      room = { members: new Map(), rate, timer: null };
+      actorRooms.set(key, room);
+    }
+    room.members.set(cid, { ws, cid, who: ws.data.who, zone, state: undefined, dirty: false });
+    ensureActorTimer(key);
+    ws.send(JSON.stringify({ op: "ack", id }));
+    sendActorSnapshot(ws, key, id, zone, cid); // instant last-value snapshot of the zone
+    return;
+  }
+  sendErr(ws, id, "invalid_request", "kind must be db, channel or actors");
+}
+
+// `set` updates the caller's own last-value state (and zone). No ack — it runs at
+// frame rate; the coalescing flush delivers it. A zone change leaves the old zone
+// (peers get actors_leave) and snapshots the new one back to the mover.
+function handleSet(ws: WS, frame: Record<string, unknown>): void {
+  const cid = typeof frame.cid === "string" ? frame.cid : null;
+  if (!cid) return;
+  if (JSON.stringify(frame.state ?? null).length > LIMITS.wsPayloadBytes) {
+    sendErr(ws, undefined, "payload_too_large", "actor state over 16KB");
+    return;
+  }
+  const key = presenceKey(ws.data.site, String(frame.channel ?? ""));
+  const room = actorRooms.get(key);
+  if (!room) return; // not subscribed (or a stale race) — ignore
+  const e = room.members.get(cid);
+  if (!e || e.ws !== ws) return; // only your own entry, on your own socket
+  const newZone = typeof frame.zone === "string" ? frame.zone : e.zone;
+  e.state = frame.state;
+  if (newZone !== e.zone) {
+    const oldZone = e.zone;
+    e.zone = newZone;
+    notifyZoneLeave(key, oldZone, cid); // old zone drops me
+    for (const subId of actorSubIds(ws, key)) sendActorSnapshot(ws, key, subId, newZone, cid);
+  }
+  e.dirty = true; // delivered to the (new) zone on the next flush
 }
 
 function handleUnsub(ws: WS, id: string): void {
@@ -122,6 +276,7 @@ function handleUnsub(ws: WS, id: string): void {
       broadcastPresence(sub.key);
     }
   }
+  if (sub?.kind === "actors" && sub.cid) dropActor(ws, sub.key, sub.cid);
 }
 
 function handlePub(ws: WS, id: string, frame: Record<string, unknown>): void {
@@ -171,6 +326,7 @@ export const websocket = {
     if (frame.op === "sub") return handleSub(ws, id, frame);
     if (frame.op === "unsub") return handleUnsub(ws, id);
     if (frame.op === "pub") return handlePub(ws, id, frame);
+    if (frame.op === "set") return handleSet(ws, frame);
     // Unknown ops are ignored (forward-compat rule).
   },
 
@@ -182,6 +338,7 @@ export const websocket = {
         dropFromScope(channelMembers, sub.key, ws);
         touched.add(sub.key);
       }
+      if (sub.kind === "actors" && sub.cid) dropActor(ws, sub.key, sub.cid);
     }
     for (const key of touched) broadcastPresence(key);
   },
