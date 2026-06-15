@@ -115,7 +115,7 @@ const r = worlds.room("chess", {
   onReturn: (s) => showLobby(s),   // fires on every client on return-to-lobby
 });
 
-await r.opened;               // resolves once loaded/created + identity is known
+await r.ready;                // resolves once loaded/created + identity is known
 r.toggleReady();              // or r.setReady(true/false)
 r.start();                    // host-only; broadcasts start to everyone
 r.returnToLobby();            // send everyone back to the waiting room
@@ -178,35 +178,57 @@ tabs.
 
 ## Realtime actors — `worlds.actors`
 
-The realtime tier for per-member **live state** — poses, cursors, ship positions —
-beside `worlds.ws` (ephemeral events) and `worlds.room` (one authoritative doc).
-Each member publishes ONE last-value state with `set`; the server keeps it and fans
-it out **only to same-zone peers**, **batched** at a fixed flush rate. That turns the
-per-tick `O(N²)` fan-out of raw channels into `O(N · zone)`, so a crowd scales. You
-also get an instant **snapshot on join** (a fresh player sees everyone immediately,
-not a blank screen) and a server-enforced rate cap (no client can melt a room by
-publishing faster). Use this instead of hand-rolling pose channels with adaptive
-send-rates.
+The realtime tier for per-member **presence**, beside `worlds.ws` (ephemeral
+broadcast) and `worlds.room` (one authoritative doc). Each member carries three
+flexible, generic payloads — all routed by the server **only to same-zone peers**:
+
+- **state** — last-value, frame-rate (`set`): coalesced, rate-capped, snapshot-on-join.
+- **metadata** — infrequent fields (team, level, status) kept apart from frame state.
+- **events** — discrete one-off messages (`send`/`onEvent`): a horn, a hit, a ping.
+
+Together that's the whole "who's near me and what are they doing" surface, so you
+stop pairing actors with a second `ws.channel`. Zone interest-management turns the
+per-tick `O(N²)` fan-out of a raw channel into `O(N · zone)`, so a crowd scales; a
+joiner gets an instant in-zone snapshot, and the server rate-caps the flush so no
+client can melt a room by publishing faster.
 
 ```js
 const net = worlds.actors("race", {
-  zoneKey: (s) => s.cell,   // interest zone derived from state — same zone = see each other
-  rate: 15,                 // server flush Hz, 1..20 (default 15; the first member sets it)
+  zoneKey: (s) => s.cell,    // interest zone from state — same zone = see each other
+  rate: 15,                  // server flush Hz, 1..20 (default 15; the first member sets it)
+  metadata: { team: "a" },   // optional initial per-member metadata
 });
 
-net.set({ x, y, z, cell });                          // publish MY state (zone via zoneKey)
-net.onChange((id, state, meta) => draw(id, state));  // a peer in my zone created/updated
-net.onLeave((id) => remove(id));                     // a peer left my zone or disconnected
-net.others();                                        // [{ id, handle, name, state }] in my zone
-net.stop();                                          // unsubscribe + drop listeners
+net.set({ x, y, cell });                          // frame STATE (zone via zoneKey)
+net.setMetadata({ level: 6 });                    // merge METADATA (infrequent)
+net.send({ t: "horn" });                          // one-off EVENT to in-zone peers
+net.onChange((id, state, peer) => draw(peer));    // peer = {id, handle, name, state, metadata}
+net.onEvent((id, payload, from) => honk(id));     // a peer's discrete event (from = {id,handle,name})
+net.onLeave((id) => remove(id));                  // peer left my zone or disconnected
+net.others();                                     // [{id, handle, name, state, metadata}] in my zone
+net.destroy();                                    // unsubscribe + drop listeners
 ```
 
-`id` is the peer's stable per-tab id (`worlds.id()`); `meta` carries `{id, handle, name}`.
-A **zone** is any string you derive from state — make it **spatial** (a grid cell)
-and you sync only nearby peers no matter how many people are connected. `set` is
-fire-and-forget at frame rate; the server coalesces multiple sets between flushes to
-the latest, so just call it every frame. State is ephemeral (≤16KB) — keep anything
-that must survive a reload in `worlds.db` / `worlds.room`.
+`id` is the peer's stable per-tab id (`worlds.id()`). A **zone** is any string you
+derive from state — make it **spatial** (a grid cell) and you sync only nearby peers
+no matter how many connect. `set` is fire-and-forget at frame rate (coalesced to the
+latest between flushes); `setMetadata` merges and rides the same flush; `send` is
+delivered immediately, never stored. All three payloads are ephemeral (≤16KB each) —
+keep anything that must survive a reload in `worlds.db` / `worlds.room`.
+
+### Which realtime primitive?
+
+| Need | Use |
+|---|---|
+| Fire an event to everyone, no per-member identity/state | `worlds.ws.channel` |
+| Per-member live state + nearby events, scales to a crowd | `worlds.actors` |
+| One shared authoritative doc + a roster/lobby (turn-based, boards) | `worlds.room` |
+| Many concurrent rooms with join codes (a lobby browser) | `worlds.rooms` |
+
+**Trust model:** realtime is **client-authoritative** — peers relay each other's
+state, the server does not validate gameplay. Keep authoritative results (scores,
+unlocks) in `worlds.db`, and for competitive play prefer deterministic, seedable
+logic you can audit from the db log.
 
 ## Utility building blocks
 

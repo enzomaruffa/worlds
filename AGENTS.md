@@ -32,7 +32,7 @@ The 30-second version:
 - `worlds.notify.slack(channel,text)`
 - **`worlds.room(name,opts)`** — ONE shared room: roster/host/ready/auto-start **+** optional authoritative state (`initial`); a waiting room is just a room with no `initial`
 - **`worlds.rooms(name,opts)`** — MANY concurrent rooms: a lobby browser with private join codes (`list/onList/create/join/joinByCode/leave`), each handing back a `worlds.room`
-- **`worlds.actors(name,{zoneKey,rate})`** — per-member LIVE STATE (poses/cursors): zone interest-management, snapshot-on-join, server-coalesced flush. Reach for this over a raw pose channel when many players move at once.
+- **`worlds.actors(name,{zoneKey,rate,metadata})`** — per-member presence: live **state** (`set`, coalesced + rate-capped + snapshot-on-join), **metadata** (`setMetadata`), one-off **events** (`send`/`onEvent`) — all zone-interest-managed. Reach for this (not a raw pose channel) when many players move at once.
 - building blocks: `worlds.id() colorFor() uniqByHandle() esc() countdown() toast()` + an auto "leave" pill
 
 **Read the docs, don't guess method names** — the surface is small and stable:
