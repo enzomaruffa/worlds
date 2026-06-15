@@ -218,7 +218,8 @@ const _Y = new THREE.Vector3(0, 1, 0);
 const _flatX = new THREE.Quaternion().setFromAxisAngle(_X, Math.PI / 2);
 const _orb = new THREE.Vector3();
 const orbitLineMat = new THREE.MeshBasicMaterial({ color: 0x52525b, transparent: true, opacity: 0.22 });
-const FTL_DIST = 460; // farther than this when you click a world → hyperspace; nearer → just glide
+const FTL_DIST = 460; // legacy gate (kept for reference)
+const MAX_PICK_DIST = 360; // you can only click-fly to a world this close; farther → warp to its system (FTL)
 
 const uTime = { value: 0 };
 
@@ -361,11 +362,11 @@ let warpMat = null, warpField = null;
 // It pulls hard (BH_MASS), and crossing the event horizon (EH_R) doesn't kill you —
 // it spaghettifies you and spits you out at the home star (a wormhole shortcut home).
 const CORE_POS = new THREE.Vector3(-1500, 90, 1500);
-const BH_MASS = 58000;     // far heavier than any star — felt from ~800 units out
-const EH_R = 96;           // event-horizon radius: cross it → wormhole jump home
+const BH_MASS = 82000;     // far heavier than any star — felt from ~800 units out
+const EH_R = 260;          // event-horizon radius: cross it → wormhole jump home (2.7× — the colossus of the map)
 let coreDisk = null;
 {
-  coreDisk = new THREE.Mesh(new THREE.RingGeometry(105, 400, 256, 1), new THREE.ShaderMaterial({
+  coreDisk = new THREE.Mesh(new THREE.RingGeometry(285, 1080, 256, 1), new THREE.ShaderMaterial({
     side: THREE.DoubleSide, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
     uniforms: { uTime },
     vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
@@ -390,11 +391,11 @@ let coreDisk = null;
   const eh = new THREE.Mesh(new THREE.SphereGeometry(EH_R * 0.92, 64, 64), new THREE.MeshBasicMaterial({ color: 0x000000 }));
   eh.position.copy(CORE_POS); scene.add(eh);
   // photon ring: a thin blazing ring hugging the horizon
-  const photon = new THREE.Mesh(new THREE.TorusGeometry(EH_R * 1.02, 3.4, 16, 220),
+  const photon = new THREE.Mesh(new THREE.TorusGeometry(EH_R * 1.02, 8, 16, 220),
     new THREE.MeshBasicMaterial({ color: 0xfff0c0, transparent: true, blending: THREE.AdditiveBlending }));
   photon.position.copy(CORE_POS); photon.rotation.set(Math.PI / 2 - 0.4, 0, 0.3); scene.add(photon);
   // soft lensing glow so the hole reads as colossal from across the map
-  const glow = new THREE.Mesh(new THREE.SphereGeometry(300, 32, 32), new THREE.MeshBasicMaterial({
+  const glow = new THREE.Mesh(new THREE.SphereGeometry(810, 32, 32), new THREE.MeshBasicMaterial({
     color: 0xffb347, transparent: true, opacity: 0.04, blending: THREE.AdditiveBlending, depthWrite: false,
   }));
   glow.position.copy(CORE_POS); scene.add(glow);
@@ -402,7 +403,7 @@ let coreDisk = null;
     color: 0xffd27a, transparent: true, opacity: 0.1, blending: THREE.AdditiveBlending, depthWrite: false,
   }));
   halo.position.copy(CORE_POS); scene.add(halo);
-  const bhLight = new THREE.PointLight(0xffb84d, 1400, 1800, 2);
+  const bhLight = new THREE.PointLight(0xffb84d, 2400, 3200, 2);
   bhLight.position.copy(CORE_POS); scene.add(bhLight);
 }
 
@@ -434,11 +435,11 @@ function updateShootingStars(dt) {
 // ---------- star systems: one star per site CATEGORY, hello.world at the center ----------
 // (biome stays a per-planet visual trait; the system you orbit is what your site is FOR)
 const SYSTEMS = {
-  misc:        { title: "home",            tag: "the heart of it all",     pos: new THREE.Vector3(0, 0, 0),         hot: 0xffd84d, deep: 0xf25a05, starR: 40, codex: "Where the first signal was lit. Every road in the sky still bends quietly back toward it." },
-  games:       { title: "the arcade",      tag: "where games are born",    pos: new THREE.Vector3(760, 30, -240),   hot: 0xff8ad8, deep: 0x86198f, starR: 32, codex: "A perpetual festival-belt whose citizens insist that losing is merely a slower kind of winning." },
-  work:        { title: "mission control", tag: "mission-critical orbit",  pos: new THREE.Vector3(-760, -40, -320), hot: 0xdff1ff, deep: 0x1d4ed8, starR: 32, codex: "Run on tides of quarterly ritual. Nothing launches here without three blessings and a checklist." },
-  tools:       { title: "the workshop",    tag: "forge of useful things",  pos: new THREE.Vector3(240, 55, 820),    hot: 0xffd27a, deep: 0xb45309, starR: 32, codex: "A forge-cluster of tinkerers. Half their inventions exist only to help build the other half." },
-  experiments: { title: "the lab",         tag: "here be dragons",         pos: new THREE.Vector3(-340, -20, 780),  hot: 0x9affe2, deep: 0x0f766e, starR: 32, codex: "A quarantined reactor-belt where unfinished physics is left running overnight. The dragons, they insist, are a feature." },
+  misc:        { title: "home",            tag: "the heart of it all",     pos: new THREE.Vector3(0, 0, 0),         hot: 0xffd84d, deep: 0xf25a05, starR: 80, codex: "Where the first signal was lit. Every road in the sky still bends quietly back toward it." },
+  games:       { title: "the arcade",      tag: "where games are born",    pos: new THREE.Vector3(760, 30, -240),   hot: 0xff8ad8, deep: 0x86198f, starR: 64, codex: "A perpetual festival-belt whose citizens insist that losing is merely a slower kind of winning." },
+  work:        { title: "mission control", tag: "mission-critical orbit",  pos: new THREE.Vector3(-760, -40, -320), hot: 0xdff1ff, deep: 0x1d4ed8, starR: 64, codex: "Run on tides of quarterly ritual. Nothing launches here without three blessings and a checklist." },
+  tools:       { title: "the workshop",    tag: "forge of useful things",  pos: new THREE.Vector3(240, 55, 820),    hot: 0xffd27a, deep: 0xb45309, starR: 64, codex: "A forge-cluster of tinkerers. Half their inventions exist only to help build the other half." },
+  experiments: { title: "the lab",         tag: "here be dragons",         pos: new THREE.Vector3(-340, -20, 780),  hot: 0x9affe2, deep: 0x0f766e, starR: 64, codex: "A quarantined reactor-belt where unfinished physics is left running overnight. The dragons, they insist, are a feature." },
 };
 
 function makeStar(sys, name) {
@@ -705,7 +706,7 @@ const BARREN_PAL = { sea: 0x3a3a40, beach: 0x6b6b73, mid: 0x8a8a93, high: 0x5555
 
 function pickKind(rng, biomeName, radius, activity) {
   const r = rng();
-  if (radius > 14.5 && r < 0.55) return "gas";               // the biggest worlds → gas giants
+  if (radius > 19 && r < 0.55) return "gas";                 // the biggest worlds → gas giants
   if (biomeName === "volcanic" && r < 0.6) return "lava";    // volcanic worlds often run molten
   if (activity < 0.04 && rng() < 0.5) return "barren";       // long-dormant worlds → dead rock
   if ((biomeName === "archipelago" || biomeName === "lush") && rng() < 0.22) return "ocean";
@@ -754,7 +755,7 @@ function makePlanet(site) {
   const noise = noise3(u.seed);
   const biomeName = u.biome ?? "lush";
   const baseBiome = BIOMES[biomeName] ?? BIOMES.lush;
-  const radius = 7.5 + Math.min((site.visits_30d ?? 0) / 40, 9) + rng() * 2.5; // bigger, chunkier worlds
+  const radius = (10.5 + Math.min((site.visits_30d ?? 0) / 40, 12) + rng() * 3.5) * 2; // chunky worlds, 2× scale (~21–52)
   const activity = Math.min((site.visits_30d ?? 0) / 200, 1);
   const sys = SYSTEMS[site.category] ?? SYSTEMS.misc; // the star this world orbits
 
@@ -901,7 +902,7 @@ function makePlanet(site) {
   }
 
   // big worlds — especially gas giants — can wear a banded Saturn ring; rare elsewhere
-  if ((kind === "gas" || radius > 13) && rng() < (kind === "gas" ? 0.65 : 0.4)) {
+  if ((kind === "gas" || radius > 18) && rng() < (kind === "gas" ? 0.65 : 0.4)) {
     const ring = makePlanetRing(radius, biome.atmo);
     ring.rotation.x = Math.PI / 2 + (rng() - 0.5) * 0.6;
     ring.rotation.y = (rng() - 0.5) * 0.4;
@@ -1003,7 +1004,7 @@ function buildShip() {
   engineLight = new THREE.PointLight(0x6cc6ff, 0, 16, 2);
   engineLight.position.copy(enginePoint);
 
-  const fill = new THREE.PointLight(0xaaccff, 14, 14, 2); // cockpit fill so the speeder reads when backlit
+  const fill = new THREE.PointLight(0xaaccff, 7, 14, 2); // gentle cockpit fill so the speeder reads when backlit
   fill.position.set(0, size.y, 0);
 
   // navigation blinkers on the wingtips (port red, starboard green) — classic flight feel
@@ -1074,16 +1075,16 @@ let shieldMesh = null;
 // ---------- asteroid belt + mothership ----------
 function buildBelt() {
   const rng = mulberry32(777);
-  const beltR = 70;
+  const beltR = 140;
   for (const name of ["meteor", "meteor_detailed"]) {
     const matrices = [];
     const beltGroup = new THREE.Group();
     for (let i = 0; i < 70; i++) {
       const a = rng() * 6.283;
-      const r = beltR + (rng() - 0.5) * 9;
-      const p = new THREE.Vector3(Math.cos(a) * r, (rng() - 0.5) * 5, Math.sin(a) * r);
+      const r = beltR + (rng() - 0.5) * 18;
+      const p = new THREE.Vector3(Math.cos(a) * r, (rng() - 0.5) * 10, Math.sin(a) * r);
       const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(rng() * 6, rng() * 6, rng() * 6));
-      const s = new THREE.Vector3().setScalar(0.4 + rng() * 1.3);
+      const s = new THREE.Vector3().setScalar(0.8 + rng() * 2.6);
       matrices.push(new THREE.Matrix4().compose(p, q, s));
       beltRocks.push({ group: beltGroup, local: p.clone(), r: s.x * 0.95 }); // collidable
     }
@@ -1096,9 +1097,9 @@ function buildBelt() {
   const matrices = [];
   const rocks = new THREE.Group();
   for (let i = 0; i < 6; i++) {
-    const a = rng() * 6.283, r = 48 + rng() * 8;
-    const p = new THREE.Vector3(Math.cos(a) * r, (rng() - 0.5) * 10, Math.sin(a) * r);
-    const s = new THREE.Vector3().setScalar(1.2 + rng());
+    const a = rng() * 6.283, r = 96 + rng() * 16;
+    const p = new THREE.Vector3(Math.cos(a) * r, (rng() - 0.5) * 20, Math.sin(a) * r);
+    const s = new THREE.Vector3().setScalar(2.4 + rng() * 2);
     matrices.push(new THREE.Matrix4().compose(p, new THREE.Quaternion().setFromEuler(new THREE.Euler(rng() * 6, rng() * 6, rng() * 6)), s));
     beltRocks.push({ group: rocks, local: p.clone(), r: s.x * 1.15 });
   }
@@ -1107,9 +1108,30 @@ function buildBelt() {
   belts.push(rocks);
   scene.add(rocks);
 
+  // belts ringing a couple of the outer systems too — more fields to weave through
+  for (const key of ["games", "tools", "experiments"]) {
+    const s = SYSTEMS[key];
+    if (!s) continue;
+    const r0 = s.starR * 4.2 + 60;
+    const mats = [];
+    const bg = new THREE.Group();
+    bg.position.copy(s.pos);
+    for (let i = 0; i < 48; i++) {
+      const a = rng() * 6.283, r = r0 + (rng() - 0.5) * 32;
+      const p = new THREE.Vector3(Math.cos(a) * r, (rng() - 0.5) * 14, Math.sin(a) * r);
+      const sc = new THREE.Vector3().setScalar(1.0 + rng() * 3.4);
+      mats.push(new THREE.Matrix4().compose(p, new THREE.Quaternion().setFromEuler(new THREE.Euler(rng() * 6, rng() * 6, rng() * 6)), sc));
+      beltRocks.push({ group: bg, local: p.clone(), r: sc.x * 0.95 });
+    }
+    instancedFromGLB(ASSETS.meteor, mats, bg);
+    bg.userData.spin = 0.008 + rng() * 0.006;
+    belts.push(bg);
+    scene.add(bg);
+  }
+
   // the mothership lazily circles hello.world
   mothership = ASSETS.craft_cargoA.clone();
-  mothership.scale.setScalar(2.4);
+  mothership.scale.setScalar(4.8);
   scene.add(mothership);
 }
 const belts = [];
@@ -1204,14 +1226,25 @@ function pick(cx, cy) {
   let o = hits[0].object;
   while (o && !o.userData.site) o = o.parent; // walk up to the planet group
   if (!o) return;
+  // clicking is for approaching a world you're already near — not teleporting across the
+  // map. For a distant system, warp to it via the sidebar (that's the hyperspace jump).
+  if (ship.position.distanceTo(o.position) > MAX_PICK_DIST) {
+    toast(`▸ <b style="color:#e5a00d">${esc(o.userData.site.name)}</b> is far — warp to its system first`);
+    return;
+  }
   following = null;
   showCard(o.userData.site);
+  // a FIXED vantage on the side we approached from — predefined + stable (no per-frame
+  // drift or spin) and far enough out that the (bigger) world is framed, not swallowed
+  const br = o.userData.bodyR ?? 6;
+  const off = new THREE.Vector3().subVectors(ship.position, o.position);
+  if (off.lengthSq() < 1e-3) off.set(0, 0, 1);
+  o.offset = off.normalize().multiplyScalar(br * 1.8 + shipRadius + 22);
+  o.offset.y += br * 0.4;
   flyTarget = o;
-  focusTarget = o;       // glide in, then freeze facing it
-  // only a genuinely distant world is an FTL jump; a nearby one just glides into focus
-  flyFTL = ship.position.distanceTo(o.position) > FTL_DIST;
+  focusTarget = o;       // glide in, then hold facing it
+  flyFTL = false;        // a local approach → smooth glide, no hyperspace
   blip();
-  if (flyFTL) warpSound();
 }
 
 // AI-generated "civilization lore" per world (worlds.ai, with a rich local fallback).
@@ -1606,7 +1639,7 @@ async function spawnRelic() {
   if (!data) return;
   const g = new THREE.Group();
   const tmpl = randOf([ASSETS.meteor_detailed, ASSETS.meteor, ASSETS.rock_crystalsLargeA].filter(Boolean));
-  const sc = 1.6 + Math.random() * 2.6;
+  const sc = 3.2 + Math.random() * 5.2;
   if (tmpl) { const body = tmpl.clone(); body.scale.setScalar(sc); g.add(body); }
   // a faint additive coma so it reads as a comet/relic, not just a rock
   const coma = new THREE.Mesh(
@@ -1928,7 +1961,7 @@ document.getElementById("hud").appendChild(rosterEl);
 function whereLabel(pos) {
   let best = "deep space", bd = 320;
   for (const [k, s] of Object.entries(SYSTEMS)) { const d = pos.distanceTo(s.pos); if (d < bd) { bd = d; best = k === "misc" ? "home" : s.title; } }
-  if (pos.distanceTo(CORE_POS) < 320) best = "the universe";
+  if (pos.distanceTo(CORE_POS) < 720) best = "the universe";
   return best;
 }
 function updateRoster() {
@@ -1990,7 +2023,7 @@ for (const [key, sys] of Object.entries(SYSTEMS)) {
   const btn = document.createElement("button");
   btn.style.color = color;
   btn.textContent = key === "misc" ? "☀ hello.world · home" : `★ ${sys.title} · ${key}`;
-  btn.onclick = () => { initAudio(); warpSound(); flyTarget = { position: sys.pos.clone(), offset: new THREE.Vector3(0, 16, sys.starR * 6) }; };
+  btn.onclick = () => { initAudio(); warpSound(); flyFTL = true; flyTarget = { position: sys.pos.clone(), offset: new THREE.Vector3(0, 16, sys.starR * 6) }; };
   systemsBar.appendChild(btn);
 
   const arrow = document.createElement("div");
@@ -2006,7 +2039,7 @@ for (const [key, sys] of Object.entries(SYSTEMS)) {
   const btn = document.createElement("button");
   btn.style.color = "#c4b5fd";
   btn.textContent = "◍ the universe · black hole";
-  btn.onclick = () => { initAudio(); warpSound(); flyTarget = { position: CORE_POS.clone(), offset: new THREE.Vector3(0, 320, 980) }; };
+  btn.onclick = () => { initAudio(); warpSound(); flyFTL = true; flyTarget = { position: CORE_POS.clone(), offset: new THREE.Vector3(0, 760, 2500) }; };
   systemsBar.appendChild(btn);
 }
 
@@ -2074,7 +2107,7 @@ askForm.addEventListener("submit", async (e) => {
   askInput.value = "";
   askInput.blur();
   const g = planets.get(target.name);
-  if (g) { flyTarget = g; focusTarget = g; showCard(g.userData.site); warpSound(); toast(`▸ navigating to <b style="color:#e5a00d">${target.name}.world</b> — ${why}`); }
+  if (g) { flyFTL = ship.position.distanceTo(g.position) > MAX_PICK_DIST; flyTarget = g; focusTarget = g; showCard(g.userData.site); warpSound(); toast(`▸ navigating to <b style="color:#e5a00d">${target.name}.world</b> — ${why}`); }
 });
 
 // assets first — planets plant Kenney forests at build time
@@ -2145,7 +2178,7 @@ function tick() {
   for (const b of belts) b.rotation.y += b.userData.spin * dt;
   if (mothership) {
     const ma = t * 0.05;
-    mothership.position.set(Math.cos(ma) * 26, 4, Math.sin(ma) * 26);
+    mothership.position.set(Math.cos(ma) * 118, 8, Math.sin(ma) * 118); // orbit clear of the bigger home star, inside its belt
     mothership.rotation.y = -ma - Math.PI / 2;
   }
   if (coreDisk) coreDisk.rotation.z += dt * 0.12;
@@ -2211,17 +2244,19 @@ function tick() {
       goal = _goal.subVectors(ship.position, flyTarget.position).normalize().multiplyScalar(br + shipRadius + 10).add(flyTarget.position);
       goal.y += br * 0.35;
     }
-    const k = flyFTL ? 2.7 : 1.6; // FTL jumps cross fast but last ~2s so the hyperspace reads; short glides stay gentle
+    const k = flyFTL ? 4.5 : 1.6; // FTL snaps across in ~1s so the jump feels instant; short glides stay gentle
     ship.position.lerp(goal, 1 - Math.exp(-k * dt));
     vel.multiplyScalar(Math.exp(-4 * dt)); // bleed residual momentum
     if (ship.position.distanceTo(goal) < 2) flyTarget = null;
   } else if (focusTarget && !thrust) {
     // frozen hold: keep a vantage just off the world, no gravity/drift, facing it,
     // until the pilot dives in ("walk"), closes the card, or thrusts away.
+    // hold the exact vantage captured at click time, so it never drifts inward or swings around
     const br = focusTarget.userData.bodyR ?? 6;
-    // hold the same near-side vantage; recomputed from our position so it never swings around
-    const goal = _goal.subVectors(ship.position, focusTarget.position).normalize().multiplyScalar(br + shipRadius + 10).add(focusTarget.position);
-    goal.y += br * 0.35;
+    const goal = focusTarget.offset
+      ? _goal.copy(focusTarget.position).add(focusTarget.offset)
+      : _goal.subVectors(ship.position, focusTarget.position).normalize().multiplyScalar(br + shipRadius + 10).add(focusTarget.position);
+    if (!focusTarget.offset) goal.y += br * 0.35;
     ship.position.lerp(goal, 1 - Math.exp(-3 * dt));
     vel.multiplyScalar(Math.exp(-6 * dt));
   } else if (following && pilots.get(following) && !thrust) {
@@ -2292,13 +2327,10 @@ function tick() {
     // asteroid belt: bump off individual rocks while flying through the field (the belt
     // rings the origin ~r48–79). Culled to when you're actually inside the band, and
     // skipped mid-FTL so a jump isn't yanked out of warp by a pebble.
-    if (!flyTarget) {
-      const dO = Math.hypot(ship.position.x, ship.position.z);
-      if (dO > 36 && dO < 88 && Math.abs(ship.position.y) < 18) {
-        for (const rk of beltRocks) {
-          _rockPos.copy(rk.local).applyAxisAngle(_Y, rk.group.rotation.y);
-          resolve(_rockPos, rk.r + shipRadius);
-        }
+    if (!flyTarget) { // resolve() early-outs for far rocks, so checking them all is cheap
+      for (const rk of beltRocks) {
+        _rockPos.copy(rk.local).applyAxisAngle(_Y, rk.group.rotation.y).add(rk.group.position);
+        resolve(_rockPos, rk.r + shipRadius);
       }
     }
   }
@@ -2351,14 +2383,14 @@ function tick() {
     const target = burning ? 1.0 + Math.sin(t * 40) * 0.28 : 0.1;
     flameMesh.scale.y += (target - flameMesh.scale.y) * Math.min(1, dt * 14);
     innerFlame.scale.y += (target * 0.8 - innerFlame.scale.y) * Math.min(1, dt * 16);
-    flameMesh.material.opacity = burning ? 0.85 : 0.05;
-    innerFlame.material.opacity = burning ? 0.95 : 0.05;
+    flameMesh.material.opacity = burning ? 0.55 : 0.0;
+    innerFlame.material.opacity = burning ? 0.62 : 0.0;
   }
-  if (engineGlow) { // core glow + cast light both fade to ~0 at rest so the ship is visible
-    engineGlow.material.opacity += ((burning ? 0.95 : 0.04) - engineGlow.material.opacity) * Math.min(1, dt * 9);
-    engineGlow.scale.setScalar(burning ? 1.0 : 0.4);
+  if (engineGlow) { // core glow + cast light fully fade to 0 at rest so the ship reads clearly
+    engineGlow.material.opacity += ((burning ? 0.4 : 0.0) - engineGlow.material.opacity) * Math.min(1, dt * 9);
+    engineGlow.scale.setScalar(burning ? 0.8 : 0.25);
   }
-  if (engineLight) engineLight.intensity += ((burning ? 9 : 0.12) - engineLight.intensity) * Math.min(1, dt * 10);
+  if (engineLight) engineLight.intensity += ((burning ? 4 : 0.0) - engineLight.intensity) * Math.min(1, dt * 10);
   // navigation blinkers
   for (let i = 0; i < navLights.length; i++) {
     const on = (Math.sin(t * 3 + i * Math.PI) > 0.4) ? 1 : 0.06;
@@ -2478,8 +2510,10 @@ function tick() {
     _camGoal.copy(ship.position).addScaledVector(forward, dive ? -8 : -14);
     _camGoal.y += 4.5;
     if (camShake > 0.001) _camGoal.x += (Math.random() - 0.5) * camShake * 6, _camGoal.y += (Math.random() - 0.5) * camShake * 6, _camGoal.z += (Math.random() - 0.5) * camShake * 6;
-    camera.position.lerp(_camGoal, 1 - Math.exp(-(dive ? 9 : 6) * dt));
-    camera.lookAt(_camLook.copy(ship.position).addScaledVector(forward, 10));
+    camera.position.lerp(_camGoal, 1 - Math.exp(-(dive ? 9 : flyTarget ? 13 : 6) * dt)); // track the ship hard during the fast FTL dash so it stays the centerpiece
+    const ft = !thrust ? (focusTarget || flyTarget) : null;
+    if (ft && ft.position) camera.lookAt(ft.position); // keep the world we're flying to / holding dead-centre
+    else camera.lookAt(_camLook.copy(ship.position).addScaledVector(forward, 10));
     camera.rotateZ(bank + (dive ? dive.t * 3.2 : 0)); // bank into turns, barrel-roll the dive
   }
 
