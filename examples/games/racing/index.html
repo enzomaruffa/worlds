@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
   <title>Kart Loop · Worlds Racing</title>
+  <meta name="description" content="Drop-in low-poly kart racing. Five tracks rotate on a shared clock — lap your friends and climb each track's hotlap board." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -71,18 +72,34 @@
     #lapBox .last { font-size: .72rem; color: var(--dim); }
     #lapBox .last.good { color: var(--green); }
 
-    /* top-center: brand / wrong-way warning */
+    /* top-center: current track + round clock / wrong-way warning */
     #topCenter {
       grid-column: 2; grid-row: 1;
       justify-self: center;
       text-align: center;
       display: flex; flex-direction: column; align-items: center; gap: .3rem;
+      min-width: min(20rem, 70vw);
     }
-    #brand {
-      font-size: .78rem; font-weight: 600; letter-spacing: .18em; text-transform: uppercase;
-      color: var(--dim);
+    #trackName {
+      font-size: 1.05rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+      color: var(--text); line-height: 1;
     }
-    #brand b { color: var(--gold); }
+    #trackName b { color: var(--gold); }
+    #trackName.flash { animation: trackPop .6s ease-out; }
+    @keyframes trackPop { 0% { transform: scale(.7); opacity: 0; color: var(--gold-bright); } 60% { transform: scale(1.06); opacity: 1; } 100% { transform: scale(1); } }
+    #trackMeta { font-size: .68rem; color: var(--dim); letter-spacing: .04em; }
+    #roundBar {
+      width: 100%; max-width: 16rem; height: 5px; border-radius: 3px; overflow: hidden;
+      background: var(--border); margin-top: .1rem;
+    }
+    #roundBar i { display: block; height: 100%; width: 100%; background: linear-gradient(90deg, var(--gold), var(--gold-bright)); border-radius: 3px; transition: width .3s linear; }
+    #roundBar.low i { background: var(--red); animation: barPulse .9s infinite; }
+    @keyframes barPulse { 0%,100% { opacity: 1; } 50% { opacity: .5; } }
+    #nextUp {
+      font-size: .72rem; font-weight: 600; color: #fecaca; letter-spacing: .03em;
+      opacity: 0; transition: opacity .2s; height: 0;
+    }
+    #nextUp.show { opacity: 1; height: auto; }
     #wrongWay {
       padding: .25rem .7rem; border-radius: 999px;
       background: rgba(239,68,68,.16); border: 1px solid var(--red);
@@ -158,6 +175,8 @@
     .tbtn.gas.held    { background: rgba(245,158,11,.4); }
     .tbtn.brake  { background: rgba(239,68,68,.16); border-color: #7f1d1d; color: #fecaca; }
     .tbtn.brake.held  { background: rgba(239,68,68,.32); }
+    .tbtn.drift  { background: rgba(34,211,238,.16); border-color: #155e75; color: #a5f3fc; font-size: .8rem; font-weight: 700; letter-spacing: .04em; }
+    .tbtn.drift.held  { background: rgba(34,211,238,.34); }
     .tbtn.steer.held  { background: rgba(228,228,231,.16); border-color: var(--muted); }
 
     /* ── Countdown ─────────────────────────────────────────── */
@@ -206,65 +225,6 @@
     #loader .who b { color: var(--gold-bright); font-weight: 600; }
     #loader .err { color: #fecaca; font-size: .82rem; max-width: 26rem; }
 
-    /* ── Lobby / waiting room ──────────────────────────────── */
-    #lobby {
-      position: absolute; inset: 0; z-index: 8;
-      display: flex; align-items: center; justify-content: center;
-      padding: max(1rem, env(safe-area-inset-top)) 1rem max(1rem, env(safe-area-inset-bottom));
-      background: radial-gradient(ellipse at 50% 0%, rgba(19,19,23,.72), rgba(9,9,11,.92));
-      backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
-      transition: opacity .4s;
-    }
-    #lobby.hide { opacity: 0; pointer-events: none; }
-    .lobby-card {
-      width: min(30rem, 94vw);
-      max-height: 88vh; overflow: auto;
-      background: var(--surface); border: 1px solid var(--border);
-      border-radius: 1rem; padding: 1.3rem 1.3rem 1.1rem;
-      box-shadow: 0 20px 60px rgba(0,0,0,.5);
-      display: flex; flex-direction: column; gap: .9rem;
-    }
-    .lobby-card h2 {
-      margin: 0; font-size: 1.45rem; font-weight: 700; letter-spacing: .01em;
-    }
-    .lobby-card h2 b { color: var(--gold); }
-    .lobby-sub { margin: -.5rem 0 0; color: var(--muted); font-size: .85rem; }
-    .lobby-sub .host { color: var(--gold-bright); font-weight: 600; }
-    #lobbyRoster {
-      list-style: none; margin: 0; padding: 0;
-      display: flex; flex-direction: column; gap: .35rem;
-      max-height: 38vh; overflow: auto;
-    }
-    #lobbyRoster li {
-      display: grid; grid-template-columns: .5rem 1fr auto; gap: .6rem; align-items: center;
-      padding: .5rem .65rem; border-radius: .55rem;
-      background: var(--surface-2); border: 1px solid var(--border);
-      font-size: .92rem;
-    }
-    #lobbyRoster li.me { border-color: var(--gold); background: rgba(245,158,11,.1); }
-    #lobbyRoster .dot { width: .5rem; height: .5rem; border-radius: 50%; background: var(--dim); }
-    #lobbyRoster li.ready .dot { background: var(--green); box-shadow: 0 0 7px var(--green); }
-    #lobbyRoster .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    #lobbyRoster .nm .tag { color: var(--dim); font-size: .76rem; margin-left: .35rem; }
-    #lobbyRoster .st { font-size: .76rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--dim); }
-    #lobbyRoster li.ready .st { color: var(--green); }
-    .lobby-actions { display: flex; flex-direction: column; gap: .55rem; margin-top: .15rem; }
-    .lobby-btn {
-      width: 100%; padding: .8rem 1rem; border-radius: .65rem;
-      font-family: inherit; font-size: 1rem; font-weight: 700; letter-spacing: .02em;
-      border: 1px solid var(--border); background: var(--surface-2); color: var(--text);
-      cursor: pointer; transition: transform .05s, background .1s, border-color .1s, opacity .1s;
-    }
-    .lobby-btn:active { transform: translateY(1px); }
-    .lobby-btn.ready { border-color: var(--gold); background: rgba(245,158,11,.16); color: var(--gold-bright); }
-    .lobby-btn.ready.on { background: var(--gold); color: #1a1206; border-color: var(--gold); }
-    .lobby-btn.start { border-color: var(--green); background: rgba(34,197,94,.18); color: #bbf7d0; }
-    .lobby-btn.start:disabled { opacity: .45; cursor: default; border-color: var(--border); background: var(--surface-2); color: var(--dim); }
-    .lobby-hint { color: var(--dim); font-size: .78rem; text-align: center; margin: 0; }
-
-    /* while the lobby is up, dim the gameplay HUD behind it */
-    body.lobby .hud { opacity: .25; filter: saturate(.6); transition: opacity .3s; }
-    body.lobby #touch { display: none !important; }
   </style>
 
   <script type="importmap">
@@ -285,12 +245,15 @@
       </div>
 
       <div id="topCenter">
-        <div id="brand"><b>KART</b> LOOP · worlds racing</div>
+        <div id="trackName">Kart Loop</div>
+        <div id="trackMeta">connecting…</div>
+        <div id="roundBar"><i id="roundFill"></i></div>
+        <div id="nextUp"></div>
         <div id="wrongWay">↺ wrong way</div>
       </div>
 
       <div class="panel" id="board">
-        <h3><span class="live"></span> best laps</h3>
+        <h3><span class="live"></span> <span id="boardTitle">best laps</span></h3>
         <ol id="boardList"><li class="empty">no laps yet — be the first</li></ol>
       </div>
 
@@ -305,6 +268,7 @@
           <div class="tbtn steer" id="btnRight" aria-label="steer right">►</div>
         </div>
         <div class="tgroup">
+          <div class="tbtn drift" id="btnDrift" aria-label="handbrake / drift">DRIFT</div>
           <div class="tbtn brake" id="btnBrake" aria-label="brake / reverse">▼</div>
           <div class="tbtn gas" id="btnGas" aria-label="accelerate">▲</div>
         </div>
@@ -313,22 +277,10 @@
 
     <div id="countdown"><div class="num" id="cdNum"></div></div>
 
-    <div id="lobby">
-      <div class="lobby-card">
-        <h2><b>KART</b> LOOP · lobby</h2>
-        <p class="lobby-sub" id="lobbySub">Waiting for racers…</p>
-        <ul id="lobbyRoster"></ul>
-        <div class="lobby-actions">
-          <button class="lobby-btn ready" id="btnReady">I'm ready</button>
-          <button class="lobby-btn start" id="btnStart" disabled>Start race</button>
-          <p class="lobby-hint" id="lobbyHint"></p>
-        </div>
-      </div>
-    </div>
-
     <div id="loader">
       <div class="logo"><b>KART</b> LOOP</div>
-      <div class="tag">Low-poly arcade kart racing. Pile in and lap your friends in real time.</div>
+      <div class="tag">Drop-in low-poly kart racing. Five tracks rotate on a shared clock — lap your friends and own each track's hotlap board.</div>
+      <div class="who" style="margin-top:.2rem">WASD / arrows to drive · <b>SPACE</b> to drift · <b>H</b> to honk</div>
       <div class="bar"><i></i></div>
       <div class="who" id="loaderWho">connecting…</div>
       <div class="err" id="loaderErr"></div>

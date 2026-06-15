@@ -76,7 +76,7 @@ any site), heavy/long compute, scheduled jobs, public webhooks. Point those at a
 - **trivia** — `worlds.rooms` (concurrent quizzes) + `worlds.ai` quiz generation + host-driven phases.
 - **tumble** — `worlds.actors` (spatial zones) + `worlds.room` (global level clock) + `worlds.db`
   leaderboard: an endless, synchronized, lobby-less three.js gauntlet for unbounded players.
-- **racing** — full three.js 3D; `worlds.room` lobby (ready/host/start) + pose **state** over `worlds.actors`, plus a press-**H** horn via actor **events** (`send`/`onEvent`).
+- **racing** — full three.js 3D, five themed tracks on a tumble-style **running lobby**: a shared `worlds.room` clock (`{trackIndex, roundEndsAt}`) rotates the track for everyone (drop-in, no waiting room), pose **state** over `worlds.actors` (zoned by track), a per-track hotlap `worlds.db` board, plus a press-**H** horn via actor **events** (`send`/`onEvent`).
 - **red-light / paint-arena** — single `worlds.room` ready-up + `worlds.ws` realtime
   (paint-arena keeps its own palette colors on purpose).
 - **draw-guess** — multiple ws channels + db. **hangout / quick-poll** — db + subscribe tools.
