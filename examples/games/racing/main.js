@@ -4,12 +4,14 @@ import * as THREE from "three";
 // Kart Loop — low-poly arcade multiplayer racing on the Worlds platform.
 //
 // Worlds SDK is the ONLY backend:
-//   ws channel "race"  — ephemeral pose broadcasts (~14/s), echoes to self.
+//   worlds.room("race")        — roster / ready / host / start (the waiting room).
+//   ws channel "race"          — ephemeral pose broadcasts (~14/s), echoes to self.
 //   db collection "leaderboard" — one persistent doc per handle: best lap.
 // Each tab gets a clientId; we ignore our own echoed poses by clientId.
 // ───────────────────────────────────────────────────────────────────────────
 
 const CHANNEL = "race";
+const ROOM = "race"; // worlds.room name (roster/ready/host) — its own channel below
 const LEADERBOARD = "leaderboard";
 const SEND_HZ = 14; // pose broadcasts per second (SDK asks for 12-15)
 const STALE_MS = 4000; // drop a remote kart unheard-from this long (aggressive anti-ghost)
@@ -23,17 +25,14 @@ const clientId = id();
 const me = { handle: null, name: "you", color: 0xfbbf24 };
 
 // ── Lobby / waiting-room state ───────────────────────────────────────────────
-// Ready-state is shared by piggybacking a `ready` boolean on the pose ping over
-// the "race" channel; the host (lexicographically smallest present handle) can
-// force-start, and we auto-start when every present racer is ready.
+// Roster, ready-state, host and start/auto-start are handled by `worlds.room`
+// (constructed in boot()). `lobby` is that room; `lobbySnap` holds its latest
+// snapshot so the rest of the file can read who's ready / am I host / etc.
+// The pose channel ("race") below stays a pure realtime position feed.
 let lobbyActive = true; // overlay shown until the race starts
-let presenceMembers = []; // last presence snapshot from the race channel
-const lobby = {
-  selfReady: false,
-  ready: new Map(), // handle -> bool (remote ready states)
-  seen: new Map(), // handle -> { name, at } (recently-heard roster)
-  started: false, // local guard so we run the countdown once
-};
+let lobby = null; // worlds.room("race") instance (roster/ready/host/start)
+let lobbySnap = null; // latest room snapshot from onChange
+let raceBegun = false; // local guard so we run the countdown once
 
 // ── DOM ─────────────────────────────────────────────────────────────────────
 const $ = (id) => document.getElementById(id);
@@ -1418,28 +1417,19 @@ function updateCamera(dt) {
 }
 
 function pruneRemotes(now) {
+  // Drop kart meshes we haven't heard a pose from recently. The lobby roster is
+  // owned by worlds.room (presence-backed), so there's nothing else to expire.
   for (const [h, r] of remotes) {
-    if (now - r.at > STALE_MS) {
-      removeRemote(h);
-      lobby.seen.delete(h);
-      lobby.ready.delete(h);
-    }
-  }
-  // also expire lobby roster entries we haven't heard a pose from recently
-  for (const [h, s] of lobby.seen) {
-    if (h !== me.handle && now - s.at > STALE_MS) {
-      lobby.seen.delete(h);
-      lobby.ready.delete(h);
-    }
+    if (now - r.at > STALE_MS) removeRemote(h);
   }
   updateRacerCount();
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-// MULTIPLAYER — ws channel "race"
-//   pose  message: { cid, t:"pose", handle, name, x, y, z, ry, speed, color, ready }
-//                  (y + ready are additive; old peers omitting them still work)
-//   start message: { cid, t:"start", handle, at }  — host/auto-start signal
+// MULTIPLAYER — ws channel "race" (realtime poses only)
+//   pose message: { cid, t:"pose", handle, name, x, y, z, ry, speed, color }
+//                 (y is additive; old peers omitting it still work)
+// Ready / host / start no longer ride this channel — they live in worlds.room.
 // ───────────────────────────────────────────────────────────────────────────
 let room = null;
 let lastSendAt = 0;
@@ -1456,7 +1446,6 @@ function buildPosePayload() {
     ry: round3(player.heading),
     speed: round3(player.vel),
     color: me.color,
-    ready: lobby.selfReady, // lobby ready-state piggybacks on the pose ping
   };
 }
 
@@ -1480,20 +1469,12 @@ function onPose(msg) {
   const p = msg && msg.payload;
   if (!p || typeof p !== "object") return;
   if (p.cid === clientId) return; // our own echo
-  if (p.t === "start") {
-    onStartMessage();
-    return;
-  }
-  if (p.t !== "pose") return;
+  if (p.t !== "pose") return; // ignore anything that isn't a kart pose
   const handle = p.handle || (msg.from && msg.from.handle);
   if (!handle || handle === me.handle) return; // never render our own handle
   const cid = typeof p.cid === "string" ? p.cid : null;
   const name = typeof p.name === "string" ? p.name : (msg.from && msg.from.name) || handle;
   const colorHex = typeof p.color === "number" ? p.color : colorForHandle(handle);
-
-  // lobby ready-state piggybacks on the pose ping
-  if (typeof p.ready === "boolean") lobby.ready.set(handle, p.ready);
-  lobby.seen.set(handle, { name, at: performance.now() });
 
   const r = ensureRemote(handle, name, colorHex, cid);
   // DEDUP: if this pose is from a different clientId than the one we have, the
@@ -1537,28 +1518,17 @@ function onPose(msg) {
     r.init = true;
   }
   updateRacerCount();
-  if (lobbyActive) {
-    renderLobby();
-    maybeAutoStart();
-  }
 }
 
 function onPresence(members) {
   if (!Array.isArray(members)) return;
-  presenceMembers = members.slice();
+  // Despawn kart meshes for anyone who left the pose channel. Lobby roster /
+  // ready bookkeeping is handled by worlds.room, not here.
   const present = new Set(members.map((m) => m && m.handle).filter(Boolean));
   for (const h of [...remotes.keys()]) {
     if (!present.has(h)) removeRemote(h);
   }
-  // prune lobby bookkeeping for anyone who left presence
-  for (const h of [...lobby.seen.keys()]) {
-    if (!present.has(h) && h !== me.handle) {
-      lobby.seen.delete(h);
-      lobby.ready.delete(h);
-    }
-  }
   updateRacerCount();
-  if (lobbyActive) renderLobby();
 }
 
 function updateRacerCount() {
@@ -1698,139 +1668,70 @@ function num(v, fallback) {
   return typeof v === "number" && isFinite(v) ? v : fallback;
 }
 // ───────────────────────────────────────────────────────────────────────────
-// LOBBY — waiting room with live roster + per-player Ready, host start, and
-// auto-start when everyone present is ready (min 1, so solo still works).
-//   ws "race": ready piggybacks on the pose ping ({...,ready:bool});
-//              start is its own message ({cid,t:"start",at}).
-// Host = lexicographically smallest handle among everyone currently present.
+// LOBBY — waiting room driven entirely by worlds.room("race").
+//   The room owns the live roster, per-player ready toggles, a stable host, and
+//   start / auto-start (min 1 player, so solo still works). We just render its
+//   snapshots and forward button presses; onStart fires on every client.
 // ───────────────────────────────────────────────────────────────────────────
-function rosterHandles() {
-  // everyone we currently know is around: self + recently-heard remotes +
-  // anyone in the latest presence snapshot.
-  const set = new Set();
-  if (me.handle) set.add(me.handle);
-  for (const h of lobby.seen.keys()) set.add(h);
-  for (const m of presenceMembers) if (m && m.handle) set.add(m.handle);
-  return [...set];
-}
-function hostHandle() {
-  const all = rosterHandles();
-  if (!all.length) return me.handle;
-  return all.slice().sort()[0];
-}
-function isHost() {
-  return me.handle && hostHandle() === me.handle;
-}
-function isReady(handle) {
-  if (handle === me.handle) return lobby.selfReady;
-  return lobby.ready.get(handle) === true;
-}
-function everyoneReady() {
-  const all = rosterHandles();
-  if (!all.length) return false;
-  return all.every((h) => isReady(h));
-}
-
-function renderLobby() {
-  if (!lobbyActive) return;
-  const all = rosterHandles().sort((a, b) => {
+function renderLobby(s) {
+  lobbySnap = s || lobbySnap;
+  if (!lobbyActive || !lobbySnap) return;
+  const members = (lobbySnap.members || []).slice().sort((a, b) => {
     // self first, then by name
-    if (a === me.handle) return -1;
-    if (b === me.handle) return 1;
-    return a.localeCompare(b);
+    if (a.isMe) return -1;
+    if (b.isMe) return 1;
+    return (a.name || a.handle).localeCompare(b.name || b.handle);
   });
-  const host = hostHandle();
-  const readyN = all.filter((h) => isReady(h)).length;
+  const total = members.length;
+  const readyN = members.filter((m) => m.ready).length;
+  const host = lobbySnap.host;
+  const hostName = host ? (host.name || host.handle) : me.name;
   dom.lobbySub.innerHTML =
-    `${all.length} racer${all.length === 1 ? "" : "s"} here · ${readyN}/${all.length} ready · host <span class="host">${esc(nameFor(host))}</span>`;
+    `${total} racer${total === 1 ? "" : "s"} here · ${readyN}/${total} ready · host <span class="host">${esc(hostName)}</span>`;
 
-  dom.lobbyRoster.innerHTML = all
-    .map((h) => {
-      const mine = h === me.handle;
-      const rdy = isReady(h);
-      const nm = esc(nameFor(h).slice(0, 18));
+  dom.lobbyRoster.innerHTML = members
+    .map((m) => {
+      const nm = esc((m.name || m.handle).slice(0, 18));
       const tags = [];
-      if (mine) tags.push("you");
-      if (h === host) tags.push("host");
+      if (m.isMe) tags.push("you");
+      if (m.isHost) tags.push("host");
       const tag = tags.length ? `<span class="tag">${tags.join(" · ")}</span>` : "";
-      return `<li class="${mine ? "me " : ""}${rdy ? "ready" : ""}"><span class="dot"></span><span class="nm">${nm}${tag}</span><span class="st">${rdy ? "ready" : "…"}</span></li>`;
+      return `<li class="${m.isMe ? "me " : ""}${m.ready ? "ready" : ""}"><span class="dot"></span><span class="nm">${nm}${tag}</span><span class="st">${m.ready ? "ready" : "…"}</span></li>`;
     })
     .join("");
 
-  dom.btnReady.classList.toggle("on", lobby.selfReady);
-  dom.btnReady.textContent = lobby.selfReady ? "Ready ✓" : "I'm ready";
+  dom.btnReady.classList.toggle("on", lobbySnap.ready);
+  dom.btnReady.textContent = lobbySnap.ready ? "Ready ✓" : "I'm ready";
 
-  const canStart = isHost() || everyoneReady();
+  const canStart = lobbySnap.isHost && lobbySnap.total >= 1;
   dom.btnStart.disabled = !canStart;
-  if (everyoneReady()) {
+  if (lobbySnap.allReady) {
     dom.lobbyHint.textContent = "Everyone's ready — starting…";
-  } else if (isHost()) {
+  } else if (lobbySnap.isHost) {
     dom.lobbyHint.textContent = "You're the host — start any time, or wait for all ready.";
   } else {
-    dom.lobbyHint.textContent = `Waiting for ${esc(nameFor(host))} to start (or all ready).`;
+    dom.lobbyHint.textContent = `Waiting for ${esc(hostName)} to start (or all ready).`;
   }
-}
-
-function nameFor(handle) {
-  if (handle === me.handle) return me.name;
-  const r = remotes.get(handle);
-  if (r && r.name) return r.name;
-  const s = lobby.seen.get(handle);
-  if (s && s.name) return s.name;
-  const pm = presenceMembers.find((m) => m && m.handle === handle);
-  if (pm && pm.name) return pm.name;
-  return handle;
 }
 
 function toggleSelfReady() {
-  lobby.selfReady = !lobby.selfReady;
-  publishPose(); // broadcast the new ready state immediately
-  renderLobby();
-  maybeAutoStart();
-}
-
-let autoStartTimer = null;
-function maybeAutoStart() {
-  if (!lobbyActive || lobby.started) return;
-  if (everyoneReady()) {
-    // small grace so a just-arrived peer can register before we fire
-    if (!autoStartTimer) {
-      autoStartTimer = setTimeout(() => {
-        autoStartTimer = null;
-        if (lobbyActive && !lobby.started && everyoneReady()) beginRace(true);
-      }, 600);
-    }
-  } else if (autoStartTimer) {
-    clearTimeout(autoStartTimer);
-    autoStartTimer = null;
-  }
+  if (lobby) lobby.toggleReady(); // room re-renders via onChange + auto-starts
 }
 
 function hostStart() {
-  if (!lobbyActive || lobby.started) return;
-  if (!(isHost() || everyoneReady())) return;
-  beginRace(true);
+  if (lobby) lobby.start(); // host-only; broadcasts start to everyone
 }
 
-function beginRace(broadcast) {
-  if (lobby.started) return;
-  lobby.started = true;
+// Begin the race locally. Fires from the room's onStart on EVERY client (host
+// pressed start, or autoStart tripped when all-ready), so no broadcast here.
+function beginRace() {
+  if (raceBegun) return;
+  raceBegun = true;
   lobbyActive = false;
-  if (broadcast && room) {
-    try {
-      room.publish({ cid: clientId, t: "start", handle: me.handle, at: Date.now() });
-    } catch (_) {}
-  }
   dom.lobby.classList.add("hide");
   document.body.classList.remove("lobby");
   setTimeout(() => { dom.lobby.style.display = "none"; }, 420);
   runCountdown();
-}
-
-function onStartMessage() {
-  // a peer pressed start (or auto-start fired on their side) — follow along.
-  if (lobby.started) return;
-  beginRace(false);
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -1912,7 +1813,7 @@ resize();
   updateHud();
   updateRacerCount();
 
-  // realtime
+  // realtime pose feed (positions only — ready/host/start live in worlds.room)
   try {
     room = worlds.ws.channel(CHANNEL);
     room.subscribe(onPose);
@@ -1926,12 +1827,35 @@ resize();
   // leaderboard (non-blocking)
   initLeaderboard();
 
+  // ── lobby room: roster / ready / host / start (own channel so it never mixes
+  // with the pose feed). minPlayers:1 keeps solo working; autoStart fires the
+  // race once everyone present is ready. onStart runs on every client.
+  try {
+    lobby = worlds.room(ROOM, {
+      channel: ROOM + "-lobby",
+      me: { handle: me.handle, name: me.name },
+      minPlayers: 1,
+      autoStart: true,
+      onChange: (s) => renderLobby(s),
+      onStart: () => beginRace(),
+      onReturn: () => {}, // racing never returns to the lobby mid-session
+    });
+  } catch (_) {
+    /* room unavailable — fall through; solo can still self-start below */
+  }
+
   // lobby wiring
   dom.btnReady.addEventListener("click", toggleSelfReady);
   dom.btnStart.addEventListener("click", hostStart);
-  lobby.seen.set(me.handle, { name: me.name, at: performance.now() });
   document.body.classList.add("lobby");
-  renderLobby();
+  if (lobby) {
+    lobby.opened.then(() => renderLobby(lobby.snapshot())).catch(() => {});
+  } else {
+    // no room (offline): show a minimal solo lobby that starts on Ready
+    dom.btnReady.removeEventListener("click", toggleSelfReady);
+    dom.btnReady.addEventListener("click", () => beginRace());
+    dom.lobbySub.textContent = "Solo session — press Ready to start.";
+  }
 
   // start render loop + reveal lobby (karts idle at the start line until start)
   lastFrame = performance.now();

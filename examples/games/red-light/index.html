@@ -459,7 +459,8 @@
     "use strict";
 
     // ── Constants ────────────────────────────────────────────
-    const CHANNEL    = "arena";
+    const ROOM       = "red-light"; // worlds.room name (roster: ready/host/start)
+    const CHANNEL    = "arena";  // realtime ws channel (positions + light state only)
     const SPEED      = 0.18;     // y units / sec while moving (0..1 track)
     const EASE       = 9;        // velocity approach rate (higher = snappier)
     const SEND_HZ    = 12;       // position broadcasts per second (throttle)
@@ -469,8 +470,6 @@
     const WIN_RESET_MS   = 3500; // host delay before returning to lobby after a win
     const GREEN_MIN = 1800, GREEN_MAX = 4500;
     const RED_MIN   = 1200, RED_MAX   = 3000;
-    const LOBBY_PING_MS  = 2500; // re-broadcast our lobby presence/ready so peers don't go stale
-    const LOBBY_STALE_MS = 7000; // drop lobby peers unheard-from this long
 
     const { colorFor } = worlds;
     const clientId = worlds.id();
@@ -519,56 +518,24 @@
     // remote players: handle -> { name, y, frozen, out, at }
     const remotes = new Map();
 
-    // presence roster: array of {handle, name}
-    let roster = [];
-    let hostHandle = null;
-
     // ── Phase + lobby ────────────────────────────────────────
     // "lobby"  → waiting room (no live round); "playing" → a round is live.
     let phase = "lobby";
-    // ready state per handle (handle -> bool); also tracks last-seen ts via lobbyAt.
-    const ready = new Map();
-    const lobbyAt = new Map();   // handle -> ts of last lobby ping (liveness)
-    let myReady = false;
     let spectating = false;      // joined while a round was already live
-    let startSeqSeen = -1;       // monotone guard for {t:"start"} frames
 
     let pressed = false;         // move control currently held
-    let room = null;
+    let room = null;             // worlds.ws.channel(CHANNEL) — positions + light
+    let lobby = null;            // worlds.room(ROOM) — ready/host/start roster
+    let snap = null;             // latest room snapshot
 
-    // ── Host election ────────────────────────────────────────
+    // Host is decided by worlds.room (smallest handle in roster).
     function isHost() {
-      return me.handle != null && hostHandle === me.handle;
-    }
-    function recomputeHost() {
-      // smallest handle in current roster (include self defensively)
-      const handles = new Set(roster.map(m => m.handle).filter(Boolean));
-      if (me.handle) handles.add(me.handle);
-      let smallest = null;
-      for (const h of handles) {
-        if (smallest === null || h < smallest) smallest = h;
-      }
-      const prev = hostHandle;
-      hostHandle = smallest;
-      const hostMember = roster.find(m => m.handle === hostHandle);
-      hostNameEl.textContent = hostHandle == null ? "—"
-        : (hostHandle === me.handle ? (me.name + " (you)")
-        : (hostMember ? hostMember.name : hostHandle));
-      hostPill.classList.toggle("you-host", isHost());
-
-      if (isHost() && prev !== hostHandle && phase === "playing") {
-        // we just became host mid-round — keep things moving for everyone
-        if (winnerName) hostScheduleReset();   // old host left mid-round-over → drive the return
-        else startHostLoopIfNeeded();           // ...or resume the light loop
-      }
-      if (phase === "lobby") renderLobby();
+      return !!(snap && snap.isHost);
     }
 
     function updatePlayerCount() {
-      // unique handles currently present (roster) — includes us
-      const handles = new Set(roster.map(m => m.handle).filter(Boolean));
-      if (me.handle) handles.add(me.handle);
-      const n = handles.size || 1;
+      // unique handles currently present (room roster) — includes us
+      const n = (snap && snap.total) || 1;
       playerCountEl.textContent = String(n);
       document.getElementById("playersPill").innerHTML =
         `<b id="playerCount">${n}</b>&nbsp;${n === 1 ? "player" : "players"}`;
@@ -577,34 +544,21 @@
     // ── Lobby ────────────────────────────────────────────────
     function initial(name) { return (name || "?").trim().charAt(0).toUpperCase() || "?"; }
 
-    function lobbyMembers() {
-      // unique present handles (presence ∪ self), name resolved from roster/self
-      const byHandle = new Map();
-      for (const m of roster) if (m.handle) byHandle.set(m.handle, m.name || m.handle);
-      if (me.handle) byHandle.set(me.handle, me.name);
-      return [...byHandle.entries()]
-        .map(([handle, name]) => ({ handle, name }))
-        .sort((a, b) => (a.handle < b.handle ? -1 : a.handle > b.handle ? 1 : 0));
-    }
-
-    function readyStats(members) {
-      const m = members || lobbyMembers();
-      let r = 0;
-      for (const p of m) {
-        const isReady = p.handle === me.handle ? myReady : !!ready.get(p.handle);
-        if (isReady) r++;
-      }
-      return { ready: r, total: m.length };
+    function renderHostPill() {
+      const host = snap && snap.host;
+      hostNameEl.textContent = !host ? "—"
+        : (host.handle === me.handle ? (me.name + " (you)") : host.name);
+      hostPill.classList.toggle("you-host", isHost());
     }
 
     function renderLobby() {
-      if (phase !== "lobby") return;
-      const members = lobbyMembers();
+      if (phase !== "lobby" || !snap) return;
+      const members = snap.members;
       lobbyRosterEl.innerHTML = "";
       for (const p of members) {
-        const isYou = p.handle === me.handle;
-        const isReady = isYou ? myReady : !!ready.get(p.handle);
-        const isTheHost = p.handle === hostHandle;
+        const isYou = p.isMe;
+        const isReady = p.ready;
+        const isTheHost = p.isHost;
         const row = document.createElement("div");
         row.className = "roster-row" + (isYou ? " you" : "");
 
@@ -633,25 +587,21 @@
         lobbyRosterEl.appendChild(row);
       }
 
-      const stats = readyStats(members);
-      readyCountEl.textContent = `${stats.ready} of ${stats.total} ready`;
+      readyCountEl.textContent = `${snap.readyCount} of ${snap.total} ready`;
 
-      readyBtn.classList.toggle("on", myReady);
-      readyBtn.textContent = myReady ? "✓ Ready" : "I'm ready";
+      readyBtn.classList.toggle("on", snap.ready);
+      readyBtn.textContent = snap.ready ? "✓ Ready" : "I'm ready";
 
       startBtn.style.display = isHost() ? "block" : "none";
-      startBtn.disabled = stats.total < 1;
+      startBtn.disabled = snap.total < 1;
       if (isHost()) {
-        lobbyWaitNote.textContent = stats.total <= 1
+        lobbyWaitNote.textContent = snap.total <= 1
           ? "Solo is fine for testing — hit start whenever."
           : "Start when you're ready, or it auto-starts once everyone is.";
       } else {
-        const hostMember = members.find(p => p.handle === hostHandle);
-        const hostLabel = hostMember ? hostMember.name : "the host";
+        const hostLabel = snap.host ? snap.host.name : "the host";
         lobbyWaitNote.textContent = `Waiting for ${hostLabel} to start…`;
       }
-
-      maybeAutoStart(members, stats);
     }
 
     function showLobby() {
@@ -669,57 +619,21 @@
       light.state = "red"; light.seq = -1; light.at = Date.now();
       renderLight();
       updateMoveBtn();
-      pingLobby();
       renderLobby();
     }
 
-    function maybeAutoStart(members, stats) {
-      // host-only, ≥2 present, and everyone present is ready → auto-start
-      if (!isHost() || phase !== "lobby") return;
-      const m = members || lobbyMembers();
-      const s = stats || readyStats(m);
-      if (s.total >= 2 && s.ready === s.total) hostStartRound();
-    }
-
-    function setMyReady(v) {
-      myReady = !!v;
-      ready.set(me.handle, myReady);
-      pingLobby();
-      renderLobby();
-    }
-
-    function pingLobby() {
-      if (phase !== "lobby") return;
-      lobbyAt.set(me.handle, Date.now());
-      publish({ t: "lobby", handle: me.handle, name: me.name, ready: myReady });
-    }
-
-    function pruneLobby(now) {
-      if (phase !== "lobby") return;
-      let changed = false;
-      const present = new Set(roster.map(m => m.handle));
-      for (const [h, at] of lobbyAt) {
-        if (h === me.handle) continue;
-        if (!present.has(h) && now - at > LOBBY_STALE_MS) {
-          lobbyAt.delete(h); ready.delete(h); changed = true;
-        }
-      }
-      if (changed) renderLobby();
+    // Host-only auto-start: ≥2 present and everyone ready. (worlds.room is
+    // configured with autoStart:false so we can keep solo from auto-starting.)
+    function maybeAutoStart() {
+      if (!isHost() || phase !== "lobby" || !snap) return;
+      if (snap.total >= 2 && snap.allReady) lobby.start();
     }
 
     // ── Start / enter the live round ─────────────────────────
-    function hostStartRound() {
-      if (!isHost() || phase !== "lobby") return;
-      startSeqSeen += 1;
-      const seq = startSeqSeen;
-      const at = Date.now();
-      publish({ t: "start", seq, at });
-      beginRound(seq);
-    }
-
-    function beginRound(seq) {
+    // Round start now flows through worlds.room: lobby.start() (host) →
+    // onStart fires on every client → beginRound().
+    function beginRound() {
       if (phase === "playing" && !spectating) return;
-      if (typeof seq === "number") startSeqSeen = Math.max(startSeqSeen, seq);
       phase = "playing";
       spectating = false;
       lobbyEl.classList.remove("show");
@@ -834,20 +748,20 @@
 
     function hostScheduleReset() {
       // After a round concludes the host returns everyone to the lobby (rather than
-      // silently looping a fresh round). Ready-state is reset for the new lobby.
+      // silently looping a fresh round). The room's returnToLobby() broadcasts the
+      // transition + resets ready-state for the new lobby on every client.
       if (!isHost()) return;
       if (resetTimer) clearTimeout(resetTimer);
       clearHostLoop();
       resetTimer = setTimeout(() => {
-        publish({ t: "to-lobby" });
-        returnToLobby();
+        if (lobby) lobby.returnToLobby(); // host → fires onReturn everywhere (incl. us)
+        else returnToLobby();
       }, WIN_RESET_MS);
     }
 
     function returnToLobby() {
-      // shared "round over → back to the waiting room" transition (host + peers)
-      myReady = false;
-      ready.clear();
+      // shared "round over → back to the waiting room" transition.
+      // Ready-state is cleared by worlds.room itself; we just rebuild the UI.
       showLobby();
     }
 
@@ -866,9 +780,13 @@
     }
     // Everyone present is eliminated → nobody can win. The host ends the round so
     // it never gets stuck (this is also the single-player "you lost → retry" path).
+    // Roster comes from the worlds.room snapshot.
+    function members() {
+      return (snap && snap.members) || [];
+    }
     function allPresentOut() {
       if (!self.out) return false;
-      for (const m of roster) {
+      for (const m of members()) {
         if (m.handle === me.handle) continue;
         const r = remotes.get(m.handle);
         if (!r || !r.out) return false;   // someone present is still alive (or just joined)
@@ -877,7 +795,7 @@
     }
     function checkRoundEnd() {
       if (isHost() && !winnerName && allPresentOut()) {
-        concludeRound(roster.length > 1 ? "Everyone's out! 🚫" : "You're out! 🚫");
+        concludeRound(members().length > 1 ? "Everyone's out! 🚫" : "You're out! 🚫");
       }
     }
 
@@ -979,7 +897,6 @@
 
       if (phase === "playing" && !spectating) maybeSendPosition(now);
       pruneStale(now);
-      pruneLobby(now);
       draw();
       requestAnimationFrame(tick);
     }
@@ -1153,32 +1070,6 @@
       if (p.cid === clientId) return;     // ignore our own echoes (and our own tabs share handle, dedupe on cid)
 
       switch (p.t) {
-        case "lobby": {
-          // a peer announced their lobby presence + ready state
-          if (!p.handle || p.handle === me.handle) return;
-          ready.set(p.handle, !!p.ready);
-          lobbyAt.set(p.handle, Date.now());
-          if (phase === "lobby") renderLobby();
-          break;
-        }
-        case "to-lobby": {
-          // host signalled the round is over — everyone returns to the waiting room
-          if (phase === "playing") returnToLobby();
-          break;
-        }
-        case "start": {
-          // host kicked off a round — everyone transitions together (monotone).
-          // Also upgrades a just-spectating tab into a participant if a stray light/p
-          // frame raced ahead of this start (same channel, possible on reconnect replay).
-          const seq = typeof p.seq === "number" ? p.seq : startSeqSeen + 1;
-          if (seq < startSeqSeen) return;             // stale start, ignore
-          if (phase === "lobby" || (spectating && seq > startSeqSeen)) {
-            beginRound(seq);
-          } else {
-            startSeqSeen = Math.max(startSeqSeen, seq);
-          }
-          break;
-        }
         case "p": {
           if (!p.handle || p.handle === me.handle) return; // never render our own handle from the wire
           // hearing live position frames means a round is running — late joiners spectate
@@ -1219,22 +1110,28 @@
     }
 
     // ── Presence ─────────────────────────────────────────────
+    // Roster/host/ready are owned by worlds.room. We still listen to the realtime
+    // position channel's presence purely to drop remote *dots* for peers who left
+    // the channel (so eliminated/idle racers don't linger on the track).
     function onPresence(members) {
-      roster = Array.isArray(members)
-        ? members.filter(m => m && m.handle).map(m => ({ handle: m.handle, name: m.name || m.handle }))
-        : [];
-      // drop remote players who left presence
-      const present = new Set(roster.map(m => m.handle));
+      const present = new Set(
+        (Array.isArray(members) ? members : [])
+          .filter(m => m && m.handle).map(m => m.handle)
+      );
       for (const h of [...remotes.keys()]) {
         if (!present.has(h)) remotes.delete(h);
       }
-      // forget ready-state for handles that left the room
-      for (const h of [...ready.keys()]) {
-        if (h !== me.handle && !present.has(h)) { ready.delete(h); lobbyAt.delete(h); }
-      }
-      recomputeHost();
+    }
+
+    // ── Room snapshot → lobby/host/start machinery ────────────
+    function onRoomChange(s) {
+      snap = s;
+      renderHostPill();
       updatePlayerCount();
-      if (phase === "lobby") renderLobby();
+      if (phase === "lobby") {
+        renderLobby();
+        maybeAutoStart();
+      }
     }
 
     // ── Boot ─────────────────────────────────────────────────
@@ -1256,9 +1153,9 @@
     window.addEventListener("blur", () => release());
     document.addEventListener("visibilitychange", () => { if (document.hidden) release(); });
 
-    // lobby controls
-    readyBtn.addEventListener("click", () => setMyReady(!myReady));
-    startBtn.addEventListener("click", () => hostStartRound());
+    // lobby controls — ready/start now flow through worlds.room
+    readyBtn.addEventListener("click", () => { if (lobby) lobby.toggleReady(); });
+    startBtn.addEventListener("click", () => { if (lobby) lobby.start(); });
     inviteLink.textContent = location.href;
     copyBtn.addEventListener("click", async () => {
       try {
@@ -1274,9 +1171,6 @@
       }
     });
 
-    // keep our lobby presence/ready fresh so peers never see us go stale
-    setInterval(() => { if (phase === "lobby") pingLobby(); }, LOBBY_PING_MS);
-
     resize();
     requestAnimationFrame(tick);
 
@@ -1291,12 +1185,27 @@
         me.name = "guest";
       }
 
-      recomputeHost();
-      updatePlayerCount();
-
+      // realtime channel: positions + host-driven light state (NOT ready/host)
       room = worlds.ws.channel(CHANNEL);
       room.subscribe(onMessage);
       room.presence(onPresence);
+
+      // worlds.room owns the ready/host/roster handshake. autoStart:false so a
+      // solo host doesn't auto-launch; we drive auto-start (≥2 + all ready) below.
+      lobby = worlds.room(ROOM, {
+        me: { handle: me.handle, name: me.name },
+        minPlayers: 1,
+        autoStart: false,
+        onChange: onRoomChange,
+        onStart:  () => beginRound(),
+        onReturn: () => returnToLobby(),
+      });
+
+      try { snap = await lobby.opened; } catch (_) {}
+      if (snap) onRoomChange(snap);
+
+      updatePlayerCount();
+      renderHostPill();
 
       // land in the waiting room, not a live round
       showLobby();
