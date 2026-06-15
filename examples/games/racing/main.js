@@ -1426,18 +1426,18 @@ function pruneRemotes(now) {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-// MULTIPLAYER — ws channel "race" (realtime poses only)
-//   pose message: { cid, t:"pose", handle, name, x, y, z, ry, speed, color }
-//                 (y is additive; old peers omitting it still work)
-// Ready / host / start no longer ride this channel — they live in worlds.room.
+// MULTIPLAYER — poses over worlds.actors("race"), one zone (the whole track).
+//   Each racer publishes ONE last-value pose; the server snapshots it to joiners
+//   and rate-caps the fan-out (no hand-rolled pose channel). Ready / host / start
+//   live in worlds.room (the lobby), NOT on the pose.
+//   actor state: { handle, name, x, y, z, ry, speed, color }
 // ───────────────────────────────────────────────────────────────────────────
-let room = null;
+let net = null; // worlds.actors handle
 let lastSendAt = 0;
+const cidToHandle = new Map(); // actor id -> handle, to map a leave back to its kart
 
 function buildPosePayload() {
   return {
-    cid: clientId,
-    t: "pose",
     handle: me.handle,
     name: me.name,
     x: round3(player.pos.x),
@@ -1450,41 +1450,35 @@ function buildPosePayload() {
 }
 
 function publishPose() {
-  if (!room) return;
+  if (!net) return;
   try {
-    room.publish(buildPosePayload());
+    net.set(buildPosePayload());
   } catch (_) {
     /* SDK buffers / reconnects */
   }
 }
 
 function maybeSendPose(now) {
-  if (!room) return;
+  if (!net) return;
   if (now - lastSendAt < 1000 / SEND_HZ) return;
   lastSendAt = now;
   publishPose();
 }
 
-function onPose(msg) {
-  const p = msg && msg.payload;
+// worlds.actors onChange — a peer (id = its stable cid) created or updated its pose.
+function onActor(cid, p) {
   if (!p || typeof p !== "object") return;
-  if (p.cid === clientId) return; // our own echo
-  if (p.t !== "pose") return; // ignore anything that isn't a kart pose
-  const handle = p.handle || (msg.from && msg.from.handle);
+  const handle = p.handle;
   if (!handle || handle === me.handle) return; // never render our own handle
-  const cid = typeof p.cid === "string" ? p.cid : null;
-  const name = typeof p.name === "string" ? p.name : (msg.from && msg.from.name) || handle;
+  const name = typeof p.name === "string" ? p.name : handle;
   const colorHex = typeof p.color === "number" ? p.color : colorForHandle(handle);
 
+  cidToHandle.set(cid, handle); // map this actor id back to its kart for onLeave
+
   const r = ensureRemote(handle, name, colorHex, cid);
-  // DEDUP: if this pose is from a different clientId than the one we have, the
-  // person renamed / reconnected / opened a new tab — take over this single
-  // kart rather than spawning a second. Reset interpolation owner.
-  if (cid && r.cid && r.cid !== cid) {
-    r.cid = cid;
-  } else if (cid && !r.cid) {
-    r.cid = cid;
-  }
+  // One kart per handle: the latest cid to send for a handle (rename / reconnect /
+  // new tab) takes ownership, so a leave from an OLD cid won't yank the kart.
+  r.cid = cid;
   // live name update on rename
   if (r.name !== name) {
     r.name = name;
@@ -1520,14 +1514,15 @@ function onPose(msg) {
   updateRacerCount();
 }
 
-function onPresence(members) {
-  if (!Array.isArray(members)) return;
-  // Despawn kart meshes for anyone who left the pose channel. Lobby roster /
-  // ready bookkeeping is handled by worlds.room, not here.
-  const present = new Set(members.map((m) => m && m.handle).filter(Boolean));
-  for (const h of [...remotes.keys()]) {
-    if (!present.has(h)) removeRemote(h);
-  }
+// worlds.actors onLeave — a peer's cid disconnected. Drop its kart if that cid
+// still owns it (a newer cid may have taken over). Roster lives in worlds.room.
+function onActorLeave(cid) {
+  const handle = cidToHandle.get(cid);
+  cidToHandle.delete(cid);
+  if (!handle) return;
+  const r = remotes.get(handle);
+  if (!r || r.cid !== cid) return;
+  removeRemote(handle);
   updateRacerCount();
 }
 
@@ -1813,12 +1808,12 @@ resize();
   updateHud();
   updateRacerCount();
 
-  // realtime pose feed (positions only — ready/host/start live in worlds.room)
+  // realtime pose feed over worlds.actors (positions only — ready/host/start live in worlds.room)
   try {
-    room = worlds.ws.channel(CHANNEL);
-    room.subscribe(onPose);
-    room.presence(onPresence);
-    // announce our presence immediately so peers spawn us before first throttle tick
+    net = worlds.actors(CHANNEL, { rate: SEND_HZ });
+    net.onChange(onActor);
+    net.onLeave(onActorLeave);
+    // announce ourselves immediately so peers spawn us before the first throttle tick
     publishPose();
   } catch (_) {
     /* still drivable solo */
