@@ -840,6 +840,14 @@ function makeLabel(text) {
   sprite.renderOrder = 10;
   return sprite;
 }
+// A transient "📣" bubble over a kart — the visual for a horn EVENT (worlds.actors `send`).
+function honkOver(mesh) {
+  if (!mesh) return;
+  const s = makeLabel("honk! 📣");
+  s.position.y = 3.7;
+  mesh.add(s);
+  setTimeout(() => { mesh.remove(s); s.material.map?.dispose(); s.material.dispose(); }, 1100);
+}
 const _lblV = new THREE.Vector3();
 function scaleLabel(sprite) {
   if (!sprite || !sprite.userData.baseW) return;
@@ -970,6 +978,7 @@ const KEYMAP = {
 addEventListener(
   "keydown",
   (e) => {
+    if (e.key === "h" || e.key === "H") { honk(); return; } // 📣 horn — actors event demo
     const k = KEYMAP[e.key];
     if (k) {
       input[k] = true;
@@ -1532,6 +1541,23 @@ function updateRacerCount() {
   dom.racerS.textContent = n === 1 ? "" : "s";
 }
 
+// Horn — a discrete one-off EVENT over worlds.actors (`send`/`onEvent`), distinct from
+// the streamed pose state. Shown as a "📣" bubble above the honking kart.
+function onActorEvent(cid, payload) {
+  if (!payload || payload.t !== "horn") return;
+  const handle = cidToHandle.get(cid);
+  const r = handle && remotes.get(handle);
+  if (r) honkOver(r.mesh);
+}
+let lastHorn = 0;
+function honk() {
+  const now = performance.now();
+  if (now - lastHorn < 500) return; // rate-limit spam
+  lastHorn = now;
+  if (net) try { net.send({ t: "horn" }); } catch (_) {}
+  honkOver(player.mesh); // optimistic: see your own honk immediately
+}
+
 // ───────────────────────────────────────────────────────────────────────────
 // LEADERBOARD — persistent db collection "leaderboard"
 //   one doc per handle: { handle, name, best_ms }
@@ -1813,6 +1839,7 @@ resize();
     net = worlds.actors(CHANNEL, { rate: SEND_HZ });
     net.onChange(onActor);
     net.onLeave(onActorLeave);
+    net.onEvent(onActorEvent);
     // announce ourselves immediately so peers spawn us before the first throttle tick
     publishPose();
   } catch (_) {
