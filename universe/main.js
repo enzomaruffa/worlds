@@ -1077,6 +1077,7 @@ function buildBelt() {
   const beltR = 70;
   for (const name of ["meteor", "meteor_detailed"]) {
     const matrices = [];
+    const beltGroup = new THREE.Group();
     for (let i = 0; i < 70; i++) {
       const a = rng() * 6.283;
       const r = beltR + (rng() - 0.5) * 9;
@@ -1084,8 +1085,8 @@ function buildBelt() {
       const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(rng() * 6, rng() * 6, rng() * 6));
       const s = new THREE.Vector3().setScalar(0.4 + rng() * 1.3);
       matrices.push(new THREE.Matrix4().compose(p, q, s));
+      beltRocks.push({ group: beltGroup, local: p.clone(), r: s.x * 0.95 }); // collidable
     }
-    const beltGroup = new THREE.Group();
     instancedFromGLB(ASSETS[name], matrices, beltGroup);
     beltGroup.userData.spin = name === "meteor" ? 0.012 : 0.009;
     belts.push(beltGroup);
@@ -1093,15 +1094,14 @@ function buildBelt() {
   }
   // a couple of crystal rocks drifting closer in
   const matrices = [];
+  const rocks = new THREE.Group();
   for (let i = 0; i < 6; i++) {
     const a = rng() * 6.283, r = 48 + rng() * 8;
-    matrices.push(new THREE.Matrix4().compose(
-      new THREE.Vector3(Math.cos(a) * r, (rng() - 0.5) * 10, Math.sin(a) * r),
-      new THREE.Quaternion().setFromEuler(new THREE.Euler(rng() * 6, rng() * 6, rng() * 6)),
-      new THREE.Vector3().setScalar(1.2 + rng()),
-    ));
+    const p = new THREE.Vector3(Math.cos(a) * r, (rng() - 0.5) * 10, Math.sin(a) * r);
+    const s = new THREE.Vector3().setScalar(1.2 + rng());
+    matrices.push(new THREE.Matrix4().compose(p, new THREE.Quaternion().setFromEuler(new THREE.Euler(rng() * 6, rng() * 6, rng() * 6)), s));
+    beltRocks.push({ group: rocks, local: p.clone(), r: s.x * 1.15 });
   }
-  const rocks = new THREE.Group();
   instancedFromGLB(ASSETS.rock_crystalsLargeA, matrices, rocks);
   rocks.userData.spin = -0.006;
   belts.push(rocks);
@@ -1113,6 +1113,7 @@ function buildBelt() {
   scene.add(mothership);
 }
 const belts = [];
+const beltRocks = []; // {group, local, r} — the individual rocks the ship can bump into
 let mothership = null;
 
 const TRAIL_N = 90;
@@ -2115,7 +2116,7 @@ const _pq = new THREE.Quaternion(), _back = new THREE.Vector3();
 // per-frame scratch — reused every tick so the render loop allocates nothing
 const _euler = new THREE.Euler(0, 0, 0, "YXZ"), _quat = new THREE.Quaternion();
 const _accel = new THREE.Vector3(), _to = new THREE.Vector3(), _push = new THREE.Vector3(), _collTmp = new THREE.Vector3();
-const _goal = new THREE.Vector3(), _engTmp = new THREE.Vector3(), _tmpv = new THREE.Vector3();
+const _goal = new THREE.Vector3(), _engTmp = new THREE.Vector3(), _tmpv = new THREE.Vector3(), _rockPos = new THREE.Vector3();
 function tick() {
   const dt = Math.min(clock.getDelta(), 0.05);
   uTime.value = clock.elapsedTime;
@@ -2206,7 +2207,9 @@ function tick() {
       goal = _goal.copy(flyTarget.position).add(flyTarget.offset);
     } else {
       const br = flyTarget.userData.bodyR ?? 6;
-      goal = _goal.set(flyTarget.position.x, flyTarget.position.y + br * 0.5, flyTarget.position.z + br + shipRadius + 10);
+      // vantage on the side of the world facing us right now → closest approach, no orbiting around it
+      goal = _goal.subVectors(ship.position, flyTarget.position).normalize().multiplyScalar(br + shipRadius + 10).add(flyTarget.position);
+      goal.y += br * 0.35;
     }
     const k = flyFTL ? 2.7 : 1.6; // FTL jumps cross fast but last ~2s so the hyperspace reads; short glides stay gentle
     ship.position.lerp(goal, 1 - Math.exp(-k * dt));
@@ -2216,7 +2219,9 @@ function tick() {
     // frozen hold: keep a vantage just off the world, no gravity/drift, facing it,
     // until the pilot dives in ("walk"), closes the card, or thrusts away.
     const br = focusTarget.userData.bodyR ?? 6;
-    const goal = _goal.set(focusTarget.position.x, focusTarget.position.y + br * 0.5, focusTarget.position.z + br + shipRadius + 10);
+    // hold the same near-side vantage; recomputed from our position so it never swings around
+    const goal = _goal.subVectors(ship.position, focusTarget.position).normalize().multiplyScalar(br + shipRadius + 10).add(focusTarget.position);
+    goal.y += br * 0.35;
     ship.position.lerp(goal, 1 - Math.exp(-3 * dt));
     vel.multiplyScalar(Math.exp(-6 * dt));
   } else if (following && pilots.get(following) && !thrust) {
@@ -2284,6 +2289,18 @@ function tick() {
     };
     for (const b of starBodies) resolve(b.pos, b.r * 1.1 + shipRadius);
     for (const g of planets.values()) resolve(g.position, g.userData.bodyR + shipRadius);
+    // asteroid belt: bump off individual rocks while flying through the field (the belt
+    // rings the origin ~r48–79). Culled to when you're actually inside the band, and
+    // skipped mid-FTL so a jump isn't yanked out of warp by a pebble.
+    if (!flyTarget) {
+      const dO = Math.hypot(ship.position.x, ship.position.z);
+      if (dO > 36 && dO < 88 && Math.abs(ship.position.y) < 18) {
+        for (const rk of beltRocks) {
+          _rockPos.copy(rk.local).applyAxisAngle(_Y, rk.group.rotation.y);
+          resolve(_rockPos, rk.r + shipRadius);
+        }
+      }
+    }
   }
   // shield shimmers as it absorbs the cushion; only a real surface hit shakes + thuds (gently now)
   if (shieldMesh && softHit > 0.001) shieldMesh.material.uniforms.uHit.value = Math.max(shieldMesh.material.uniforms.uHit.value, softHit);
