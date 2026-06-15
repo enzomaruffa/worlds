@@ -82,11 +82,17 @@ await worlds.uploads.delete("photo.jpg");
 
 ## Realtime channels — `worlds.ws`
 
+A **stateless topic broadcast**: publish an event to a named channel, everyone
+subscribed gets it. No per-member state, no zones — just fan-out. Reach for it for
+chat, drawing strokes, buzzers, reactions, announcements. (For per-member *state*
+that persists between frames — poses, cursors, "who's near me" — use `worlds.actors`;
+for one shared authoritative doc + a roster, use `worlds.room`.)
+
 ```js
 const ch = worlds.ws.channel("cursors");
-ch.publish({ x, y });                       // ≤16KB JSON
+ch.publish({ x, y });                       // ≤16KB JSON, fire-and-forget
 const stop = ch.subscribe(msg => { /* {payload, from: {handle, name}, at} */ });
-ch.presence(list => { /* [{handle, name}] */ });
+ch.presence(list => { /* [{handle, name}] currently on this channel */ });
 ```
 
 ## Rooms — `worlds.room` / `worlds.rooms`
