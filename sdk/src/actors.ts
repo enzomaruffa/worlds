@@ -24,6 +24,7 @@ export interface ActorsOptions<T = any> {
   zone?: string | number; // a fixed zone if you don't vary it per-state
   rate?: number; // server flush Hz, 1..20 (default 15) — set by the first member
   metadata?: Record<string, any>; // initial per-member metadata
+  observer?: boolean; // watch a zone read-only — invisible to peers (set/send become no-ops)
 }
 
 export interface ActorRecord<T = any> {
@@ -87,7 +88,7 @@ export function actors<T = any>(name: string, opts: ActorsOptions<T> = {}): Acto
   }
 
   const stopSub = sock.subscribe(
-    { op: "sub", kind: "actors", channel: name, zone, cid, rate: opts.rate, meta: opts.metadata },
+    { op: "sub", kind: "actors", channel: name, zone, cid, rate: opts.rate, meta: opts.metadata, observer: opts.observer },
     () => { /* actors deliver via the on* hooks below, not the plain handler */ },
     {
       // A snapshot is the authoritative in-zone set (on join AND on zone switch), so
@@ -108,16 +109,16 @@ export function actors<T = any>(name: string, opts: ActorsOptions<T> = {}): Acto
 
   return {
     set(state: T): void {
-      if (stopped) return;
+      if (stopped || opts.observer) return; // observers are read-only
       if (opts.zoneKey) zone = String(opts.zoneKey(state));
       sock.send({ op: "set", id: "set", channel: name, cid, state, zone });
     },
     setMetadata(patch: Record<string, any>): void {
-      if (stopped || !patch) return;
+      if (stopped || opts.observer || !patch) return;
       sock.send({ op: "ameta", id: "ameta", channel: name, cid, meta: patch });
     },
     send(payload: any): void {
-      if (stopped) return;
+      if (stopped || opts.observer) return;
       sock.send({ op: "aevent", id: "aevent", channel: name, cid, payload });
     },
     others: () => [...states.values()],

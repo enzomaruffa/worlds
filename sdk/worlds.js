@@ -961,7 +961,7 @@
         emitChange(rec);
       }
     }
-    const stopSub = sock.subscribe({ op: "sub", kind: "actors", channel: name, zone, cid, rate: opts.rate, meta: opts.metadata }, () => {}, {
+    const stopSub = sock.subscribe({ op: "sub", kind: "actors", channel: name, zone, cid, rate: opts.rate, meta: opts.metadata, observer: opts.observer }, () => {}, {
       onSnapshot: (list) => {
         const keep = new Set((list || []).map((a) => a && a.id).filter(Boolean));
         for (const peer of [...states.keys()])
@@ -986,19 +986,19 @@
     });
     return {
       set(state) {
-        if (stopped)
+        if (stopped || opts.observer)
           return;
         if (opts.zoneKey)
           zone = String(opts.zoneKey(state));
         sock.send({ op: "set", id: "set", channel: name, cid, state, zone });
       },
       setMetadata(patch) {
-        if (stopped || !patch)
+        if (stopped || opts.observer || !patch)
           return;
         sock.send({ op: "ameta", id: "ameta", channel: name, cid, meta: patch });
       },
       send(payload) {
-        if (stopped)
+        if (stopped || opts.observer)
           return;
         sock.send({ op: "aevent", id: "aevent", channel: name, cid, payload });
       },

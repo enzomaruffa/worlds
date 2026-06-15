@@ -33,6 +33,7 @@ interface ActorEntry {
   meta: Record<string, unknown>; // infrequent per-member metadata (team, level, status…)
   stateDirty: boolean; // state changed since the last flush
   metaDirty: boolean; // metadata changed since the last flush
+  observer: boolean; // watches the zone but is invisible to peers (no state/events/leave)
 }
 interface ActorRoom {
   members: Map<string, ActorEntry>; // cid -> entry
@@ -115,7 +116,7 @@ function sendActorSnapshot(ws: WS, key: string, subId: string, zone: string, sel
   if (!room) return;
   const actors = [];
   for (const e of room.members.values()) {
-    if (e.cid === selfCid || e.zone !== zone) continue;
+    if (e.cid === selfCid || e.zone !== zone || e.observer) continue; // observers are invisible
     if (e.state === undefined && !hasKeys(e.meta)) continue; // nothing to show yet
     const a: Record<string, unknown> = { id: e.cid, handle: e.who.handle, name: e.who.name };
     if (e.state !== undefined) a.state = e.state;
@@ -146,7 +147,7 @@ function flushActorRoom(key: string): void {
   if (!room) return;
   const dirtyByZone = new Map<string, ActorEntry[]>();
   for (const e of room.members.values()) {
-    if (!e.stateDirty && !e.metaDirty) continue;
+    if (e.observer || (!e.stateDirty && !e.metaDirty)) continue; // observers emit nothing
     let arr = dirtyByZone.get(e.zone);
     if (!arr) dirtyByZone.set(e.zone, (arr = []));
     arr.push(e);
@@ -183,9 +184,10 @@ function dropActor(ws: WS, key: string, cid: string): void {
   const room = actorRooms.get(key);
   if (!room) return;
   const e = room.members.get(cid);
-  if (!e || e.ws !== ws) return;
+  if (!e || e.ws !== ws) return; // observers ARE dropped on disconnect — just not announced
+  const wasObserver = e.observer;
   room.members.delete(cid);
-  notifyZoneLeave(key, e.zone, cid);
+  if (!wasObserver) notifyZoneLeave(key, e.zone, cid); // peers never saw an observer
   if (room.members.size === 0) {
     if (room.timer) clearInterval(room.timer);
     actorRooms.delete(key);
@@ -244,8 +246,9 @@ async function handleSub(ws: WS, id: string, frame: Record<string, unknown>): Pr
       room = { members: new Map(), rate, timer: null };
       actorRooms.set(key, room);
     }
-    const meta = frame.meta && typeof frame.meta === "object" ? (frame.meta as Record<string, unknown>) : {};
-    room.members.set(cid, { ws, cid, who: ws.data.who, zone, state: undefined, meta, stateDirty: false, metaDirty: hasKeys(meta) });
+    const observer = frame.observer === true;
+    const meta = !observer && frame.meta && typeof frame.meta === "object" ? (frame.meta as Record<string, unknown>) : {};
+    room.members.set(cid, { ws, cid, who: ws.data.who, zone, state: undefined, meta, stateDirty: false, metaDirty: hasKeys(meta), observer });
     ensureActorTimer(key);
     ws.send(JSON.stringify({ op: "ack", id }));
     sendActorSnapshot(ws, key, id, zone, cid); // instant last-value snapshot of the zone
@@ -268,7 +271,7 @@ function handleSet(ws: WS, frame: Record<string, unknown>): void {
   const room = actorRooms.get(key);
   if (!room) return; // not subscribed (or a stale race) — ignore
   const e = room.members.get(cid);
-  if (!e || e.ws !== ws) return; // only your own entry, on your own socket
+  if (!e || e.ws !== ws || e.observer) return; // your own entry only; observers are read-only
   const newZone = typeof frame.zone === "string" ? frame.zone : e.zone;
   e.state = frame.state;
   if (newZone !== e.zone) {
@@ -293,7 +296,7 @@ function handleSetMeta(ws: WS, frame: Record<string, unknown>): void {
   }
   const room = actorRooms.get(presenceKey(ws.data.site, String(frame.channel ?? "")));
   const e = room && room.members.get(cid);
-  if (!e || e.ws !== ws) return;
+  if (!e || e.ws !== ws || e.observer) return;
   e.meta = { ...e.meta, ...patch };
   e.metaDirty = true;
 }
@@ -311,7 +314,7 @@ function handleActorEvent(ws: WS, frame: Record<string, unknown>): void {
   const key = presenceKey(ws.data.site, String(frame.channel ?? ""));
   const room = actorRooms.get(key);
   const e = room && room.members.get(cid);
-  if (!e || e.ws !== ws) return;
+  if (!e || e.ws !== ws || e.observer) return;
   const from = { id: cid, handle: e.who.handle, name: e.who.name };
   for (const peer of room.members.values()) {
     if (peer.cid === cid || peer.zone !== e.zone) continue;
