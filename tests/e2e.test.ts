@@ -389,6 +389,86 @@ describe("realtime", () => {
   });
 });
 
+describe("realtime actors", () => {
+  const mk = () => new WebSocket(`ws://localhost:${PORT}/api/v1/socket`, "worlds.v1");
+  const opened = (w: WebSocket) => new Promise<void>((r) => (w.onopen = () => r()));
+  const sub = (w: WebSocket, id: string, cid: string, zone: string, ch = "arena") =>
+    w.send(JSON.stringify({ op: "sub", id, kind: "actors", channel: ch, zone, cid }));
+  const set = (w: WebSocket, cid: string, state: unknown, zone: string, ch = "arena") =>
+    w.send(JSON.stringify({ op: "set", id: "set", channel: ch, cid, state, zone }));
+  const waitFor = (w: WebSocket, pred: (f: any) => boolean, ms = 3000) =>
+    new Promise<any>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("actors frame not seen in time")), ms);
+      w.onmessage = (m) => {
+        const f = JSON.parse(String(m.data));
+        if (pred(f)) { clearTimeout(timer); resolve(f); }
+      };
+    });
+
+  test("a joiner gets an in-zone last-value snapshot of existing members", async () => {
+    const a = mk(), b = mk();
+    await Promise.all([opened(a), opened(b)]);
+    sub(a, "a1", "A", "z1");
+    await Bun.sleep(80);
+    set(a, "A", { hp: 7 }, "z1");
+    await Bun.sleep(80);
+    const snapP = waitFor(b, (f) => f.op === "actors_snapshot");
+    sub(b, "b1", "B", "z1");
+    const snap = await snapP;
+    a.close(); b.close();
+    expect(snap.actors.length).toBe(1);
+    expect(snap.actors[0].id).toBe("A");
+    expect(snap.actors[0].state.hp).toBe(7);
+    expect(snap.actors[0].handle).toBe("dev"); // profile-resolved identity, like channels
+  });
+
+  test("a set is coalesced and flushed to same-zone peers", async () => {
+    const a = mk(), b = mk();
+    await Promise.all([opened(a), opened(b)]);
+    sub(b, "b1", "B", "z1");
+    sub(a, "a1", "A", "z1");
+    await Bun.sleep(80);
+    const updP = waitFor(b, (f) => f.op === "actors" && f.updates.some((u: any) => u.id === "A"));
+    set(a, "A", { n: 1 }, "z1");
+    set(a, "A", { n: 5 }, "z1"); // coalesces — only the latest is delivered
+    const upd = await updP;
+    a.close(); b.close();
+    const mine = upd.updates.find((u: any) => u.id === "A");
+    expect(mine.state.n).toBe(5);
+  });
+
+  test("interest management: updates never cross zones", async () => {
+    const a = mk(), c = mk();
+    await Promise.all([opened(a), opened(c)]);
+    sub(a, "a1", "A", "z1");
+    sub(c, "c1", "C", "z2"); // different zone
+    await Bun.sleep(80);
+    let leaked = false;
+    c.onmessage = (m) => {
+      const f = JSON.parse(String(m.data));
+      if (f.op === "actors" && f.updates.some((u: any) => u.id === "A")) leaked = true;
+    };
+    set(a, "A", { n: 9 }, "z1");
+    await Bun.sleep(400); // several 15Hz flush ticks
+    a.close(); c.close();
+    expect(leaked).toBe(false);
+  });
+
+  test("a disconnect notifies same-zone peers via actors_leave", async () => {
+    const a = mk(), b = mk();
+    await Promise.all([opened(a), opened(b)]);
+    sub(a, "a1", "A", "z1");
+    set(a, "A", { x: 1 }, "z1");
+    sub(b, "b1", "B", "z1");
+    await Bun.sleep(120);
+    const leftP = waitFor(b, (f) => f.op === "actors_leave" && (f.ids || []).includes("A"));
+    a.close();
+    const left = await leftP;
+    b.close();
+    expect(left.ids).toContain("A");
+  });
+});
+
 describe("mcp", () => {
   const rpc = (method: string, params: unknown, id: number | null = 1) =>
     req("POST", "/mcp", { body: { jsonrpc: "2.0", id, method, params } });
