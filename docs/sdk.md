@@ -176,6 +176,38 @@ roster into the directory and heartbeats it; rooms whose host goes quiet for
 `ttlMs` (default 45s) are swept, so the list self-heals after crashes and closed
 tabs.
 
+## Realtime actors — `worlds.actors`
+
+The realtime tier for per-member **live state** — poses, cursors, ship positions —
+beside `worlds.ws` (ephemeral events) and `worlds.room` (one authoritative doc).
+Each member publishes ONE last-value state with `set`; the server keeps it and fans
+it out **only to same-zone peers**, **batched** at a fixed flush rate. That turns the
+per-tick `O(N²)` fan-out of raw channels into `O(N · zone)`, so a crowd scales. You
+also get an instant **snapshot on join** (a fresh player sees everyone immediately,
+not a blank screen) and a server-enforced rate cap (no client can melt a room by
+publishing faster). Use this instead of hand-rolling pose channels with adaptive
+send-rates.
+
+```js
+const net = worlds.actors("race", {
+  zoneKey: (s) => s.cell,   // interest zone derived from state — same zone = see each other
+  rate: 15,                 // server flush Hz, 1..20 (default 15; the first member sets it)
+});
+
+net.set({ x, y, z, cell });                          // publish MY state (zone via zoneKey)
+net.onChange((id, state, meta) => draw(id, state));  // a peer in my zone created/updated
+net.onLeave((id) => remove(id));                     // a peer left my zone or disconnected
+net.others();                                        // [{ id, handle, name, state }] in my zone
+net.stop();                                          // unsubscribe + drop listeners
+```
+
+`id` is the peer's stable per-tab id (`worlds.id()`); `meta` carries `{id, handle, name}`.
+A **zone** is any string you derive from state — make it **spatial** (a grid cell)
+and you sync only nearby peers no matter how many people are connected. `set` is
+fire-and-forget at frame rate; the server coalesces multiple sets between flushes to
+the latest, so just call it every frame. State is ephemeral (≤16KB) — keep anything
+that must survive a reload in `worlds.db` / `worlds.room`.
+
 ## Utility building blocks
 
 Small things every multiplayer/collab site re-implements — included so you don't:
