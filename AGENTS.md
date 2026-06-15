@@ -32,7 +32,7 @@ The 30-second version:
 - `worlds.notify.slack(channel,text)`
 - **`worlds.room(name,opts)`** — ONE shared room: roster/host/ready/auto-start **+** optional authoritative state (`initial`); a waiting room is just a room with no `initial`
 - **`worlds.rooms(name,opts)`** — MANY concurrent rooms: a lobby browser with private join codes (`list/onList/create/join/joinByCode/leave`), each handing back a `worlds.room`
-- **`worlds.actors(name,{zoneKey,rate,metadata})`** — per-member presence: live **state** (`set`, coalesced + rate-capped + snapshot-on-join), **metadata** (`setMetadata`), one-off **events** (`send`/`onEvent`) — all zone-interest-managed. Reach for this (not a raw pose channel) when many players move at once.
+- **`worlds.actors(name,{zoneKey,rate,metadata,observer})`** — per-member presence: live **state** (`set`, coalesced + rate-capped + snapshot-on-join), **metadata** (`setMetadata`), one-off **events** (`send`/`onEvent`), and read-only **observers** — all zone-interest-managed. Reach for this (not a raw pose channel) when many players move at once.
 - building blocks: `worlds.id() colorFor() uniqByHandle() esc() countdown() toast()` + an auto "leave" pill
 
 **Read the docs, don't guess method names** — the surface is small and stable:
@@ -76,7 +76,7 @@ any site), heavy/long compute, scheduled jobs, public webhooks. Point those at a
 - **trivia** — `worlds.rooms` (concurrent quizzes) + `worlds.ai` quiz generation + host-driven phases.
 - **tumble** — `worlds.actors` (spatial zones) + `worlds.room` (global level clock) + `worlds.db`
   leaderboard: an endless, synchronized, lobby-less three.js gauntlet for unbounded players.
-- **racing** — full three.js 3D; `worlds.room` lobby (ready/host/start) + pose sync over `worlds.actors`.
+- **racing** — full three.js 3D; `worlds.room` lobby (ready/host/start) + pose **state** over `worlds.actors`, plus a press-**H** horn via actor **events** (`send`/`onEvent`).
 - **red-light / paint-arena** — single `worlds.room` ready-up + `worlds.ws` realtime
   (paint-arena keeps its own palette colors on purpose).
 - **draw-guess** — multiple ws channels + db. **hangout / quick-poll** — db + subscribe tools.

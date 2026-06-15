@@ -197,6 +197,7 @@ const net = worlds.actors("race", {
   zoneKey: (s) => s.cell,    // interest zone from state — same zone = see each other
   rate: 15,                  // server flush Hz, 1..20 (default 15; the first member sets it)
   metadata: { team: "a" },   // optional initial per-member metadata
+  // observer: true,         // watch a zone read-only — invisible to peers (replays, leaderboards, mod tools)
 });
 
 net.set({ x, y, cell });                          // frame STATE (zone via zoneKey)
@@ -214,7 +215,10 @@ derive from state — make it **spatial** (a grid cell) and you sync only nearby
 no matter how many connect. `set` is fire-and-forget at frame rate (coalesced to the
 latest between flushes); `setMetadata` merges and rides the same flush; `send` is
 delivered immediately, never stored. All three payloads are ephemeral (≤16KB each) —
-keep anything that must survive a reload in `worlds.db` / `worlds.room`.
+keep anything that must survive a reload in `worlds.db` / `worlds.room`. Pass
+`observer: true` to watch a zone read-only — you still get snapshots/updates/events
+but stay invisible to peers and your `set`/`send` are no-ops (replays, leaderboards,
+moderation). The racing example uses `send`/`onEvent` for a press-**H** horn.
 
 ### Which realtime primitive?
 
