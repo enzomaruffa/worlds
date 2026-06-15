@@ -467,6 +467,55 @@ describe("realtime actors", () => {
     b.close();
     expect(left.ids).toContain("A");
   });
+
+  test("metadata: setMetadata merges and flushes to in-zone peers", async () => {
+    const a = mk(), b = mk();
+    await Promise.all([opened(a), opened(b)]);
+    sub(b, "b1", "B", "z1");
+    sub(a, "a1", "A", "z1");
+    await Bun.sleep(80);
+    const updP = waitFor(b, (f) => f.op === "actors" && f.updates.some((u: any) => u.id === "A" && u.meta));
+    a.send(JSON.stringify({ op: "ameta", id: "ameta", channel: "arena", cid: "A", meta: { team: "red", level: 3 } }));
+    const upd = await updP;
+    a.close(); b.close();
+    const mine = upd.updates.find((u: any) => u.id === "A");
+    expect(mine.meta.team).toBe("red");
+    expect(mine.meta.level).toBe(3);
+  });
+
+  test("metadata: a joiner's snapshot includes existing metadata (even with no state)", async () => {
+    const a = mk(), b = mk();
+    await Promise.all([opened(a), opened(b)]);
+    a.send(JSON.stringify({ op: "sub", id: "a1", kind: "actors", channel: "arena", zone: "z9", cid: "A", meta: { color: "#f00" } }));
+    await Bun.sleep(80);
+    const snapP = waitFor(b, (f) => f.op === "actors_snapshot");
+    sub(b, "b1", "B", "z9");
+    const snap = await snapP;
+    a.close(); b.close();
+    const ra = snap.actors.find((x: any) => x.id === "A");
+    expect(ra).toBeTruthy();
+    expect(ra.meta.color).toBe("#f00");
+  });
+
+  test("events: send() reaches same-zone peers but never crosses zones", async () => {
+    const a = mk(), b = mk(), c = mk();
+    await Promise.all([opened(a), opened(b), opened(c)]);
+    sub(a, "a1", "A", "z1");
+    sub(b, "b1", "B", "z1");
+    sub(c, "c1", "C", "z2"); // different zone
+    await Bun.sleep(80);
+    let cGot = false;
+    c.onmessage = (m) => { if (JSON.parse(String(m.data)).op === "actor_event") cGot = true; };
+    const evP = waitFor(b, (f) => f.op === "actor_event" && f.from.id === "A");
+    a.send(JSON.stringify({ op: "aevent", id: "aevent", channel: "arena", cid: "A", payload: { t: "horn", n: 7 } }));
+    const ev = await evP;
+    await Bun.sleep(250); // give any cross-zone leak time to (not) arrive
+    a.close(); b.close(); c.close();
+    expect(ev.payload.t).toBe("horn");
+    expect(ev.payload.n).toBe(7);
+    expect(ev.from.handle).toBe("dev");
+    expect(cGot).toBe(false);
+  });
 });
 
 describe("mcp", () => {
