@@ -120,6 +120,7 @@ main {
   padding: 12px;
   min-height: 0;
 }
+main.hidden { display: none; }
 .left {
   display: flex;
   flex-direction: column;
@@ -389,6 +390,74 @@ main {
 }
 .banner.hidden { display: none; }
 
+/* ---------- tables browser (lobby of many rooms) ---------- */
+#screenTables {
+  flex: 1;
+  display: none;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 24px 16px 40px;
+}
+#screenTables.show { display: flex; }
+.tables-inner {
+  width: 100%;
+  max-width: 640px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.tables-card {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  padding: 18px;
+}
+.tables-card h2 { margin: 0 0 4px; font-size: 20px; letter-spacing: -0.01em; }
+.tables-card .hint { color: var(--muted); font-size: 13px; margin: 0 0 16px; line-height: 1.5; }
+.tablelist { list-style: none; margin: 0 0 16px; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.tablerow {
+  display: flex; align-items: center; gap: 12px;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 11px; padding: 11px 13px;
+}
+.tablerow .meta { flex: 1; min-width: 0; }
+.tablerow .nm { font-weight: 600; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tablerow .sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.tablerow .sub .code { font-family: ui-monospace, monospace; letter-spacing: 1px; color: var(--gold-2); }
+.tablerow .sub .playing { color: var(--green); }
+.tablerow .btn { flex: none; }
+.empty-note { color: var(--muted); font-size: 13px; font-style: italic; text-align: center; padding: 20px 4px; }
+.tables-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.tables-actions .btn { flex: 1; min-width: 130px; padding: 11px; }
+.tablebar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 12px; }
+.tablebar input {
+  flex: 1; min-width: 120px; padding: 10px 12px; border-radius: 9px;
+  border: 1px solid var(--border); background: var(--surface-2); color: var(--text);
+  font-family: inherit; font-size: 14px; text-transform: uppercase; letter-spacing: 1px; outline: none;
+}
+.tablebar input:focus { border-color: var(--gold); }
+.tablebar .btn { flex: none; }
+
+/* in-game "back to tables" control */
+.brand .leave-tables {
+  margin-left: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 5px 10px;
+}
+.brand .leave-tables:hover { border-color: #3f3f46; color: var(--text); }
+.brand .table-code {
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  letter-spacing: 1px;
+  color: var(--gold-2);
+}
+
 /* loading screen */
 #loading {
   position: fixed; inset: 0;
@@ -441,8 +510,10 @@ main {
     <div class="brand">
       <span class="pencil">✏️</span>
       Draw <span class="dot">&amp;</span> Guess
+      <button class="leave-tables" id="btnLeaveTable" type="button" style="display:none">← Tables</button>
+      <span class="table-code" id="tableCode"></span>
     </div>
-    <div class="status-strip">
+    <div class="status-strip" id="statusStrip">
       <div class="round-badge" id="roundBadge">Lobby</div>
       <div class="word-box">
         <div class="word-label" id="wordLabel">Waiting</div>
@@ -457,7 +528,26 @@ main {
 
   <div class="banner hidden" id="connBanner">Reconnecting…</div>
 
-  <main>
+  <!-- ── TABLES (lobby browser of many concurrent rooms) ── -->
+  <section id="screenTables">
+    <div class="tables-inner">
+      <div class="tables-card">
+        <h2>Open tables</h2>
+        <p class="hint">Each table is its own Draw &amp; Guess room. Start a fresh one, jump into an open table below, or punch in a private code a friend shared.</p>
+        <ul class="tablelist" id="tableList"></ul>
+        <div class="tables-actions">
+          <button class="btn gold" id="btnNewTable" type="button">New table</button>
+          <button class="btn" id="btnNewPrivate" type="button">New private table</button>
+        </div>
+        <div class="tablebar">
+          <input id="codeInput" maxlength="4" placeholder="CODE" autocomplete="off" />
+          <button class="btn" id="btnJoinCode" type="button">Join by code</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <main id="screenGame">
     <section class="left">
       <div class="canvas-wrap">
         <canvas id="board"></canvas>
@@ -546,7 +636,7 @@ main {
   // ---------------------------------------------------------------------------
   const ROUND_MS = 80000;
   const REVEAL_MS = 4500;
-  const GAME_DOC_ID = "main";          // single authoritative doc id in `game`
+  const MIN_PLAYERS = 1;               // host can start solo (good for testing)
   const STROKE_THROTTLE_MS = 30;       // ~33 sends/sec cap on movement; batched below
   const COLORS = ["#18181b", "#ef4444", "#f59e0b", "#22c55e", "#3b82f6", "#a855f7", "#ec4899", "#ffffff"];
   const SIZES = [3, 7, 14];
@@ -570,13 +660,13 @@ main {
   // ---------------------------------------------------------------------------
   const { toast, colorFor } = worlds;
   const clientId = worlds.id();
+  await worlds.ready.catch(() => {});
   let me;
   try {
     me = await worlds.me();
   } catch (e) {
     me = { handle: "anon-" + clientId.slice(0, 6), name: "Guest", email: "", avatar_url: "" };
   }
-  await worlds.ready.catch(() => {});
   const myHandle = me.handle;
   const myName = me.name || me.handle || "Player";
 
@@ -586,6 +676,12 @@ main {
   const $ = (id) => document.getElementById(id);
   const els = {
     loading: $("loading"), app: $("app"),
+    screenTables: $("screenTables"), screenGame: $("screenGame"),
+    statusStrip: $("statusStrip"),
+    tableList: $("tableList"),
+    btnNewTable: $("btnNewTable"), btnNewPrivate: $("btnNewPrivate"),
+    codeInput: $("codeInput"), btnJoinCode: $("btnJoinCode"),
+    btnLeaveTable: $("btnLeaveTable"), tableCode: $("tableCode"),
     roundBadge: $("roundBadge"), wordLabel: $("wordLabel"), wordDisplay: $("wordDisplay"),
     timerWrap: $("timerWrap"), timer: $("timer"),
     connBanner: $("connBanner"),
@@ -599,23 +695,57 @@ main {
     chatLog: $("chatLog"), chatInput: $("chatInput"), sendBtn: $("sendBtn"),
   };
 
+  function showScreen(name) {
+    els.screenTables.classList.toggle("show", name === "tables");
+    els.screenGame.classList.toggle("hidden", name !== "game");
+    // the status strip (word/timer/round badge) only makes sense inside a table
+    els.statusStrip.style.visibility = name === "game" ? "visible" : "hidden";
+    els.btnLeaveTable.style.display = name === "game" ? "inline-block" : "none";
+    if (name !== "game") els.tableCode.textContent = "";
+  }
+
+  // ---------------------------------------------------------------------------
+  // Multiplayer: one directory (`hall`) of many concurrent tables; each table is
+  // a `worlds.room` carrying the authoritative game doc (s.state) AND the live
+  // roster + ready-state (s.members). Strokes + chat are per-table ws channels.
+  // ---------------------------------------------------------------------------
+  const hall = worlds.rooms("draw-guess", {
+    minPlayers: MIN_PLAYERS,
+    initial: () => ({
+      phase: "lobby",
+      drawer: null,
+      word: null,
+      players: [],
+      roundEndsAt: 0,
+      roundNum: 0,
+      scores: {},
+      lastWinner: null,
+      _scored: false,
+    }),
+    onChange: onRoomChange,
+    onStart: () => { if (ROOM && ROOM.isHost) startGame(); },
+    onReturn: () => { /* host reset handled via room state */ },
+  });
+
+  let ROOM = null;          // the joined table (worlds.room) or null
+  let unsubRoom = null;     // teardown for the joined table's onChange
+  let strokes = null;       // per-table strokes channel
+  let chat = null;          // per-table chat channel
+  let unsubStrokes = null;  // teardown for the strokes subscription
+  let unsubChat = null;     // teardown for the chat subscription
+
   // ---------------------------------------------------------------------------
   // Local state
   // ---------------------------------------------------------------------------
-  let game = null;          // latest authoritative game doc.data (or null = lobby/none)
-  let gameDocId = null;     // resolved id of the game doc (may differ from GAME_DOC_ID)
-  let presence = [];        // [{handle,name}] currently connected
+  let game = null;          // latest authoritative game doc (room state) (or null)
+  let presence = [];        // [{handle,name,ready,isMe,isHost}] — the table roster
+  let presenceLoaded = false;
   const guessedThisRound = new Set();  // handles that already guessed correctly (drawer-tracked + local display)
   let drawColor = COLORS[0];
   let drawSize = SIZES[1];
-  let advancing = false;    // guard so we only fire one db transition at a time
+  let advancing = false;    // guard so we only fire one room write at a time
   let lastRoundNumSeen = -1;
   let revealTimer = null;
-
-  // lobby ready-state (ephemeral, ws-only)
-  const ready = new Map();   // handle -> bool
-  let myReady = false;
-  let autoStarting = false;  // guard so auto-start only fires once
 
   // ---------------------------------------------------------------------------
   // Helpers
@@ -628,14 +758,12 @@ main {
   const isDrawer = () => !!(amDrawer() && game.phase === "draw");
 
   function presentHandles() {
-    return new Set(presence.map((p) => p.handle));
+    const set = new Set(presence.map((p) => p.handle));
+    set.add(myHandle);   // self always counts, even before the roster echoes back
+    return set;
   }
-  // Lobby host = lexicographically-smallest present handle (drives Start + auto-start).
-  function lobbyHostHandle() {
-    const handles = presence.map((p) => p.handle).filter(Boolean).sort();
-    return handles.length ? handles[0] : myHandle;
-  }
-  function amLobbyHost() { return lobbyHostHandle() === myHandle; }
+  // Lobby host = the room's host (first member). Drives Start + auto-start.
+  function amLobbyHost() { return !!(ROOM && ROOM.isHost); }
   // Of the present players, am I the one responsible for advancing when the drawer is gone?
   function isFallbackController() {
     if (!game || !game.drawer) return false;
@@ -644,7 +772,7 @@ main {
     const presentSorted = [...present].sort();
     return presentSorted.length > 0 && presentSorted[0] === myHandle;
   }
-  // Whoever should drive db transitions for the current doc state: the drawer (across
+  // Whoever should drive room writes for the current doc state: the drawer (across
   // draw AND reveal), or — if the drawer has left — the lexicographically-smallest present handle.
   function iControl() {
     return amDrawer() || isFallbackController();
@@ -668,13 +796,6 @@ main {
     if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
     return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
   }
-
-  // ---------------------------------------------------------------------------
-  // Channels
-  // ---------------------------------------------------------------------------
-  const strokeChan = worlds.ws.channel("strokes");
-  const chatChan = worlds.ws.channel("chat");
-  const lobbyChan = worlds.ws.channel("lobby");   // ephemeral ready-state pings
 
   // ---------------------------------------------------------------------------
   // Canvas
@@ -773,14 +894,14 @@ main {
     if (t - lastFlush >= 80) flushStrokes();
   }
   function flushStrokes() {
-    if (strokeQueue.length === 0) return;
+    if (strokeQueue.length === 0 || !strokes) return;
     const segs = strokeQueue;
     strokeQueue = [];
     lastFlush = now();
     // chunk to stay well under 16KB
     while (segs.length) {
       const chunk = segs.splice(0, 60);
-      strokeChan.publish({ cid: clientId, t: "stroke", segs: chunk });
+      strokes.publish({ cid: clientId, t: "stroke", segs: chunk });
     }
   }
   setInterval(flushStrokes, 90);
@@ -795,7 +916,7 @@ main {
   canvas.addEventListener("touchcancel", endDraw, { passive: false });
 
   // ---- incoming strokes (everyone renders) ----
-  strokeChan.subscribe((msg) => {
+  function onStroke(msg) {
     const p = msg.payload;
     if (!p || p.cid === clientId) return;          // ignore my own echo
     // Only honor strokes from the current drawer (defensive against stragglers).
@@ -809,7 +930,7 @@ main {
         drawSegment(p.x0, p.y0, p.x1, p.y1, p.color, p.size); // single-seg fallback
       }
     }
-  });
+  }
 
   // ---------------------------------------------------------------------------
   // Chat / guesses
@@ -878,21 +999,21 @@ main {
     return edits <= 1;
   }
 
-  chatChan.subscribe((msg) => {
+  function onChat(msg) {
     const p = msg.payload;
     if (!p || p.t !== "msg") return;
     if (p.cid === clientId) return;                // my own echo handled at send time
     handleGuess(p.handle, p.name, p.text);
-  });
+  }
 
   function sendChat() {
     const text = els.chatInput.value.trim();
-    if (!text) return;
+    if (!text || !chat) return;
     els.chatInput.value = "";
     // Drawer is blocked from chatting during their own draw phase (can't spoil/guess).
     if (isDrawer()) { toast("You're drawing — no chatting!"); return; }
     const payload = { cid: clientId, t: "msg", handle: myHandle, name: myName, text };
-    chatChan.publish(payload);
+    chat.publish(payload);
     // render + process locally immediately (echo is ignored by cid)
     handleGuess(myHandle, myName, text);
   }
@@ -900,55 +1021,32 @@ main {
   els.chatInput.addEventListener("keydown", (e) => { if (e.key === "Enter") sendChat(); });
 
   // ---------------------------------------------------------------------------
-  // Lobby ready-state (ephemeral ws channel "lobby")
+  // Lobby ready-state — now driven entirely by the room roster + ready bits.
+  // (`presence` rows carry .ready/.isMe/.isHost from the room snapshot.)
   // ---------------------------------------------------------------------------
   function inLobby() { return !game || game.phase === "lobby"; }
+  function myRow() { return presence.find((p) => p.isMe) || null; }
+  function amReady() { const r = myRow(); return !!(r && r.ready); }
 
-  function pingReady() {
-    lobbyChan.publish({ cid: clientId, t: "ready", handle: myHandle, name: myName, ready: myReady });
-  }
-  function setReady(v) {
-    myReady = !!v;
-    ready.set(myHandle, myReady);
-    pingReady();
-    renderUI();
-    maybeAutoStart();
-  }
-  lobbyChan.subscribe((msg) => {
-    const p = msg.payload;
-    if (!p || p.cid === clientId) return;
-    if (p.t === "ready" && p.handle) {
-      const known = ready.has(p.handle);
-      ready.set(p.handle, !!p.ready);
-      // Echo our state back only to peers we hadn't seen yet (a newcomer), so we
-      // don't ping-pong forever on every routine ping.
-      if (!known) pingReady();
-      if (inLobby()) { renderRoster(); renderOverlay(); maybeAutoStart(); }
-    }
-  });
-
-  function readyStats() {
-    const present = presentHandles();
-    present.add(myHandle);            // self counts even before the first presence event
-    let r = 0;
-    for (const h of present) if (h === myHandle ? myReady : ready.get(h)) r++;
-    return { ready: r, total: present.size };
-  }
-
+  // host-only, ≥2 present, everyone present ready → auto-start the game.
+  // (We drive this manually rather than via room.autoStart so it gates on a live
+  // game-doc start, matching the original behaviour.)
+  let autoStarting = false;
   function maybeAutoStart() {
-    // host-only, ≥2 present, everyone present ready → auto-start the game
     if (!inLobby() || autoStarting || !amLobbyHost()) return;
-    const s = readyStats();
-    if (s.total >= 2 && s.ready === s.total) {
+    const total = presence.length;
+    const readyCount = presence.filter((p) => p.ready).length;
+    if (total >= 2 && readyCount === total) {
       autoStarting = true;
       startGame().finally(() => { autoStarting = false; });
     }
   }
 
-  els.readyBtn.addEventListener("click", () => setReady(!myReady));
+  els.readyBtn.addEventListener("click", () => { if (ROOM) ROOM.toggleReady(); });
   els.copyBtn.addEventListener("click", async () => {
+    const link = ROOM ? location.origin + location.pathname + "#" + ROOM.code : location.href;
     try {
-      await navigator.clipboard.writeText(location.href);
+      await navigator.clipboard.writeText(link);
       els.copyBtn.textContent = "Copied!";
       setTimeout(() => { els.copyBtn.textContent = "Copy"; }, 1400);
     } catch (e) {
@@ -960,43 +1058,13 @@ main {
   });
 
   // ---------------------------------------------------------------------------
-  // Authoritative game transitions (controller only)
+  // Authoritative game transitions (controller only) — written to room state.
+  // The room load-or-creates the doc and orders writes; we just merge patches.
   // ---------------------------------------------------------------------------
-  async function ensureDoc(data) {
-    // Try to create the known doc; if it already exists, fall back to the existing one.
-    try {
-      const doc = await worlds.db.collection("game").create({ _id: GAME_DOC_ID, ...data });
-      gameDocId = doc.id;
-      return doc;
-    } catch (e) {
-      // creation may fail or id may be server-assigned; resolve via list
-      const found = await loadGameDoc();
-      if (found) {
-        await worlds.db.collection("game").replace(found.id, data);
-        gameDocId = found.id;
-        return { id: found.id, data };
-      }
-      // last resort: plain create
-      const doc = await worlds.db.collection("game").create(data);
-      gameDocId = doc.id;
-      return doc;
-    }
-  }
-
-  async function loadGameDoc() {
-    const res = await worlds.db.collection("game").list({ limit: 1, sort: "-created_at" });
-    if (res && res.items && res.items.length) return res.items[0];
-    return null;
-  }
-
   async function patchGame(patch) {
-    if (!gameDocId) {
-      const found = await loadGameDoc();
-      if (found) gameDocId = found.id;
-    }
-    if (!gameDocId) return;
+    if (!ROOM) return;
     try {
-      await worlds.db.collection("game").update(gameDocId, patch);
+      await ROOM.merge(patch);
     } catch (e) {
       // benign: another controller may have advanced first
     }
@@ -1075,7 +1143,7 @@ main {
 
   let starting = false;     // re-entrancy guard (manual click vs. auto-start)
   async function startGame() {
-    if (starting || (game && game.phase !== "lobby")) return;
+    if (!ROOM || starting || (game && game.phase !== "lobby")) return;
     starting = true;
     const present = presence.length ? presence.slice() : [{ handle: myHandle, name: myName }];
     const players = present.map((p) => ({ handle: p.handle, name: p.name }));
@@ -1093,18 +1161,14 @@ main {
     };
     els.startBtn.disabled = true;
     try {
-      if (gameDocId) {
-        await worlds.db.collection("game").replace(gameDocId, data);
-      } else {
-        await ensureDoc(data);
-      }
+      await ROOM.set(data);
     } catch (e) {
       systemMsg("Couldn't start the game — try again.");
     }
     els.startBtn.disabled = false;
     starting = false;
   }
-  els.startBtn.addEventListener("click", startGame);
+  els.startBtn.addEventListener("click", () => { if (ROOM && ROOM.isHost) startGame(); });
 
   // ---------------------------------------------------------------------------
   // Reacting to authoritative state changes
@@ -1115,15 +1179,10 @@ main {
 
     const prevPhase = prev ? prev.phase : (prev === null ? "lobby" : null);
     const nowPhase = data ? data.phase : "lobby";
-    // Leaving the lobby into a live game: ready-state has done its job, clear it.
-    if (prevPhase === "lobby" && nowPhase !== "lobby") {
-      ready.clear(); myReady = false; autoStarting = false;
-    }
-    // (Re)entering the lobby: fresh ready-state, re-announce ourselves.
-    if (prevPhase !== "lobby" && nowPhase === "lobby") {
-      ready.clear(); myReady = false; autoStarting = false;
-      pingReady();
-    }
+    // Phase transitions: ready-state is owned by the room roster, so we only need
+    // to reset our auto-start guard so a fresh lobby can auto-start again.
+    if (prevPhase === "lobby" && nowPhase !== "lobby") autoStarting = false;
+    if (prevPhase !== "lobby" && nowPhase === "lobby") autoStarting = false;
 
     // New round started: reset per-round local state + clear board.
     const newRound = data && data.roundNum !== lastRoundNumSeen && data.phase === "draw";
@@ -1258,17 +1317,13 @@ main {
   }
 
   function renderLobby() {
-    const host = lobbyHostHandle();
-    // build roster from presence (live), ensure self present
-    const map = new Map();
-    for (const p of presence) map.set(p.handle, { handle: p.handle, name: p.name });
-    if (!map.has(myHandle)) map.set(myHandle, { handle: myHandle, name: myName });
-    const rows = [...map.values()].sort((a, b) => a.handle.localeCompare(b.handle));
+    // Roster comes straight from the room snapshot (members carry ready/host/me).
+    const rows = presence.slice().sort((a, b) => a.handle.localeCompare(b.handle));
 
     els.lobbyRoster.innerHTML = "";
     for (const p of rows) {
-      const isYou = p.handle === myHandle;
-      const isReady = isYou ? myReady : !!ready.get(p.handle);
+      const isYou = !!p.isMe;
+      const isReady = !!p.ready;
       const row = document.createElement("div");
       row.className = "lobby-row" + (isYou ? " you" : "");
 
@@ -1283,7 +1338,7 @@ main {
       nm.textContent = p.name + (isYou ? " (you)" : "");
       row.appendChild(nm);
 
-      if (p.handle === host) {
+      if (p.isHost) {
         const t = document.createElement("span");
         t.className = "tag host";
         t.textContent = "host";
@@ -1297,20 +1352,22 @@ main {
       els.lobbyRoster.appendChild(row);
     }
 
-    const s = readyStats();
-    els.readyCount.textContent = s.ready + " of " + s.total + " ready";
+    const total = rows.length;
+    const readyN = rows.filter((p) => p.ready).length;
+    els.readyCount.textContent = readyN + " of " + total + " ready";
 
-    els.readyBtn.classList.toggle("on", myReady);
-    els.readyBtn.textContent = myReady ? "✓ Ready" : "I'm ready";
+    const iAmReady = amReady();
+    els.readyBtn.classList.toggle("on", iAmReady);
+    els.readyBtn.textContent = iAmReady ? "✓ Ready" : "I'm ready";
 
     els.startBtn.style.display = amLobbyHost() ? "inline-block" : "none";
-    els.startBtn.disabled = s.total < 1;          // host can always start (solo OK)
+    els.startBtn.disabled = total < 1;            // host can always start (solo OK)
     if (amLobbyHost()) {
-      els.lobbyHint.textContent = s.total <= 1
+      els.lobbyHint.textContent = total <= 1
         ? "Solo is fine for testing — hit start whenever."
         : "Start when ready, or it auto-starts once everyone is.";
     } else {
-      const h = rows.find((r) => r.handle === host);
+      const h = rows.find((r) => r.isHost);
       els.lobbyHint.textContent = "Waiting for " + (h ? h.name : "the host") + " to start…";
     }
   }
@@ -1435,63 +1492,139 @@ main {
   els.clearBtn.addEventListener("click", () => {
     if (!isDrawer()) { toast("Only the drawer can clear"); return; }
     clearBoard();
-    strokeChan.publish({ cid: clientId, t: "clear" });
+    if (strokes) strokes.publish({ cid: clientId, t: "clear" });
   });
 
   // ---------------------------------------------------------------------------
-  // Presence
+  // Room snapshot → game state + roster (one subscription, fired on either change)
   // ---------------------------------------------------------------------------
-  strokeChan.presence((members) => {
-    // dedupe by handle (two tabs share a handle)
-    const seen = new Map();
-    for (const m of members || []) {
-      if (m && m.handle) seen.set(m.handle, { handle: m.handle, name: m.name || m.handle });
-    }
-    if (!seen.has(myHandle)) seen.set(myHandle, { handle: myHandle, name: myName });
-    presence = [...seen.values()];
-    // forget ready-state for handles that left
-    const present = presentHandles();
-    for (const h of [...ready.keys()]) if (h !== myHandle && !present.has(h)) ready.delete(h);
-    renderUI();
+  function onRoomChange(s) {
+    presence = (s.members || []).slice();
+    presenceLoaded = s.loaded;
+    applyGame(s.state || null);
     scheduleControllerWork();
-    if (inLobby()) { pingReady(); maybeAutoStart(); }
-  });
+    if (inLobby()) maybeAutoStart();
+  }
 
   // ---------------------------------------------------------------------------
-  // DB subscription + initial load
+  // Tables browser (worlds.rooms directory)
   // ---------------------------------------------------------------------------
-  worlds.db.collection("game").subscribe((ev) => {
-    if (!ev || !ev.doc) return;
-    // Track our resolved doc id; ignore stray docs other than the one we know about.
-    if (gameDocId && ev.doc.id !== gameDocId) return;
-    if (!gameDocId) gameDocId = ev.doc.id;
-    if (ev.type === "delete") { applyGame(null); return; }
-    applyGame(ev.doc.data);
-  });
-
-  async function init() {
-    buildToolbar();
-    els.inviteLink.textContent = location.href;
-    resizeCanvas();
-    // give the wrapper a frame to lay out, then size again (mobile flex quirks)
-    requestAnimationFrame(resizeCanvas);
-
-    const existing = await loadGameDoc().catch(() => null);
-    if (existing) {
-      gameDocId = existing.id;
-      applyGame(existing.data);
-    } else {
-      applyGame(null); // lobby
+  function renderTables(list) {
+    const ul = els.tableList;
+    ul.innerHTML = "";
+    if (!list.length) {
+      ul.innerHTML = '<li class="empty-note">No open tables yet — start one!</li>';
+      return;
     }
+    for (const t of list) {
+      const li = document.createElement("li");
+      li.className = "tablerow";
+      const who = t.count === 1 ? "1 here" : t.count + " here";
+      const status = t.status === "playing" ? ' · <span class="playing">in round</span>' : "";
+      li.innerHTML =
+        '<div class="meta"><div class="nm"></div>' +
+        '<div class="sub">' + who + status + ' · <span class="code"></span></div></div>';
+      li.querySelector(".nm").textContent = t.name;
+      li.querySelector(".code").textContent = t.code;
+      const btn = document.createElement("button");
+      btn.className = "btn gold";
+      btn.textContent = t.status === "playing" ? "Watch" : "Join";
+      btn.addEventListener("click", () => joinTable(() => hall.join(t.id)));
+      li.appendChild(btn);
+      ul.appendChild(li);
+    }
+  }
 
-    els.loading.style.display = "none";
-    els.app.style.display = "flex";
+  // Mount a table: bind game state + roster + per-table strokes/chat channels.
+  function mountRoom(room) {
+    if (unsubRoom) { try { unsubRoom(); } catch (_) {} unsubRoom = null; }
+    if (unsubStrokes) { try { unsubStrokes(); } catch (_) {} unsubStrokes = null; }
+    if (unsubChat) { try { unsubChat(); } catch (_) {} unsubChat = null; }
+
+    ROOM = room;
+    game = null; presence = []; presenceLoaded = false;
+    lastRoundNumSeen = -1; autoStarting = false;
+    guessedThisRound.clear();
+    clearBoard();
+    strokeQueue = [];
+    els.chatLog.innerHTML = "";
+
+    // Per-table ephemeral channels (drawing + chat isolated per table).
+    strokes = worlds.ws.channel("draw-guess:" + room.id + ":strokes");
+    chat = worlds.ws.channel("draw-guess:" + room.id + ":chat");
+    unsubStrokes = strokes.subscribe(onStroke);
+    unsubChat = chat.subscribe(onChat);
+
+    // Invite link + table code from the room's shareable code.
+    els.tableCode.textContent = "code " + room.code;
+    els.inviteLink.textContent = location.origin + location.pathname + "#" + room.code;
+    location.hash = room.code;
+
+    showScreen("game");
     requestAnimationFrame(resizeCanvas);
     setTimeout(resizeCanvas, 120);
 
-    // announce our lobby presence/ready, and re-ping periodically so peers stay fresh
-    if (inLobby()) pingReady();
-    setInterval(() => { if (inLobby()) pingReady(); }, 3000);
+    // One subscription delivers BOTH the live game (s.state) and the roster (s.members).
+    unsubRoom = room.onChange(onRoomChange);
+  }
+
+  async function joinTable(fn) {
+    try { mountRoom(await fn()); }
+    catch (e) {
+      toast(e && e.code === "conflict" ? "That table is full." : "Couldn't join that table.");
+      console.error("[draw-guess] join failed", e);
+    }
+  }
+
+  function leaveTable() {
+    if (unsubRoom) { try { unsubRoom(); } catch (_) {} unsubRoom = null; }
+    if (unsubStrokes) { try { unsubStrokes(); } catch (_) {} unsubStrokes = null; }
+    if (unsubChat) { try { unsubChat(); } catch (_) {} unsubChat = null; }
+    if (revealTimer) { clearTimeout(revealTimer); revealTimer = null; }
+    hall.leave().catch(() => {});
+    ROOM = null; strokes = null; chat = null;
+    game = null; presence = []; presenceLoaded = false;
+    history.replaceState(null, "", location.pathname);
+    showScreen("tables");
+  }
+
+  // ---------------------------------------------------------------------------
+  // Table-browser wiring
+  // ---------------------------------------------------------------------------
+  els.btnLeaveTable.addEventListener("click", leaveTable);
+  els.btnNewTable.addEventListener("click", () =>
+    joinTable(() => hall.create({ name: myName + "'s table" })));
+  els.btnNewPrivate.addEventListener("click", () =>
+    joinTable(() => hall.create({ name: myName + "'s table", private: true })));
+  els.btnJoinCode.addEventListener("click", () => {
+    const code = els.codeInput.value.trim().toUpperCase();
+    if (code.length < 4) { toast("Enter the 4-letter code."); return; }
+    joinTable(() => hall.joinByCode(code));
+  });
+  els.codeInput.addEventListener("keydown", (e) => { if (e.key === "Enter") els.btnJoinCode.click(); });
+
+  // ---------------------------------------------------------------------------
+  // Boot
+  // ---------------------------------------------------------------------------
+  async function init() {
+    buildToolbar();
+    resizeCanvas();
+    requestAnimationFrame(resizeCanvas);
+
+    els.loading.style.display = "none";
+    els.app.style.display = "flex";
+
+    // Live directory of open tables drives the browser screen.
+    hall.onList(renderTables);
+
+    // Deep link: #CODE drops you straight into a shared table.
+    const code = (location.hash || "").replace(/^#/, "").trim().toUpperCase();
+    if (code.length >= 4) {
+      await joinTable(() => hall.joinByCode(code));
+      if (!ROOM) showScreen("tables");
+    } else {
+      showScreen("tables");
+    }
   }
 
   await init();
