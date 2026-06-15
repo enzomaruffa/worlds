@@ -1317,6 +1317,8 @@ const TRANSMISSIONS = [
   "{pilot} was last seen orbiting {world}, transmitting nothing but extremely confident jazz",
   "all pilots: {pilot} is doing loops near {world} again. wave if you pass",
   "long-range scan: a new star is forming somewhere out past the workshop belt",
+  "legend says {pilot} once out-ran a comet around {world} and has never once let it go",
+  "the old logs still list {pilot} as 'missing, presumed exploring' somewhere near {world}",
   "reminder from mission control: a deploy is a promise you make to your future self",
   "the lab requests that everyone please stop poking the experimental gravity. it remembers",
   "the arcade has extended happy hour to all hours. this is now simply 'the hour'",
@@ -1338,7 +1340,12 @@ async function transmissionFor(world) {
   return tx;
 }
 const txWorld = () => { const n = [...planets.keys()]; return n.length ? `${randOf(n)}.world` : "an unnamed world"; };
-const txPilot = () => { const p = [...pilots.values()]; return p.length ? `@${p[Math.floor(Math.random() * p.length)].group.userData.handle}` : "a silent pilot"; };
+const txPilot = () => {
+  const p = [...pilots.values()];
+  if (p.length) return `@${p[Math.floor(Math.random() * p.length)].group.userData.handle}`;
+  const v = randVoyager(); // no one online → pull a name from the logbook of everyone who ever flew
+  return v ? `@${v}` : "a silent pilot";
+};
 function showTx(text) { toast(`📡 <span style="color:#7dd3fc">intercepted transmission</span><br><span style="color:#cbd5e1">${esc(text)}</span>`, 6500, { wide: true }); }
 async function emitTransmission() {
   const names = [...planets.keys()];
@@ -1427,6 +1434,95 @@ function revealCodex(b) {
     if (nearSystem !== title) return;
     toast(`<b style="color:${c};letter-spacing:.06em">✦ ${esc(title.toUpperCase())}</b> · <i style="color:#a1a1aa">${esc(tag)}</i><br><span style="color:#c4b5fd">${esc(text)}</span>`, 7000, { wide: true });
   });
+}
+
+// ---------- the voyager logbook: every handle that ever flew here is remembered ----------
+// Persisted in worlds.db so past pilots — even ones long gone — keep surfacing in the lore
+// (transmissions, rumors, and the names of drifting relics). Includes you, the moment you arrive.
+const voyagerStore = worlds.db.collection("voyagers");
+const everJoined = [];
+function rememberVoyager(handle) {
+  if (!handle || everJoined.includes(handle)) return;
+  everJoined.push(handle);
+  voyagerStore.create({ handle }).catch(() => {}); // best-effort; dupes are harmless
+}
+const randVoyager = () => (everJoined.length ? randOf(everJoined) : null);
+(async () => {
+  try { for (const it of (await voyagerStore.list({ limit: 200 })).items) if (it.data?.handle) rememberVoyager(it.data.handle); } catch { /* db down */ }
+  try { const me = await worlds.me(); if (me?.handle) rememberVoyager(me.handle); } catch { /* identity unknown */ }
+})();
+
+// ---------- drifting relics: named wandering objects whose AI lore ties a world to a voyager ----------
+const relicStore = worlds.db.collection("relic"), relicCache = new Map();
+async function relicLore(world, pilot) {
+  const key = pilot ? `${world}|${pilot}` : world;
+  if (relicCache.has(key)) return relicCache.get(key);
+  try {
+    const s = (await relicStore.list({ filter: { key }, limit: 1 })).items[0];
+    if (s?.data?.name) { const r = { name: s.data.name, lore: s.data.lore }; relicCache.set(key, r); return r; }
+  } catch { /* db down → generate */ }
+  let out = null;
+  try {
+    const res = await worlds.ai.complete({
+      prompt: `Invent a wandering space relic — a derelict, comet, or drifting monument — tied to the planet "${world}.world"${pilot ? ` and a vanished voyager named @${pilot}` : ""}. Return exactly two lines, no labels, no numbering, no quotes:\n1) the relic's name (2-4 words, evocative, e.g. "the Vellum Wake")\n2) one vivid sci-fi sentence of its lore (max 22 words)`,
+      model: "fast", max_tokens: 80,
+    });
+    const lines = String(res.text || "").split("\n").map((l) =>
+      l.trim().replace(/^(line\s*\d+\s*[:.)\-]*|[-*•]\s*|\d+\s*[:.)\-]\s*)/i, "").replace(/^["']|["']$/g, "").trim()).filter(Boolean);
+    if (lines.length >= 2) out = { name: lines[0], lore: lines[1] };
+  } catch { /* fall back */ }
+  if (!out) out = { name: `the ${world} Drifter`, lore: `A nameless wreck adrift on the tides between the worlds, still faintly echoing ${world}.world.` };
+  relicCache.set(key, out);
+  relicStore.create({ key, name: out.name, lore: out.lore }).catch(() => {});
+  return out;
+}
+
+const relics = [];
+const RELIC_MAX = 6;
+async function spawnRelic() {
+  const names = [...planets.keys()];
+  if (!names.length || relics.length >= RELIC_MAX) return;
+  const world = randOf(names);
+  const pilot = everJoined.length && Math.random() < 0.55 ? randVoyager() : null;
+  const data = await relicLore(world, pilot);
+  if (!data) return;
+  const g = new THREE.Group();
+  const tmpl = randOf([ASSETS.meteor_detailed, ASSETS.meteor, ASSETS.rock_crystalsLargeA].filter(Boolean));
+  const sc = 1.6 + Math.random() * 2.6;
+  if (tmpl) { const body = tmpl.clone(); body.scale.setScalar(sc); g.add(body); }
+  // a faint additive coma so it reads as a comet/relic, not just a rock
+  const coma = new THREE.Mesh(
+    new THREE.SphereGeometry(sc * 1.9, 16, 16),
+    new THREE.MeshBasicMaterial({ color: 0x9ad8ff, transparent: true, opacity: 0.1, blending: THREE.AdditiveBlending, depthWrite: false }),
+  );
+  g.add(coma);
+  const lbl = label(`☄ ${data.name}`, sc * 2.4 + 2.5, 0x9ad8ff);
+  lbl.scale.multiplyScalar(0.82);
+  g.add(lbl);
+  // drop it off to the side of the player so it drifts INTO view rather than popping in
+  const dir = randomUnit(Math.random);
+  g.position.copy(ship.position).addScaledVector(dir, 240 + Math.random() * 160);
+  g.position.y += (Math.random() - 0.5) * 80;
+  scene.add(g);
+  relics.push({ group: g, body: g.children[0], coma, lbl, name: data.name, lore: data.lore,
+    vel: randomUnit(Math.random).multiplyScalar(2 + Math.random() * 3.5), spin: 0.1 + Math.random() * 0.3, revealed: false });
+}
+let nextRelic = 18 + Math.random() * 18; // first relic drifts in ~18–36s after launch
+function updateRelics(dt, t) {
+  if (!introActive) { nextRelic -= dt; if (nextRelic <= 0) { nextRelic = 45 + Math.random() * 40; spawnRelic(); } }
+  for (let i = relics.length - 1; i >= 0; i--) {
+    const r = relics[i];
+    r.group.position.addScaledVector(r.vel, dt);
+    if (r.body) r.body.rotation.y += r.spin * dt, r.body.rotation.x += r.spin * 0.4 * dt;
+    const d = ship.position.distanceTo(r.group.position);
+    // fly close → its story surfaces (once)
+    if (!r.revealed && d < 55 && !introActive) {
+      r.revealed = true;
+      toast(`☄ <span style="color:#9ad8ff">${esc(r.name)}</span><br><span style="color:#cbd5e1">${esc(r.lore)}</span>`, 7000, { wide: true });
+    }
+    // drifted far from the pilot → retire it (keeps the count bounded; dispose what we own)
+    if (d > 900) { scene.remove(r.group); r.coma.geometry.dispose(); r.coma.material.dispose(); r.lbl.material.map?.dispose(); r.lbl.material.dispose(); relics.splice(i, 1); }
+  }
 }
 
 // ---------- live deploy supernova (dogfoods worlds.db realtime) ----------
@@ -1551,6 +1647,7 @@ function pilotShip(handle, key) {
 shipsNet.onChange((cid, d, meta) => {
   if (!d || !d.p || !Object.keys(ASSETS).length) return;
   const handle = (meta && meta.handle) || cid;
+  rememberVoyager(handle); // add to the persistent logbook the first time we ever see them
   let p = pilots.get(cid);
   if (!p) {
     p = pilotShip(handle, cid);
@@ -1643,6 +1740,7 @@ function updateBeacons(dt) {
 commsChannel.subscribe((msg) => {
   const d = msg.payload;
   if (!d || d.id === pilotId) return; // own messages are shown locally
+  if (msg.from?.handle) rememberVoyager(msg.from.handle); // anyone who speaks joins the logbook
   // comms `id` is the sender's pilotId === its ships-actor cid, so look the ship up directly.
   const getPos = pilots.has(d.id) ? () => pilots.get(d.id)?.group.position ?? ship.position : null;
   if (d.type === "chat" && getPos) showBubble(getPos, `<b>@${esc(msg.from.handle)}</b>${esc(d.text)}`, false, 5200);
@@ -1940,6 +2038,7 @@ function tick() {
   updateNovas(dt);
   updateCodex();
   updateTransmissions(dt);
+  updateRelics(dt, t);
 
   // joystick steers (with a deadzone, gentler gain); drag-look + keys also steer
   if (joy.active) {
