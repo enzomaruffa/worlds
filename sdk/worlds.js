@@ -255,18 +255,32 @@
     slack: (target, text) => call("POST", "/api/v1/notify/slack", { target, text })
   };
 
-  // sdk/src/lobby.ts
-  function lobby(channel, opts = {}) {
-    const room = ws.channel(channel);
+  // sdk/src/room.ts
+  function room(name, opts = {}) {
+    const chan = ws.channel(opts.channel || name);
+    const hasState = opts.initial !== undefined;
+    const col = hasState ? collection(name) : null;
+    const key = opts.key || `${name}-main`;
     const cid = globalThis.crypto && typeof globalThis.crypto.randomUUID === "function" ? globalThis.crypto.randomUUID() : `c${Date.now()}-${Math.floor(Math.random() * 1e9)}`;
     const autoStart = opts.autoStart !== false;
     const minPlayers = Math.max(1, opts.minPlayers ?? 1);
+    const maxPlayers = Math.max(0, opts.maxPlayers ?? 0);
     let me = opts.me ? { handle: opts.me.handle, name: opts.me.name || opts.me.handle } : null;
     let presence = [];
     let loaded = false;
     let started = false;
     let dead = false;
     const ready = {};
+    let docId = null;
+    let state = hasState ? null : null;
+    let rev = 0;
+    const listeners = new Set;
+    if (opts.onChange)
+      listeners.add(opts.onChange);
+    function seed() {
+      const init = typeof opts.initial === "function" ? opts.initial() : opts.initial ?? {};
+      return { ...init };
+    }
     function uniq(list) {
       const seen = new Set;
       const out = [];
@@ -306,8 +320,10 @@
         readyCount: readyCount(),
         total: r.length,
         allReady: allReady(),
+        full: maxPlayers > 0 && r.length >= maxPlayers,
         started,
         loaded,
+        state: hasState ? state : null,
         members: r.map((p) => ({
           handle: p.handle,
           name: p.name,
@@ -318,11 +334,17 @@
       };
     }
     function emit() {
-      if (!dead)
-        opts.onUpdate?.(snapshot());
+      if (dead)
+        return;
+      const s = snapshot();
+      for (const fn of listeners) {
+        try {
+          fn(s);
+        } catch {}
+      }
     }
     function pub(msg) {
-      room.publish({ _lobby: 1, cid, ...msg });
+      chan.publish({ _p: 1, cid, ...msg });
     }
     function maybeAutoStart() {
       if (autoStart && isHost() && !started && allReady())
@@ -346,6 +368,7 @@
         return;
       started = true;
       pub({ t: "start", handle: me.handle });
+      emit();
       opts.onStart?.(snapshot());
     }
     function returnToLobby() {
@@ -358,103 +381,6 @@
     }
     function setStarted(val) {
       started = !!val;
-    }
-    const unsubPresence = room.presence((members) => {
-      presence = uniq(members || []);
-      const live = new Set(roster().map((p) => p.handle));
-      for (const h of Object.keys(ready))
-        if (!live.has(h))
-          delete ready[h];
-      loaded = true;
-      emit();
-      maybeAutoStart();
-    });
-    const unsubMsg = room.subscribe((msg) => {
-      const p = msg && msg.payload;
-      if (!p || !p._lobby || p.cid === cid)
-        return;
-      if (p.t === "ready" && p.handle) {
-        ready[p.handle] = !!p.ready;
-        emit();
-        maybeAutoStart();
-      } else if (p.t === "start") {
-        if (!started) {
-          started = true;
-          opts.onStart?.(snapshot());
-        }
-      } else if (p.t === "return") {
-        started = false;
-        for (const k of Object.keys(ready))
-          ready[k] = false;
-        emit();
-        opts.onReturn?.(snapshot());
-      } else if (p.t === "hello" && p.handle) {
-        if (me)
-          pub({ t: "ready", handle: me.handle, name: me.name, ready: !!ready[me.handle] });
-      }
-    });
-    function announce() {
-      if (!me)
-        return;
-      if (!(me.handle in ready))
-        ready[me.handle] = false;
-      pub({ t: "hello", handle: me.handle, name: me.name });
-      emit();
-      maybeAutoStart();
-    }
-    if (me) {
-      announce();
-    } else {
-      call("GET", "/api/v1/me").then((m) => {
-        if (dead)
-          return;
-        me = { handle: m.handle, name: m.name || m.handle };
-        announce();
-      }).catch(() => {});
-    }
-    return {
-      setReady,
-      toggleReady,
-      start,
-      returnToLobby,
-      setStarted,
-      snapshot,
-      get me() {
-        return me;
-      },
-      get isHost() {
-        return isHost();
-      },
-      destroy() {
-        dead = true;
-        try {
-          unsubPresence?.();
-        } catch {}
-        try {
-          unsubMsg?.();
-        } catch {}
-      }
-    };
-  }
-
-  // sdk/src/room.ts
-  function room(name, opts = {}) {
-    const col = collection(name);
-    const key = opts.key || `${name}-main`;
-    let docId = null;
-    let state = null;
-    let rev = 0;
-    const listeners = new Set;
-    function seed() {
-      const init = typeof opts.initial === "function" ? opts.initial() : opts.initial ?? {};
-      return { ...init };
-    }
-    function emit() {
-      for (const fn of listeners) {
-        try {
-          fn(state);
-        } catch {}
-      }
     }
     function adopt(doc, own) {
       if (!doc || !doc.data)
@@ -469,9 +395,11 @@
       rev = incoming._rev || 0;
       emit();
     }
-    async function load() {
-      const page = await col.list({ sort: "-created_at", limit: 100 });
-      const found = page.items.find((d) => d.data && d.data._room === key);
+    async function loadState() {
+      if (!col)
+        return;
+      const page = await col.list({ filter: { _room: key }, sort: "-created_at", limit: 1 });
+      const found = page.items[0];
       if (found) {
         docId = found.id;
         state = found.data;
@@ -495,14 +423,13 @@
           adopt(d, false);
         }
       });
-      emit();
-      return state;
     }
-    const ready = load();
     async function write(next) {
+      if (!col)
+        return false;
       if (!docId) {
         try {
-          await ready;
+          await opened;
         } catch {}
       }
       if (!docId)
@@ -516,26 +443,409 @@
         return false;
       }
     }
+    const unsubPresence = chan.presence((members) => {
+      presence = uniq(members || []);
+      const live = new Set(roster().map((p) => p.handle));
+      for (const h of Object.keys(ready))
+        if (!live.has(h))
+          delete ready[h];
+      loaded = true;
+      emit();
+      maybeAutoStart();
+    });
+    const unsubMsg = chan.subscribe((msg) => {
+      const p = msg && msg.payload;
+      if (!p || !p._p || p.cid === cid)
+        return;
+      if (p.t === "ready" && p.handle) {
+        ready[p.handle] = !!p.ready;
+        emit();
+        maybeAutoStart();
+      } else if (p.t === "start") {
+        if (!started) {
+          started = true;
+          emit();
+          opts.onStart?.(snapshot());
+        }
+      } else if (p.t === "return") {
+        started = false;
+        for (const k of Object.keys(ready))
+          ready[k] = false;
+        emit();
+        opts.onReturn?.(snapshot());
+      } else if (p.t === "hello" && p.handle) {
+        if (me)
+          pub({ t: "ready", handle: me.handle, name: me.name, ready: !!ready[me.handle] });
+      }
+    });
+    function announce() {
+      if (!me)
+        return;
+      if (!(me.handle in ready))
+        ready[me.handle] = false;
+      pub({ t: "hello", handle: me.handle, name: me.name });
+      emit();
+      maybeAutoStart();
+    }
+    const opened = (async () => {
+      if (!me) {
+        try {
+          const m = await call("GET", "/api/v1/me");
+          if (!dead)
+            me = { handle: m.handle, name: m.name || m.handle };
+        } catch {}
+      }
+      if (hasState) {
+        try {
+          await loadState();
+        } catch {}
+      }
+      if (!dead)
+        announce();
+      return snapshot();
+    })();
     return {
-      ready,
-      get: () => state,
+      opened,
+      setReady,
+      toggleReady,
+      start,
+      returnToLobby,
+      setStarted,
+      set: (next) => write(next),
+      merge: (patch) => write({ ...state || {}, ...patch }),
+      reset: (overrides) => write({ ...seed(), ...overrides || {} }),
+      refetch: async () => {
+        try {
+          if (col && docId)
+            adopt(await col.get(docId), true);
+        } catch {}
+      },
+      snapshot,
       onChange(fn) {
         listeners.add(fn);
-        if (state) {
+        if (loaded || hasState && state) {
           try {
-            fn(state);
+            fn(snapshot());
           } catch {}
         }
         return () => listeners.delete(fn);
       },
-      set: (next) => write(next),
-      merge: (patch) => write({ ...state || {}, ...patch }),
-      reset: (next) => write({ ...seed(), ...next || {} }),
-      refetch: async () => {
+      get me() {
+        return me;
+      },
+      get isHost() {
+        return isHost();
+      },
+      get members() {
+        return snapshot().members;
+      },
+      get state() {
+        return hasState ? state : null;
+      },
+      leave() {
+        this.destroy();
+      },
+      destroy() {
+        dead = true;
         try {
-          if (docId)
-            adopt(await col.get(docId), true);
+          unsubPresence?.();
         } catch {}
+        try {
+          unsubMsg?.();
+        } catch {}
+      }
+    };
+  }
+
+  // sdk/src/rooms.ts
+  var CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  function randInts(n) {
+    const out = [];
+    if (globalThis.crypto && typeof globalThis.crypto.getRandomValues === "function") {
+      const buf = new Uint32Array(n);
+      globalThis.crypto.getRandomValues(buf);
+      for (let i = 0;i < n; i++)
+        out.push(buf[i]);
+    } else {
+      for (let i = 0;i < n; i++)
+        out.push(Math.floor(Math.random() * 4294967295));
+    }
+    return out;
+  }
+  function makeCode() {
+    return randInts(4).map((r) => CODE_ALPHABET[r % CODE_ALPHABET.length]).join("");
+  }
+  function makeId() {
+    return randInts(3).map((r) => r.toString(36)).join("").slice(0, 10);
+  }
+  function rooms(name, opts = {}) {
+    const dir = collection(name);
+    const hasState = opts.initial !== undefined;
+    const ttlMs = Math.max(5000, opts.ttlMs ?? 45000);
+    const docs = new Map;
+    const listeners = new Set;
+    let current = null;
+    let currentDbId = null;
+    let stopMirror = null;
+    let heartbeat = null;
+    let lastMirror = "";
+    let dead = false;
+    function toInfo(doc) {
+      const d = doc.data || {};
+      const max = Number(d.max || 0);
+      const count = Number(d.count || (d.members ? d.members.length : 0));
+      return {
+        id: d.id,
+        code: d.code,
+        name: d.name || d.id,
+        host: d.host || null,
+        members: Array.isArray(d.members) ? d.members : [],
+        count,
+        max,
+        status: d.status === "playing" ? "playing" : "open",
+        full: max > 0 && count >= max,
+        private: !!d.private,
+        createdAt: doc.created_at,
+        updatedAt: doc.updated_at
+      };
+    }
+    function fresh(doc) {
+      const t = Date.parse(doc.updated_at || doc.created_at || "");
+      return !Number.isFinite(t) || Date.now() - t < ttlMs;
+    }
+    function computeList() {
+      const out = [];
+      for (const doc of docs.values()) {
+        if (!doc.data || !doc.data._dir || doc.data.private)
+          continue;
+        if (!fresh(doc))
+          continue;
+        out.push(toInfo(doc));
+      }
+      out.sort((a, b) => a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0);
+      return out;
+    }
+    function pushList() {
+      if (dead)
+        return;
+      const list = computeList();
+      for (const fn of listeners) {
+        try {
+          fn(list);
+        } catch {}
+      }
+    }
+    async function sweep() {
+      for (const [dbId, doc] of [...docs.entries()]) {
+        if (doc.data && doc.data._dir && !fresh(doc)) {
+          docs.delete(dbId);
+          try {
+            await dir.delete(dbId);
+          } catch {}
+          try {
+            await deleteStateDoc(doc.data.id);
+          } catch {}
+        }
+      }
+    }
+    async function deleteStateDoc(instId) {
+      if (!hasState)
+        return;
+      try {
+        const page = await dir.list({ filter: { _room: `inst:${instId}` }, limit: 1 });
+        if (page.items[0])
+          await dir.delete(page.items[0].id);
+      } catch {}
+    }
+    const unsubDir = dir.subscribe((ev) => {
+      if (!ev || !ev.doc)
+        return;
+      if (ev.type === "delete") {
+        if (docs.delete(ev.doc.id))
+          pushList();
+        return;
+      }
+      if (!ev.doc.data || !ev.doc.data._dir)
+        return;
+      docs.set(ev.doc.id, ev.doc);
+      pushList();
+    });
+    if (opts.onList)
+      listeners.add(opts.onList);
+    (async () => {
+      try {
+        const page = await dir.list({ filter: { _dir: 1 }, sort: "-created_at", limit: 100 });
+        for (const doc of page.items)
+          docs.set(doc.id, doc);
+        pushList();
+      } catch {}
+    })();
+    const sweeper = setInterval(() => {
+      sweep().then(pushList);
+    }, Math.min(ttlMs, 20000));
+    function detach() {
+      if (stopMirror) {
+        try {
+          stopMirror();
+        } catch {}
+        stopMirror = null;
+      }
+      if (heartbeat) {
+        clearInterval(heartbeat);
+        heartbeat = null;
+      }
+      if (current) {
+        try {
+          current.destroy();
+        } catch {}
+      }
+      current = null;
+      currentDbId = null;
+      lastMirror = "";
+    }
+    function open(id, code, dbId, max) {
+      detach();
+      const r = room(name, {
+        channel: `${name}:${id}`,
+        key: `inst:${id}`,
+        initial: hasState ? opts.initial : undefined,
+        minPlayers: opts.minPlayers,
+        maxPlayers: max || opts.maxPlayers,
+        autoStart: opts.autoStart,
+        onChange: opts.onChange,
+        onStart: opts.onStart,
+        onReturn: opts.onReturn
+      });
+      r.id = id;
+      r.code = code;
+      current = r;
+      currentDbId = dbId;
+      function mirror(s) {
+        if (!s.isHost || currentDbId !== dbId)
+          return;
+        const patch = {
+          host: s.host,
+          members: s.members.map((m) => ({ handle: m.handle, name: m.name })),
+          count: s.total,
+          status: s.started ? "playing" : "open"
+        };
+        const sig = JSON.stringify(patch);
+        if (sig === lastMirror)
+          return;
+        lastMirror = sig;
+        dir.update(dbId, patch).catch(() => {});
+      }
+      stopMirror = r.onChange(mirror);
+      heartbeat = setInterval(() => {
+        const s = r.snapshot();
+        if (s.isHost && currentDbId === dbId)
+          dir.update(dbId, { count: s.total }).catch(() => {});
+      }, 15000);
+      return r;
+    }
+    async function findByInstanceId(id) {
+      for (const doc of docs.values())
+        if (doc.data && doc.data._dir && doc.data.id === id)
+          return doc;
+      try {
+        const page = await dir.list({ filter: { _dir: 1, id }, limit: 1 });
+        return page.items[0] || null;
+      } catch {
+        return null;
+      }
+    }
+    return {
+      list: () => computeList(),
+      onList(fn) {
+        listeners.add(fn);
+        try {
+          fn(computeList());
+        } catch {}
+        return () => listeners.delete(fn);
+      },
+      async create(o = {}) {
+        const id = makeId();
+        const used = new Set;
+        for (const doc of docs.values())
+          if (doc.data?.code)
+            used.add(doc.data.code);
+        let code = makeCode();
+        for (let i = 0;i < 8 && used.has(code); i++)
+          code = makeCode();
+        const max = Math.max(0, o.max ?? opts.maxPlayers ?? 0);
+        const data = {
+          _dir: 1,
+          id,
+          code,
+          name: o.name || `Room ${code}`,
+          private: !!o.private,
+          status: "open",
+          host: null,
+          members: [],
+          count: 0,
+          max
+        };
+        const created = await dir.create(data);
+        docs.set(created.id, created);
+        pushList();
+        return open(id, code, created.id, max);
+      },
+      async join(id) {
+        const doc = await findByInstanceId(id);
+        if (!doc)
+          throw new WorldsError("not_found", "no such room", 404);
+        const info = toInfo(doc);
+        if (info.full)
+          throw new WorldsError("conflict", "room is full", 409);
+        return open(info.id, info.code, doc.id, info.max);
+      },
+      async joinByCode(code) {
+        const want = String(code || "").toUpperCase().trim();
+        let doc = null;
+        for (const d of docs.values())
+          if (d.data && d.data._dir && d.data.code === want)
+            doc = d;
+        if (!doc) {
+          try {
+            const page = await dir.list({ filter: { _dir: 1, code: want }, limit: 1 });
+            doc = page.items[0] || null;
+          } catch {}
+        }
+        if (!doc)
+          throw new WorldsError("not_found", "no room with that code", 404);
+        const info = toInfo(doc);
+        if (info.full)
+          throw new WorldsError("conflict", "room is full", 409);
+        return open(info.id, info.code, doc.id, info.max);
+      },
+      async leave() {
+        const r = current;
+        const dbId = currentDbId;
+        if (!r || !dbId)
+          return;
+        const s = r.snapshot();
+        const instId = r.id;
+        detach();
+        if (s.isHost && s.total <= 1) {
+          try {
+            await dir.delete(dbId);
+          } catch {}
+          docs.delete(dbId);
+          await deleteStateDoc(instId);
+          pushList();
+        }
+      },
+      get current() {
+        return current;
+      },
+      destroy() {
+        dead = true;
+        detach();
+        try {
+          unsubDir?.();
+        } catch {}
+        clearInterval(sweeper);
+        listeners.clear();
       }
     };
   }
@@ -676,8 +986,8 @@
     uploads,
     ws,
     notify,
-    lobby,
     room,
+    rooms,
     id,
     colorFor,
     uniqByHandle,
