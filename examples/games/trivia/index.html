@@ -279,6 +279,36 @@
   /* confetti */
   #confetti { position: fixed; inset: 0; pointer-events: none; z-index: 40; }
   .confetti-pc { position: absolute; width: 9px; height: 14px; top: -20px; opacity: .95; will-change: transform; }
+
+  /* ── Tables (lobby browser) ─────────────── */
+  .tablehead {
+    display: flex; align-items: center; justify-content: space-between; gap: .75rem;
+    margin-bottom: 1rem;
+  }
+  .tablehead .code {
+    font-family: ui-monospace, monospace; font-size: .8rem; color: var(--gold); letter-spacing: .12em;
+  }
+  ul.tablelist { list-style: none; margin: 0 0 1rem; padding: 0; display: flex; flex-direction: column; gap: .55rem; }
+  ul.tablelist li.tablerow {
+    display: flex; align-items: center; gap: .75rem;
+    padding: .7rem .8rem; border-radius: 11px;
+    background: var(--surface-2); border: 1px solid var(--border-soft);
+  }
+  .tablerow .meta { flex: 1; min-width: 0; }
+  .tablerow .nm { font-weight: 600; font-size: .95rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tablerow .sub { font-size: .78rem; color: var(--muted-2); margin-top: .12rem; }
+  .tablerow .sub .code { font-family: ui-monospace, monospace; letter-spacing: .1em; color: var(--gold); }
+  .tablerow .sub .playing { color: var(--good); }
+  .tablerow button { flex: none; padding: .5rem .9rem; }
+  .empty-note { color: var(--muted-2); font-size: .85rem; font-style: italic; text-align: center; padding: 1.1rem .25rem; }
+  .tablebar { display: flex; gap: .55rem; flex-wrap: wrap; align-items: center; }
+  .tablebar input {
+    flex: 1; min-width: 120px; padding: .65rem .8rem; border-radius: 10px;
+    border: 1px solid var(--border); background: var(--surface-2); color: var(--text);
+    font: inherit; font-size: .9rem; text-transform: uppercase; letter-spacing: .12em;
+  }
+  .tablebar input:focus { outline: none; border-color: var(--gold); }
+  .tablebar button { flex: none; }
 </style>
 </head>
 <body>
@@ -294,8 +324,29 @@
 
   <div id="boot">Establishing secure channel…</div>
 
+  <!-- ░░░ TABLES (lobby browser) ░░░ -->
+  <main id="screenTables" class="hidden">
+    <div class="card">
+      <p class="section-label">Open tables</p>
+      <p class="muted" style="margin:0 0 1rem;font-size:.88rem">Each table is its own quiz room. Start a fresh one, drop into an open table below, or punch in a private code a friend shared.</p>
+      <ul class="tablelist" id="tableList"></ul>
+      <div class="btn-row">
+        <button id="btnNewTable" class="btn-primary">New table</button>
+        <button id="btnNewPrivate" class="btn-ghost">New private table</button>
+      </div>
+      <div class="tablebar" style="margin-top:1rem">
+        <input id="codeInput" maxlength="4" placeholder="CODE" autocomplete="off" />
+        <button id="btnJoinCode" class="btn-ghost">Join by code</button>
+      </div>
+    </div>
+  </main>
+
   <!-- ░░░ LOBBY ░░░ -->
   <main id="screenLobby" class="hidden">
+    <div class="tablehead">
+      <button id="btnLeaveLobby" class="btn-ghost" style="flex:none">← Tables</button>
+      <span class="code" id="tableCodeLobby"></span>
+    </div>
     <div class="grid cols">
       <div class="card">
         <p class="section-label">In the room <span class="count-pill" id="lobbyCount"></span></p>
@@ -335,6 +386,10 @@
 
   <!-- ░░░ LOADING ░░░ -->
   <main id="screenLoading" class="hidden">
+    <div class="tablehead">
+      <button id="btnLeaveLoading" class="btn-ghost" style="flex:none">← Tables</button>
+      <span class="code" id="tableCodeLoading"></span>
+    </div>
     <div class="card">
       <div class="loading">
         <div class="spin"></div>
@@ -346,6 +401,10 @@
 
   <!-- ░░░ QUESTION ░░░ -->
   <main id="screenQuestion" class="hidden">
+    <div class="tablehead">
+      <button id="btnLeaveQuestion" class="btn-ghost" style="flex:none">← Tables</button>
+      <span class="code" id="tableCodeQuestion"></span>
+    </div>
     <div class="card">
       <div class="qhead">
         <div class="qmeta">Question <b id="qIndex">1</b> of <span id="qTotal">5</span> · <span id="qTopic">topic</span></div>
@@ -361,6 +420,10 @@
 
   <!-- ░░░ REVEAL ░░░ -->
   <main id="screenReveal" class="hidden">
+    <div class="tablehead">
+      <button id="btnLeaveReveal" class="btn-ghost" style="flex:none">← Tables</button>
+      <span class="code" id="tableCodeReveal"></span>
+    </div>
     <div class="card">
       <div class="qhead">
         <div class="qmeta">Question <b id="rIndex">1</b> of <span id="rTotal">5</span></div>
@@ -384,6 +447,10 @@
 
   <!-- ░░░ OVER / PODIUM ░░░ -->
   <main id="screenOver" class="hidden">
+    <div class="tablehead">
+      <button id="btnLeaveOver" class="btn-ghost" style="flex:none">← Tables</button>
+      <span class="code" id="tableCodeOver"></span>
+    </div>
     <div class="card">
       <div class="podium-wrap">
         <div class="crown">👑</div>
@@ -416,9 +483,6 @@
   "use strict";
 
   // ── Constants / identity ─────────────────────────────────
-  const COLLECTION = "trivia";          // db collection
-  const DOC_KEY = "trivia-main";        // logical key carried on the doc
-  const ROOM = "room";                  // ws channel (presence + buzzes)
   const QUESTION_MS = 15000;            // per-question window
   const REVEAL_MS = 6000;               // reveal screen duration before host advances
   const MAX_POINTS = 1000;              // full-speed correct answer
@@ -446,21 +510,33 @@
   const $ = (id) => document.getElementById(id);
   const boot = $("boot");
   const screens = {
-    lobby: $("screenLobby"), loading: $("screenLoading"), question: $("screenQuestion"),
-    reveal: $("screenReveal"), over: $("screenOver")
+    tables: $("screenTables"), lobby: $("screenLobby"), loading: $("screenLoading"),
+    question: $("screenQuestion"), reveal: $("screenReveal"), over: $("screenOver")
   };
 
   // ── Worlds handles ───────────────────────────────────────
-  const col = worlds.db.collection(COLLECTION);
-  const room = worlds.ws.channel(ROOM);
+  // Many concurrent quiz rooms: worlds.rooms is the directory (lobby browser +
+  // join codes); each table is one worlds.room carrying the authoritative quiz
+  // doc (load-or-create + live sync + ordering) AND the live roster (host/ready/
+  // start). The quiz state lives in the room — no separate db collection.
   const { toast, esc, uniqByHandle } = worlds;   // shared SDK building blocks
+  const hall = worlds.rooms("trivia", {
+    initial: blankGame(),
+    minPlayers: 1,
+    autoStart: false,            // trivia is host-driven (host picks a topic)
+    onChange: onRoomChange,
+    onStart: onRoomStart,
+    onReturn: onRoomReturn
+  });
 
   // ── Runtime state ────────────────────────────────────────
   let me = null;                 // {handle,name,...}
-  let docId = null;
-  let game = null;               // doc.data (authoritative)
-  let L = null;                  // worlds.lobby() — robust roster/host/ready
-  let lob = null;                // latest lobby snapshot
+  let ROOM = null;               // the joined table (worlds.room) or null
+  let unsubRoom = null;          // teardown for the joined table's onChange
+  let buzz = null;               // per-table ephemeral channel (buzzes)
+  let unsubBuzz = null;          // teardown for the buzz subscription
+  let snap = null;               // latest room snapshot (roster/host/ready/started)
+  let game = null;               // ROOM state (authoritative quiz doc)
   // host-chosen setup (local until start)
   let topic = "";
   let qCount = COUNT_OPTIONS[0];
@@ -478,14 +554,15 @@
     boot.classList.add("hidden");
     for (const k in screens) screens[k].classList.toggle("hidden", k !== name);
   }
-  // Roster/host/ready are owned by worlds.lobby() (self-inclusive: the caller is
-  // always counted, even before presence echoes back — fixes host flicker).
+  // Roster/host/ready are owned by the joined worlds.room (self-inclusive: the
+  // caller is always counted, even before presence echoes back — fixes host
+  // flicker). Snapshots arrive via room.onChange and are cached in `snap`.
   function roster() {
-    if (lob) return lob.members.map((m) => ({ handle: m.handle, name: m.name }));
+    if (snap) return snap.members.map((m) => ({ handle: m.handle, name: m.name }));
     return me ? [{ handle: me.handle, name: me.name }] : [];
   }
-  function hostHandle() { return lob && lob.host ? lob.host.handle : (me ? me.handle : null); }
-  function isHost() { return L ? L.isHost : false; }
+  function hostHandle() { return snap && snap.host ? snap.host.handle : (me ? me.handle : null); }
+  function isHost() { return snap ? snap.isHost : false; }
   function nameFor(handle) {
     const p = roster().find((x) => x.handle === handle);
     if (p) return p.name;
@@ -494,71 +571,32 @@
   }
   function blankGame() {
     return {
-      key: DOC_KEY, phase: "lobby", topic: "", questions: [], current: 0,
+      phase: "lobby", topic: "", questions: [], current: 0,
       questionEndsAt: 0, revealEndsAt: 0, scores: {}, players: [], answers: {}, gameNum: 0
     };
   }
 
-  // ── DB doc bootstrap (single shared doc) ─────────────────
-  async function loadDoc() {
-    const page = await col.list({ sort: "-created_at", limit: 100 });
-    const found = page.items.find((d) => d.data && d.data.key === DOC_KEY) || page.items[0];
-    if (found) { docId = found.id; return found.data; }
-    const created = await col.create(blankGame());
-    docId = created.id; return created.data;
-  }
-
-  // monotonic guard: phases advance, current advances, gameNum advances.
-  function isStale(incoming) {
-    if (!game || !incoming) return false;
-    if ((incoming.gameNum || 0) < (game.gameNum || 0)) return true;
-    if ((incoming.gameNum || 0) > (game.gameNum || 0)) return false;
-    const order = { lobby: 0, loading: 1, question: 2, reveal: 3, over: 4 };
-    // within same game + same question, allow same-phase updates (answers grow)
-    if ((incoming.current || 0) < (game.current || 0)) return true;
-    if ((incoming.current || 0) === (game.current || 0)) {
-      if ((order[incoming.phase] ?? 0) < (order[game.phase] ?? 0)) return true;
-    }
-    return false;
-  }
-
+  // ── Authoritative quiz doc lives in the room (s.state) ───
+  // The room owns load-or-create + ordering; we just read snapshots and write
+  // via ROOM.set / ROOM.merge. Writes are host-gated by callers.
   async function writeDoc(next) {
-    try {
-      const res = await col.replace(docId, next);
-      adoptDoc(res, true);
-      return true;
-    } catch (e) { return false; }
+    if (!ROOM) return false;
+    try { await ROOM.set(next); game = next; return true; }
+    catch (e) { return false; }
   }
   async function patchDoc(patch) {
     // merge onto latest known game; used by host to grow answers/scores
-    return writeDoc({ ...game, ...patch });
+    if (!ROOM) return false;
+    try { const next = { ...game, ...patch }; await ROOM.merge(patch); game = next; return true; }
+    catch (e) { return false; }
   }
-  async function refetch() { try { adoptDoc(await col.get(docId), true); } catch (e) {} }
+  async function refetch() { if (ROOM) { try { await ROOM.refetch(); } catch (e) {} } }
 
-  function adoptDoc(doc, fromSelf) {
-    if (!doc || !doc.data) return;
-    const incoming = doc.data;
-    if (incoming.key !== DOC_KEY && doc.id !== docId) return;
-    if (!fromSelf && isStale(incoming)) return;
-    const prevPhase = game ? game.phase : null;
-    const prevCurrent = game ? game.current : -1;
-    docId = doc.id;
-    game = incoming;
-    onGameChange(prevPhase, prevCurrent);
-  }
-
-  // ── Lobby: readiness (delegated to worlds.lobby over ws) ──
-  function setReady(val) { if (L) L.setReady(val); }
-  function readyCount() { return lob ? lob.readyCount : 0; }
-  function allReady() { return lob ? lob.allReady : false; }
-  function myReady() { return lob ? lob.ready : false; }
-  function maybeAutoStart() {
-    if (!game || game.phase !== "lobby") return;
-    if (isHost() && allReady() && !starting && !generating) {
-      const t = (topic || "").trim() || "General knowledge";
-      startGame(t, qCount);
-    }
-  }
+  // ── Lobby: readiness (delegated to the room snapshot) ────
+  function setReady(val) { if (ROOM) ROOM.setReady(val); }
+  function readyCount() { return snap ? snap.readyCount : 0; }
+  function allReady() { return snap ? snap.allReady : false; }
+  function myReady() { return snap ? snap.ready : false; }
 
   // ── AI question generation (host only) ───────────────────
   function clampQuestion(item) {
@@ -608,6 +646,9 @@ Respond with ONLY a JSON array, no prose, no markdown fences. Schema:
   }
 
   // ── Host: phase machine ──────────────────────────────────
+  // Kicking off a game = ROOM.start() (flips the room to "started" + fires
+  // onStart on every client). The host then generates questions in onStart and
+  // writes them into the room state below.
   async function startGame(t, n) {
     if (starting || generating) return;
     if (!isHost()) { toast("Only the host can start."); return; }
@@ -616,9 +657,9 @@ Respond with ONLY a JSON array, no prose, no markdown fences. Schema:
     const players = roster();
     const scores = {}; players.forEach((p) => { scores[p.handle] = 0; });
     // flip to loading so everyone sees the spinner
-    const num = (game.gameNum || 0) + 1;
+    const num = ((game && game.gameNum) || 0) + 1;
     await writeDoc({
-      ...blankGame(), key: DOC_KEY, phase: "loading", topic: t, players, scores,
+      ...blankGame(), phase: "loading", topic: t, players, scores,
       current: 0, gameNum: num
     });
     let questions = [];
@@ -718,7 +759,7 @@ Respond with ONLY a JSON array, no prose, no markdown fences. Schema:
     answersByQ[game.current] = answersByQ[game.current] || {};
     answersByQ[game.current][me.handle] = { choice, at };
     renderQuestion();
-    room.publish({ cid: clientId, t: "buzz", qi: game.current, handle: me.handle, name: me.name, choice, at });
+    if (buzz) buzz.publish({ cid: clientId, t: "buzz", qi: game.current, handle: me.handle, name: me.name, choice, at });
     if (isHost()) ingestBuzz({ qi: game.current, handle: me.handle, choice, at });
   }
 
@@ -726,7 +767,7 @@ Respond with ONLY a JSON array, no prose, no markdown fences. Schema:
   function onGameChange(prevPhase, prevCurrent) {
     if (!game) return;
     // returning to the lobby → un-ready everyone for the next round
-    if (game.phase === "lobby" && prevPhase && prevPhase !== "lobby" && L) L.setReady(false);
+    if (game.phase === "lobby" && prevPhase && prevPhase !== "lobby" && ROOM) ROOM.setReady(false);
     // entering a new question → reset local pick + capture prev scores for deltas
     if (game.phase === "question" && (prevPhase !== "question" || prevCurrent !== game.current)) {
       myChoice = null;
@@ -780,7 +821,7 @@ Respond with ONLY a JSON array, no prose, no markdown fences. Schema:
 
   function renderLobby() {
     showScreen("lobby");
-    const members = lob ? lob.members : (me ? [{ handle: me.handle, name: me.name, ready: false, isMe: true, isHost: true }] : []);
+    const members = snap ? snap.members : (me ? [{ handle: me.handle, name: me.name, ready: false, isMe: true, isHost: true }] : []);
     $("lobbyCount").textContent = `${members.length} online`;
     const el = $("lobbyRoster"); el.innerHTML = "";
     if (!members.length) { el.innerHTML = '<li class="muted" style="border:none;background:transparent">No one here yet…</li>'; }
@@ -1042,12 +1083,15 @@ Respond with ONLY a JSON array, no prose, no markdown fences. Schema:
   }
 
   // ── Buttons ──────────────────────────────────────────────
-  $("btnReady").addEventListener("click", () => setReady(!ready[me.handle]));
+  $("btnReady").addEventListener("click", () => ROOM && ROOM.toggleReady());
   $("topicInput").addEventListener("input", (e) => { topic = e.target.value; });
   $("btnStart").addEventListener("click", () => {
     const t = ($("topicInput").value || "").trim();
     if (!t) { toast("Pick a topic first."); $("topicInput").focus(); return; }
-    startGame(t, qCount);
+    topic = t;
+    // ROOM.start() flips the room to "started" and fires onStart on every client;
+    // the host then generates + writes the quiz in onRoomStart (below).
+    if (ROOM) ROOM.start();
   });
   $("btnNext").addEventListener("click", () => { if (game && game.phase === "reveal") hostAdvance(); });
   $("btnPlayAgain").addEventListener("click", () => backToLobby());
@@ -1056,14 +1100,141 @@ Respond with ONLY a JSON array, no prose, no markdown fences. Schema:
   async function backToLobby() {
     clearTimeout(advanceTimer);
     if (isHost()) {
-      if (L) L.setReady(false);            // clear readiness for the new round
-      await writeDoc({ ...blankGame(), gameNum: game.gameNum || 0, players: roster(), scores: {} });
+      // ROOM.returnToLobby() flips the room back to the lobby + un-readies
+      // everyone; clear the quiz doc so the next round starts fresh.
+      await writeDoc({ ...blankGame(), gameNum: (game && game.gameNum) || 0, players: roster(), scores: {} });
+      if (ROOM) ROOM.returnToLobby();
     } else {
-      // a guest can locally hop back; host's lobby doc is authoritative anyway
-      if (L) L.setReady(false);
+      // a guest can locally hop back; the host's room doc stays authoritative.
+      if (ROOM) ROOM.setReady(false);
       renderLobby(); showScreen("lobby");
     }
   }
+
+  // ── Room callbacks (forwarded from worlds.rooms to the joined room) ──
+  // Snapshot-driven: fires on roster OR state change. We mirror the quiz doc
+  // from s.state, the roster/host/ready from s, and run the phase machine.
+  function onRoomChange(s) {
+    snap = s;
+    const prevPhase = game ? game.phase : null;
+    const prevCurrent = game ? game.current : -1;
+    game = s.state || blankGame();
+    onGameChange(prevPhase, prevCurrent);
+  }
+
+  // Host kicks off a game: generate questions + write them into the room state.
+  // Fires on every client; only the host generates + writes (writes are gated).
+  function onRoomStart() {
+    if (!isHost()) return;
+    const t = (topic || "").trim() || "General knowledge";
+    startGame(t, qCount);
+  }
+
+  // Host returned the room to the lobby: clear local round state + re-render.
+  function onRoomReturn() {
+    clearTimeout(advanceTimer);
+    myChoice = null; answersByQ = {}; prevScores = {};
+    if (!game || game.phase !== "lobby") game = { ...blankGame(), players: roster(), scores: {} };
+    render();
+  }
+
+  // ── Tables browser (worlds.rooms directory) ──────────────
+  function renderTables(list) {
+    const ul = $("tableList");
+    ul.innerHTML = "";
+    if (!list.length) {
+      ul.innerHTML = '<li class="empty-note">No open tables yet — start one!</li>';
+      return;
+    }
+    for (const t of list) {
+      const li = document.createElement("li");
+      li.className = "tablerow";
+      const who = t.count === 1 ? "1 here" : `${t.count} here`;
+      const status = t.status === "playing" ? ' · <span class="playing">in game</span>' : "";
+      li.innerHTML =
+        `<div class="meta"><div class="nm">${esc(t.name)}</div>` +
+        `<div class="sub">${who}${status} · <span class="code">${esc(t.code)}</span></div></div>`;
+      const btn = document.createElement("button");
+      btn.className = "btn-primary";
+      btn.textContent = t.status === "playing" ? "Watch" : "Join";
+      btn.addEventListener("click", () => joinTable(() => hall.join(t.id)));
+      li.appendChild(btn);
+      ul.appendChild(li);
+    }
+  }
+
+  // Mount a table: bind the quiz doc + roster + buzz channel to this room.
+  function mountRoom(room) {
+    if (unsubRoom) { try { unsubRoom(); } catch (_) {} unsubRoom = null; }
+    if (unsubBuzz) { try { unsubBuzz(); } catch (_) {} unsubBuzz = null; }
+    clearTimeout(advanceTimer);
+    ROOM = room;
+    snap = null; game = null;
+    myChoice = null; answersByQ = {}; prevScores = {}; starting = false; generating = false;
+
+    // Per-table ephemeral channel: buzzes (presence rides the room snapshot).
+    buzz = worlds.ws.channel("trivia:" + room.id);
+    unsubBuzz = buzz.subscribe((msg) => {
+      const p = msg && msg.payload;
+      if (!p || p.cid === clientId) return;  // ignore our own echo
+      if (p.t === "buzz") {
+        if (game && game.phase === "question" && p.qi === game.current && typeof p.choice === "number") {
+          answersByQ[game.current] = answersByQ[game.current] || {};
+          if (!answersByQ[game.current][p.handle]) {
+            answersByQ[game.current][p.handle] = { choice: p.choice, at: typeof p.at === "number" ? p.at : Date.now() };
+            renderPips();
+          }
+          if (isHost()) ingestBuzz(p);
+        }
+      }
+    });
+
+    location.hash = room.code;
+    const codeStr = "code " + room.code;
+    $("tableCodeLobby").textContent = codeStr;
+    $("tableCodeLoading").textContent = codeStr;
+    $("tableCodeQuestion").textContent = codeStr;
+    $("tableCodeReveal").textContent = codeStr;
+    $("tableCodeOver").textContent = codeStr;
+    showScreen("lobby");
+
+    // One subscription delivers BOTH the live quiz doc (s.state) and the roster.
+    unsubRoom = room.onChange(onRoomChange);
+  }
+
+  async function joinTable(fn) {
+    try { mountRoom(await fn()); }
+    catch (e) {
+      toast(e && e.code === "conflict" ? "That table is full." : "Couldn't join that table.");
+      console.error("[trivia] join failed", e);
+    }
+  }
+
+  function leaveTable() {
+    if (unsubRoom) { try { unsubRoom(); } catch (_) {} unsubRoom = null; }
+    if (unsubBuzz) { try { unsubBuzz(); } catch (_) {} unsubBuzz = null; }
+    clearTimeout(advanceTimer);
+    stopTick();
+    buzz = null;
+    hall.leave().catch(() => {});
+    ROOM = null; snap = null; game = null;
+    history.replaceState(null, "", location.pathname);
+    showScreen("tables");
+  }
+
+  // ── Leave-table wiring (shared across in-game screens) ───
+  ["btnLeaveLobby", "btnLeaveLoading", "btnLeaveQuestion", "btnLeaveReveal", "btnLeaveOver"]
+    .forEach((id) => { const el = $(id); if (el) el.addEventListener("click", leaveTable); });
+  $("btnNewTable").addEventListener("click", () =>
+    joinTable(() => hall.create({ name: `${me.name || me.handle}'s table` })));
+  $("btnNewPrivate").addEventListener("click", () =>
+    joinTable(() => hall.create({ name: `${me.name || me.handle}'s table`, private: true })));
+  $("btnJoinCode").addEventListener("click", () => {
+    const code = $("codeInput").value.trim().toUpperCase();
+    if (code.length < 4) { toast("Enter the 4-letter code."); return; }
+    joinTable(() => hall.joinByCode(code));
+  });
+  $("codeInput").addEventListener("keydown", (e) => { if (e.key === "Enter") $("btnJoinCode").click(); });
 
   // ── Boot ─────────────────────────────────────────────────
   (async () => {
@@ -1075,48 +1246,17 @@ Respond with ONLY a JSON array, no prose, no markdown fences. Schema:
       buildCountSeg();
       buildTopicChips();
 
-      game = await loadDoc();
+      // Live directory of open tables drives the browser screen.
+      hall.onList(renderTables);
 
-      // Live shared game state
-      col.subscribe((ev) => {
-        if (!ev || !ev.doc) return;
-        const d = ev.doc;
-        const k = d.data && d.data.key;
-        if (d.id === docId || k === DOC_KEY) {
-          if (ev.type === "delete") { game = blankGame(); render(); return; }
-          adoptDoc(d, false);
-        }
-      });
-
-      // Robust roster / host / readiness (self-inclusive). The host auto-starts
-      // via maybeAutoStart() once everyone is ready — driven off lobby updates so
-      // the db phase stays authoritative (no double-start over a live game).
-      L = worlds.lobby(ROOM, {
-        me: { handle: me.handle, name: me.name },
-        autoStart: false,
-        onUpdate: (s) => {
-          lob = s;
-          if (game && game.phase === "lobby") { renderLobby(); maybeAutoStart(); }
-        },
-      });
-
-      // Ephemeral ws: buzzes (lobby messages carry _lobby and are handled by L)
-      room.subscribe((msg) => {
-        const p = msg && msg.payload;
-        if (!p || p._lobby || p.cid === clientId) return;  // ignore lobby + our own echo
-        if (p.t === "buzz") {
-          if (game && game.phase === "question" && p.qi === game.current && typeof p.choice === "number") {
-            answersByQ[game.current] = answersByQ[game.current] || {};
-            if (!answersByQ[game.current][p.handle]) {
-              answersByQ[game.current][p.handle] = { choice: p.choice, at: typeof p.at === "number" ? p.at : Date.now() };
-              renderPips();
-            }
-            if (isHost()) ingestBuzz(p);
-          }
-        }
-      });
-
-      render();
+      // Deep link: #CODE drops you straight into a shared table.
+      const code = (location.hash || "").replace(/^#/, "").trim().toUpperCase();
+      if (code.length >= 4) {
+        await joinTable(() => hall.joinByCode(code));
+        if (!ROOM) showScreen("tables");
+      } else {
+        showScreen("tables");
+      }
     } catch (e) {
       boot.textContent = "Couldn't connect to Worlds. Refresh to retry.";
       console.error("[trivia] boot failed", e);
