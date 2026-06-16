@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { GLTFLoader } from "./lib/GLTFLoader.js";
 
 // ───────────────────────────────────────────────────────────────────────────
 // Kart Loop — low-poly arcade multiplayer racing on the Worlds platform.
@@ -658,41 +659,58 @@ function buildFinishLine(group, theme) {
     }
   }
 
-  // Gantry: two posts + a banner over the line.
-  const postMat = new THREE.MeshLambertMaterial({ color: theme.neon ? 0x16161e : 0x27272a });
-  const bannerMat = theme.neon
-    ? new THREE.MeshBasicMaterial({ color: theme.curb[1] })
-    : new THREE.MeshLambertMaterial({ color: 0xf59e0b });
-  for (const s of [1, -1]) {
-    const post = new THREE.Mesh(new THREE.BoxGeometry(0.7, 9, 0.7), postMat);
-    const base = edgeAt(0, s * (ROAD_HALF + 0.6), ROAD_LIFT);
-    post.position.set(base.x, base.y + 4.5, base.z);
-    post.castShadow = true;
-    group.add(post);
+  // Start gantry: slim posts + banner. (Kept thin on purpose — a wide overhead
+  // arch sits right where the camera spawns each round and its legs splay into
+  // dark bars across the view; the GLB arches are used for checkpoints instead.)
+  {
+    const postMat = new THREE.MeshLambertMaterial({ color: theme.neon ? 0x16161e : 0x27272a });
+    const bannerMat = theme.neon ? new THREE.MeshBasicMaterial({ color: theme.curb[1] }) : new THREE.MeshLambertMaterial({ color: 0xf59e0b });
+    for (const s of [1, -1]) {
+      const post = new THREE.Mesh(new THREE.BoxGeometry(0.6, 9, 0.6), postMat);
+      const base = edgeAt(0, s * (ROAD_HALF + 0.6), ROAD_LIFT);
+      post.position.set(base.x, base.y + 4.5, base.z);
+      post.castShadow = true;
+      group.add(post);
+    }
+    const banner = new THREE.Mesh(new THREE.BoxGeometry(ROAD_HALF * 2 + 1.6, 1.8, 0.5), bannerMat);
+    banner.position.set(c.x, c.y + 9, c.z);
+    banner.rotation.y = Math.atan2(finishForward.x, finishForward.z);
+    banner.castShadow = true;
+    group.add(banner);
   }
-  const banner = new THREE.Mesh(new THREE.BoxGeometry(ROAD_HALF * 2 + 1.6, 1.8, 0.5), bannerMat);
-  banner.position.set(c.x, c.y + 9, c.z);
-  banner.rotation.y = Math.atan2(finishForward.x, finishForward.z);
-  banner.castShadow = true;
-  group.add(banner);
 }
 
 // ── Checkpoint gates ────────────────────────────────────────────────────────
 const CP_COLOR_NEXT = new THREE.Color(0xfbbf24); // gold — go here next
 const CP_COLOR_DONE = new THREE.Color(0x34d399); // green — passed
-const CP_COLOR_IDLE = new THREE.Color(0x4b5563); // dim — not yet
+const CP_COLOR_IDLE = new THREE.Color(0xc8ccd4); // light grey — not yet (clean, not a dark slab)
 
+// Checkpoint gates — Kenney overhead arch, scaled to span the road, oriented to
+// the banked surface frame, recoloured per state. Falls back to box gates.
+function gateAt(cp) {
+  const g = MODELS.overhead.clone(true);
+  const mats = [];
+  g.traverse((o) => { if (o.isMesh) { o.material = o.material.clone(); o.castShadow = true; mats.push(o.material); } });
+  cp.mats = mats;
+  _mbb.setFromObject(g); _mbb.getSize(_msz);
+  g.scale.setScalar((ROAD_HALF * 2 + 4) / (_msz.x || 1)); // span the road + margin
+  const i = cp.index, c = centerPts[i], up = ups[i], t = tangents[i];
+  g.quaternion.setFromRotationMatrix(orientMatrix(t, up));
+  g.position.set(c.x + up.x * ROAD_LIFT, c.y + up.y * ROAD_LIFT, c.z + up.z * ROAD_LIFT);
+  return g;
+}
 function buildCheckpointGates(group) {
+  if (!MODELS.overhead) return buildCheckpointGatesBox(group);
+  for (const cp of checkpoints) { const g = gateAt(cp); cp.group = g; group.add(g); }
+  refreshCheckpointVisuals();
+}
+function buildCheckpointGatesBox(group) {
   const dimMat = () => new THREE.MeshBasicMaterial({ color: 0x4b5563, transparent: true, opacity: 0.55 });
   const GATE_H = 6.2;
   const HALF_W = ROAD_HALF + 0.5;
   const postGeo = new THREE.CylinderGeometry(0.22, 0.22, GATE_H, 8);
   const barGeo = new THREE.BoxGeometry(HALF_W * 2, 0.45, 0.45);
   for (const cp of checkpoints) {
-    // Build the gate in the road's LOCAL frame (x = across, y = surface-up,
-    // z = forward), then orient the whole group to the banked surface. This
-    // keeps the posts on the edges and the bar spanning their tops even on
-    // banked / curved checkpoints (the old world-axis build skewed there).
     const g = new THREE.Group();
     const matA = dimMat(), matB = dimMat(), barMat = dimMat();
     cp.mats = [matA, matB, barMat];
@@ -712,11 +730,15 @@ function refreshCheckpointVisuals() {
   for (let k = 0; k < checkpoints.length; k++) {
     const cp = checkpoints[k];
     if (!cp.mats) continue;
-    let color, opacity;
-    if (k === lap.nextCheckpoint && raceStarted) { color = CP_COLOR_NEXT; opacity = 0.95; }
-    else if (k < lap.nextCheckpoint) { color = CP_COLOR_DONE; opacity = 0.45; }
-    else { color = CP_COLOR_IDLE; opacity = 0.55; }
-    for (const mat of cp.mats) { mat.color.copy(color); mat.opacity = opacity; }
+    let color, opacity, emis;
+    if (k === lap.nextCheckpoint && raceStarted) { color = CP_COLOR_NEXT; opacity = 0.95; emis = 0x6b4e07; }
+    else if (k < lap.nextCheckpoint) { color = CP_COLOR_DONE; opacity = 0.45; emis = 0x0c3a26; }
+    else { color = CP_COLOR_IDLE; opacity = 0.55; emis = 0x000000; }
+    for (const mat of cp.mats) {
+      mat.color.copy(color);
+      if ("opacity" in mat && mat.transparent) mat.opacity = opacity;
+      if (mat.emissive) mat.emissive.setHex(emis);
+    }
   }
 }
 
@@ -757,31 +779,76 @@ function scatter(count, rng, place, minRad = 95, maxRad = 320) {
   }
   return placed;
 }
+// one scattered ground point clear of the track, or null
+const UP_Y = new THREE.Vector3(0, 1, 0);
+function scatterPoint(rng, minRad = 95, maxRad = 320) {
+  for (let g = 0; g < 40; g++) {
+    const ang = rng() * Math.PI * 2;
+    const rad = minRad + rng() * (maxRad - minRad);
+    const x = Math.cos(ang) * rad, z = Math.sin(ang) * rad;
+    if (nearestSample(x, z).dist >= ROAD_HALF + 14) return { x, z };
+  }
+  return null;
+}
+
+// Instance a single Kenney model `count` times. bakeParts scales it to targetH
+// with its base at y=0; `place(i, pos, quat, scale)` fills the transform (return
+// false to skip). Returns the InstancedMesh(es) (one per material/part).
+function instedGLB(group, model, targetH, count, place, opts = {}) {
+  const { parts } = bakeParts(model, targetH);
+  const ims = parts.map((p) => {
+    const mat = p.mat.clone(); // per-build clone — safe to dispose on rotation
+    if (opts.recolor != null && mat.color) mat.color.setHex(opts.recolor);
+    if (opts.emissive != null && mat.emissive) mat.emissive.setHex(opts.emissive);
+    const im = new THREE.InstancedMesh(p.geo, mat, count);
+    im.castShadow = !opts.noShadow;
+    im.receiveShadow = false;
+    return im;
+  });
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), pos = new THREE.Vector3(), scl = new THREE.Vector3();
+  let n = 0;
+  for (let i = 0; i < count; i++) {
+    q.identity(); pos.set(0, 0, 0); scl.set(1, 1, 1);
+    if (place(i, pos, q, scl) === false) continue;
+    m.compose(pos, q, scl);
+    for (const im of ims) im.setMatrixAt(n, m);
+    n++;
+  }
+  for (const im of ims) { im.count = n; im.instanceMatrix.needsUpdate = true; group.add(im); }
+  return ims;
+}
 
 function addScenery(group, theme) {
   const rng = mulberry32(hashStr(curTrack.id) || 1337);
 
-  // Cones along both curbs (instanced) — theme-tinted.
-  const coneGeo = new THREE.ConeGeometry(0.5, 1.3, 8);
-  const coneMat = theme.neon
-    ? new THREE.MeshBasicMaterial({ color: theme.cone })
-    : new THREE.MeshLambertMaterial({ color: theme.cone });
+  // Cones along both curbs — Kenney pylon, recoloured to the theme.
   const coneCount = 60;
-  const cones = new THREE.InstancedMesh(coneGeo, coneMat, coneCount);
-  cones.castShadow = !theme.neon;
-  const m = new THREE.Matrix4();
-  for (let k = 0; k < coneCount; k++) {
-    const i = Math.floor((k / coneCount) * SAMPLES);
-    const edge = k % 2 === 0 ? trackEdges.curbL[i] : trackEdges.curbR[i];
-    const off = (k % 2 === 0 ? 1 : -1) * 1.1;
-    const n = finishNormalAt(i).multiplyScalar(off);
-    m.makeTranslation(edge.x + n.x, edge.y + 0.65, edge.z + n.z);
-    cones.setMatrixAt(k, m);
+  if (MODELS.pylon) {
+    instedGLB(group, MODELS.pylon, 1.5, coneCount, (k, pos) => {
+      const i = Math.floor((k / coneCount) * SAMPLES);
+      const edge = k % 2 === 0 ? trackEdges.curbL[i] : trackEdges.curbR[i];
+      const off = (k % 2 === 0 ? 1 : -1) * 1.1;
+      const n = finishNormalAt(i).multiplyScalar(off);
+      pos.set(edge.x + n.x, edge.y, edge.z + n.z);
+    }, { recolor: theme.cone, emissive: theme.neon ? theme.cone : null, noShadow: theme.neon });
   }
-  cones.instanceMatrix.needsUpdate = true;
-  group.add(cones);
 
-  if (theme.scenery === "trees" || theme.scenery === "stands") {
+  // Trees from Kenney models for the leafy biomes; the others stay procedural
+  // (no cactus/pine/neon-pylon in the kit).
+  if ((theme.scenery === "trees" || theme.scenery === "stands") && MODELS.treeLarge) {
+    const treeCount = theme.scenery === "stands" ? 42 : 72;
+    const big = MODELS.treeLarge, small = MODELS.treeSmall || MODELS.treeLarge;
+    for (const [model, frac] of [[big, 0.6], [small, 0.4]]) {
+      const cnt = Math.round(treeCount * frac);
+      instedGLB(group, model, 7, cnt, (i, pos, q, scl) => {
+        const p = scatterPoint(rng);
+        if (!p) return false;
+        pos.set(p.x, terrainHeightAt(p.x, p.z), p.z);
+        q.setFromAxisAngle(UP_Y, rng() * Math.PI * 2);
+        const u = 0.7 + rng() * 0.8; scl.set(u, u, u);
+      });
+    }
+  } else if (theme.scenery === "trees" || theme.scenery === "stands") {
     addTrees(group, rng, theme.scenery === "stands" ? 40 : 70);
   } else if (theme.scenery === "cacti") {
     addCacti(group, rng);
@@ -917,6 +984,24 @@ function addPylons(group, rng, theme) {
 }
 
 function addGrandstands(group, theme) {
+  const spots = [70, 360];
+  if (MODELS.grandStand) {
+    _mbb.setFromObject(MODELS.grandStand); _mbb.getSize(_msz);
+    const s = 6 / (_msz.y || 1); // ~6 tall (model is near-cubic — scale by height, not width)
+    for (const spot of spots) {
+      const i = spot % SAMPLES;
+      const c = centerPts[i];
+      const n = finishNormalAt(i).multiplyScalar(ROAD_HALF + 18);
+      const px = c.x + n.x, pz = c.z + n.z;
+      const gs = MODELS.grandStand.clone(true);
+      gs.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+      gs.scale.setScalar(s);
+      gs.position.set(px, terrainHeightAt(px, pz), pz);
+      gs.lookAt(c.x, terrainHeightAt(px, pz), c.z); // face the track
+      group.add(gs);
+    }
+    return;
+  }
   const standMat = new THREE.MeshLambertMaterial({ color: 0x3b3b44 });
   const roofMat = new THREE.MeshLambertMaterial({ color: 0xf59e0b });
   for (const spot of [80, 360]) {
@@ -940,10 +1025,10 @@ const T = { index: -1, group: null, built: false };
 function disposeGroup(g) {
   g.traverse((o) => {
     if (o.isMesh || o.isInstancedMesh) {
-      o.geometry?.dispose?.();
+      if (o.geometry && !SHARED.has(o.geometry)) o.geometry.dispose();
       const mat = o.material;
-      if (Array.isArray(mat)) mat.forEach((x) => x.dispose());
-      else mat?.dispose?.();
+      if (Array.isArray(mat)) mat.forEach((x) => { if (!SHARED.has(x)) x.dispose(); });
+      else if (mat && !SHARED.has(mat)) mat.dispose();
     }
   });
 }
@@ -979,7 +1064,63 @@ function spawnPlayerAtStart() {
 // ───────────────────────────────────────────────────────────────────────────
 // KART mesh — built from boxes. Reused for self + remotes; color-tinted.
 // ───────────────────────────────────────────────────────────────────────────
+// ── CC0 models (Kenney Racing Kit) — loaded once, cloned/instanced per use ──
+const MODELS = {};
+const SHARED = new Set(); // geometries/materials owned by MODELS — never disposed on rotation
+async function loadModels() {
+  const loader = new GLTFLoader();
+  const names = ["raceCarRed", "pylon", "overhead", "grandStand", "treeLarge", "treeSmall"];
+  await Promise.all(names.map((n) => new Promise((res) => {
+    loader.load(`assets/${n}.glb`, (g) => { g.scene.updateMatrixWorld(true); MODELS[n] = g.scene; res(); }, undefined, () => res());
+  })));
+  for (const s of Object.values(MODELS)) s.traverse((o) => {
+    if (o.geometry) SHARED.add(o.geometry);
+    if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => SHARED.add(m));
+  });
+}
+const _mbb = new THREE.Box3();
+const _msz = new THREE.Vector3();
+// Bake a single model's meshes into instanceable parts {geo (world-baked), mat},
+// scaled so its height = targetH and its base sits at y=0. Returns {parts, lift}.
+function bakeParts(model, targetH) {
+  model.updateMatrixWorld(true);
+  const raw = [];
+  model.traverse((o) => { if (o.isMesh) { const g = o.geometry.clone(); g.applyMatrix4(o.matrixWorld); raw.push({ g, mat: o.material }); } });
+  const box = new THREE.Box3();
+  for (const p of raw) { p.g.computeBoundingBox(); box.union(p.g.boundingBox); }
+  box.getSize(_msz);
+  const s = targetH / (_msz.y || 1);
+  const minY = box.min.y;
+  const parts = raw.map((p) => { p.g.scale(s, s, s); p.g.translate(0, -minY * s, 0); return { geo: p.g, mat: p.mat }; });
+  return { parts };
+}
+
+// GLB kart (recolour the body's "red" material per player); falls back to boxes.
 function makeKart(colorHex) {
+  if (!MODELS.raceCarRed) return makeKartBox(colorHex);
+  const wrap = new THREE.Group();
+  const car = MODELS.raceCarRed.clone(true);
+  let bodyMat = null;
+  car.traverse((o) => {
+    if (!o.isMesh) return;
+    o.castShadow = true;
+    o.material = o.material.clone();
+    if (o.material.name === "red") { o.material.color.setHex(colorHex); bodyMat = o.material; }
+  });
+  _mbb.setFromObject(car); _mbb.getSize(_msz);
+  const s = 3.0 / Math.max(_msz.x, _msz.z); // longest horizontal dim → ~3 units
+  car.scale.setScalar(s);
+  car.rotation.y = Math.PI; // Kenney cars face -Z; our forward is +Z
+  _mbb.setFromObject(car);
+  car.position.y -= _mbb.min.y; // wheels rest on y=0
+  wrap.add(car);
+  wrap.userData.bodyMat = bodyMat || { color: { setHex() {} } };
+  wrap.userData.allWheels = [];
+  wrap.userData.frontWheels = [];
+  return wrap;
+}
+
+function makeKartBox(colorHex) {
   const group = new THREE.Group();
   const bodyMat = new THREE.MeshLambertMaterial({ color: colorHex });
   const darkMat = new THREE.MeshLambertMaterial({ color: 0x18181b });
@@ -1971,6 +2112,8 @@ resize();
   if (!me.handle) { me.handle = "anon-" + clientId.slice(0, 8); me.name = "guest"; }
   me.color = colorForHandle(me.handle);
   dom.loaderWho.innerHTML = "ready · <b>" + esc(me.name) + "</b>";
+
+  try { await loadModels(); } catch (_) { /* fall back to box art */ }
 
   makeSelfKart();
   initSkid();
