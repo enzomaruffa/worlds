@@ -2100,6 +2100,15 @@ resize();
 // BOOT
 // ───────────────────────────────────────────────────────────────────────────
 (async function boot() {
+  // Track-editor preview: `?preview` loads a single track from localStorage
+  // (written by editor.html) and races it solo — handy for iterating on a design.
+  try {
+    if (new URLSearchParams(location.search).has("preview")) {
+      const t = JSON.parse(localStorage.getItem("kartPreviewTrack") || "null");
+      if (t && Array.isArray(t.cp) && Array.isArray(t.bank)) TRACKS.splice(0, TRACKS.length, t);
+    }
+  } catch (_) {}
+
   try { if (window.worlds && worlds.ready) await worlds.ready; } catch (_) {}
   try {
     const info = await worlds.me();

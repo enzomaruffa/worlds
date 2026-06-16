@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Kart Loop · Track Editor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #09090b; --surface: #0c0c0f; --surface-2: #131317; --border: #27272a;
+      --gold: #f59e0b; --gold-bright: #fbbf24; --green: #22c55e; --red: #ef4444;
+      --text: #e4e4e7; --muted: #a1a1aa; --dim: #71717a;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      background: var(--bg); color: var(--text); overflow: hidden;
+      font-family: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+      display: flex;
+    }
+    #stage { flex: 1; position: relative; min-width: 0; }
+    canvas#edit { display: block; width: 100%; height: 100%; cursor: crosshair; touch-action: none; }
+    #hint {
+      position: absolute; left: .8rem; bottom: .8rem; font-size: .76rem; color: var(--dim);
+      background: rgba(12,12,15,.7); padding: .4rem .6rem; border-radius: .5rem; border: 1px solid var(--border);
+      pointer-events: none; line-height: 1.5;
+    }
+    #hint b { color: var(--muted); }
+
+    #panel {
+      width: 22rem; flex-shrink: 0; height: 100%; overflow-y: auto;
+      background: var(--surface); border-left: 1px solid var(--border);
+      padding: 1rem; display: flex; flex-direction: column; gap: .9rem;
+    }
+    .panel-h { font-size: 1.15rem; font-weight: 700; margin: 0; }
+    .panel-h b { color: var(--gold); }
+    .sec { background: var(--surface-2); border: 1px solid var(--border); border-radius: .6rem; padding: .7rem .75rem; }
+    .sec h3 {
+      margin: 0 0 .55rem; font-size: .68rem; font-weight: 600; letter-spacing: .12em;
+      text-transform: uppercase; color: var(--dim);
+    }
+    .row { display: flex; align-items: center; gap: .5rem; margin: .35rem 0; }
+    .row label { font-size: .8rem; color: var(--muted); width: 4.5rem; flex-shrink: 0; }
+    .row input[type="text"], .row input[type="number"], .row select {
+      flex: 1; min-width: 0; background: var(--bg); color: var(--text);
+      border: 1px solid var(--border); border-radius: .4rem; padding: .35rem .5rem;
+      font-family: inherit; font-size: .82rem;
+    }
+    .row input[type="range"] { flex: 1; min-width: 0; accent-color: var(--gold); }
+    .row .val { font-size: .78rem; color: var(--gold-bright); width: 3rem; text-align: right; font-variant-numeric: tabular-nums; }
+
+    .metrics { display: flex; flex-direction: column; gap: .3rem; }
+    .metric { display: flex; justify-content: space-between; font-size: .82rem; }
+    .metric .k { color: var(--muted); }
+    .metric .v { font-variant-numeric: tabular-nums; font-weight: 600; }
+    .metric .v.ok { color: var(--green); }
+    .metric .v.warn { color: var(--gold-bright); }
+    .metric .v.bad { color: var(--red); }
+    #verdict {
+      margin-top: .5rem; text-align: center; font-weight: 700; font-size: .85rem;
+      padding: .35rem; border-radius: .4rem; letter-spacing: .04em;
+    }
+    #verdict.clean { background: rgba(34,197,94,.16); color: #bbf7d0; border: 1px solid #166534; }
+    #verdict.warn { background: rgba(245,158,11,.16); color: #fde68a; border: 1px solid #92660a; }
+    #verdict.issues { background: rgba(239,68,68,.16); color: #fecaca; border: 1px solid #7f1d1d; }
+
+    .btns { display: flex; flex-wrap: wrap; gap: .5rem; }
+    button {
+      flex: 1; min-width: 6rem; padding: .55rem .6rem; border-radius: .5rem; cursor: pointer;
+      font-family: inherit; font-size: .82rem; font-weight: 600;
+      border: 1px solid var(--border); background: var(--surface-2); color: var(--text);
+      transition: background .1s, border-color .1s, transform .05s;
+    }
+    button:hover { border-color: var(--muted); }
+    button:active { transform: translateY(1px); }
+    button.primary { border-color: var(--gold); background: rgba(245,158,11,.16); color: var(--gold-bright); }
+    button.go { border-color: var(--green); background: rgba(34,197,94,.16); color: #bbf7d0; }
+    button.danger { border-color: #7f1d1d; color: #fecaca; }
+    button:disabled { opacity: .4; cursor: default; }
+    #ptSec.hidden { display: none; }
+    #export { width: 100%; height: 9rem; resize: vertical; background: var(--bg); color: var(--text);
+      border: 1px solid var(--border); border-radius: .4rem; padding: .5rem; font-family: ui-monospace, monospace; font-size: .72rem; }
+    .note { font-size: .72rem; color: var(--dim); line-height: 1.5; }
+  </style>
+  <script type="importmap">{ "imports": { "three": "./three.module.js" } }</script>
+</head>
+<body>
+  <div id="stage">
+    <canvas id="edit"></canvas>
+    <div id="hint">
+      <b>drag</b> a point to move · <b>click the road</b> to add a point · <b>click a point</b> to select<br />
+      <b>Del / Backspace</b> remove selected · <b>drag empty space</b> to pan · <b>scroll</b> to zoom
+    </div>
+  </div>
+
+  <div id="panel">
+    <h2 class="panel-h"><b>KART</b> LOOP · track editor</h2>
+
+    <div class="sec">
+      <h3>Track</h3>
+      <div class="row"><label>Name</label><input type="text" id="mName" /></div>
+      <div class="row"><label>Blurb</label><input type="text" id="mBlurb" /></div>
+      <div class="row"><label>Laps</label><input type="number" id="mLaps" min="1" max="12" /></div>
+      <div class="row"><label>Theme</label><select id="mTheme"></select></div>
+    </div>
+
+    <div class="sec">
+      <h3>Validation</h3>
+      <div class="metrics" id="metrics"></div>
+      <div id="verdict"></div>
+    </div>
+
+    <div class="sec hidden" id="ptSec">
+      <h3>Point <span id="ptIdx"></span></h3>
+      <div class="row"><label>Elev (Y)</label><input type="range" id="ptY" min="-4" max="10" step="0.1" /><span class="val" id="ptYV"></span></div>
+      <div class="row"><label>Bank</label><input type="range" id="ptBank" min="0" max="1" step="0.05" /><span class="val" id="ptBankV"></span></div>
+      <div class="btns"><button class="danger" id="ptDel">Delete point</button></div>
+    </div>
+
+    <div class="sec">
+      <h3>Load a track to edit</h3>
+      <div class="row"><label>Start from</label><select id="loadSel"></select></div>
+      <div class="btns"><button id="loadBtn">Load</button><button id="newBtn">New blank</button></div>
+    </div>
+
+    <div class="sec">
+      <h3>Export &amp; preview</h3>
+      <div class="btns">
+        <button class="go" id="previewBtn">▶ Preview in game</button>
+        <button class="primary" id="copyBtn">Copy track def</button>
+      </div>
+      <p class="note">Paste the copied object into the <code>TRACKS</code> array in <code>main.js</code> to keep it. Preview opens the real game with this track (solo).</p>
+      <textarea id="export" readonly spellcheck="false"></textarea>
+    </div>
+  </div>
+
+  <script type="module" src="./editor.js"></script>
+</body>
+</html>
