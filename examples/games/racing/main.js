@@ -233,7 +233,7 @@ function computeTrackGeometry(index) {
     const turnSign = Math.sign(t.x * tn.z - t.z * tn.x) || 0; // +left, -right (XZ)
     const u = (i % SAMPLES) / SAMPLES;
     const bank = bankWeightAt(u) * BANK_MAX;
-    const roll = -turnSign * bank;
+    const roll = turnSign * bank; // bank INTO the turn (raise the outer edge), not off-camber
     const q = new THREE.Quaternion().setFromAxisAngle(t, roll);
     sideNormals.push(flatN.clone().applyQuaternion(q).normalize());
     ups.push(WORLD_UP.clone().applyQuaternion(q).normalize());
