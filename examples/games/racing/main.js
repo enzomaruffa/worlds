@@ -684,22 +684,24 @@ const CP_COLOR_IDLE = new THREE.Color(0x4b5563); // dim — not yet
 
 function buildCheckpointGates(group) {
   const dimMat = () => new THREE.MeshBasicMaterial({ color: 0x4b5563, transparent: true, opacity: 0.55 });
-  const postGeo = new THREE.CylinderGeometry(0.22, 0.22, 7, 8);
-  const barGeo = new THREE.BoxGeometry(ROAD_HALF * 2 + 0.8, 0.4, 0.4);
+  const GATE_H = 6.2;
+  const HALF_W = ROAD_HALF + 0.5;
+  const postGeo = new THREE.CylinderGeometry(0.22, 0.22, GATE_H, 8);
+  const barGeo = new THREE.BoxGeometry(HALF_W * 2, 0.45, 0.45);
   for (const cp of checkpoints) {
+    // Build the gate in the road's LOCAL frame (x = across, y = surface-up,
+    // z = forward), then orient the whole group to the banked surface. This
+    // keeps the posts on the edges and the bar spanning their tops even on
+    // banked / curved checkpoints (the old world-axis build skewed there).
     const g = new THREE.Group();
     const matA = dimMat(), matB = dimMat(), barMat = dimMat();
     cp.mats = [matA, matB, barMat];
-    for (const [s, mat] of [[1, matA], [-1, matB]]) {
-      const base = edgeAt(cp.index, s * (ROAD_HALF + 0.4), ROAD_LIFT);
-      const post = new THREE.Mesh(postGeo, mat);
-      post.position.set(base.x, base.y + 3.5, base.z);
-      g.add(post);
-    }
-    const bar = new THREE.Mesh(barGeo, barMat);
-    bar.position.set(cp.center.x, cp.center.y + 6.8, cp.center.z);
-    bar.rotation.y = Math.atan2(cp.forward.x, cp.forward.z);
-    g.add(bar);
+    const postA = new THREE.Mesh(postGeo, matA); postA.position.set(HALF_W, GATE_H / 2, 0); g.add(postA);
+    const postB = new THREE.Mesh(postGeo, matB); postB.position.set(-HALF_W, GATE_H / 2, 0); g.add(postB);
+    const bar = new THREE.Mesh(barGeo, barMat); bar.position.set(0, GATE_H, 0); g.add(bar);
+    const c = centerPts[cp.index], up = ups[cp.index], t = tangents[cp.index];
+    g.position.set(c.x + up.x * ROAD_LIFT, c.y + up.y * ROAD_LIFT, c.z + up.z * ROAD_LIFT);
+    g.quaternion.setFromRotationMatrix(orientMatrix(t, up));
     cp.group = g;
     group.add(g);
   }
