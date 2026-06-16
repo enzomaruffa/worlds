@@ -561,11 +561,15 @@ function buildRoad(group, theme) {
   const m = new THREE.Matrix4();
   const q = new THREE.Quaternion();
   const dz = new THREE.Vector3();
+  // lay the plane flat on the banked surface (its normal → surface up), length
+  // along the tangent — same trick as the finish tiles.
+  const lay = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2);
   for (let d = 0; d < dashCount; d++) {
     const i = Math.floor((d / dashCount) * SAMPLES);
     const c = centerPts[i], t = tangents[i], up = ups[i];
     dz.copy(t).normalize();
     q.setFromRotationMatrix(orientMatrix(dz, up));
+    q.multiply(lay);
     m.compose(
       new THREE.Vector3(c.x + up.x * (ROAD_LIFT + 0.02), c.y + up.y * (ROAD_LIFT + 0.02), c.z + up.z * (ROAD_LIFT + 0.02)),
       q, new THREE.Vector3(1, 1, 1),
