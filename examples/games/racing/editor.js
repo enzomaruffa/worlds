@@ -14,8 +14,9 @@ import * as THREE from "./three.module.js";
 const ROAD_HALF = 7.0;
 const CURB_W = 0.9;
 const SAMPLES = 400;
-const MIN_RADIUS_OK = ROAD_HALF * 1.6; // corner radius must clear the road width
-const SELF_DIST_OK = 18;               // opposite strands must not pinch
+const FOLD_RADIUS = 0.7;               // the inner-edge taper keeps the road from folding down to ~0.6u, so anything ≥ ~1u is clean
+const HAIRPIN_RADIUS = ROAD_HALF * 1.8; // below this it's a sharp hairpin — tight but totally drivable
+const OVERLAP_DIST = ROAD_HALF * 0.5;   // with tapered inner edges, strands only truly overlap when this close
 
 // ── theme presets (mirror of main.js TRACKS themes) ─────────────────────────
 const THEMES = {
@@ -46,11 +47,28 @@ const BUILTIN = [
 ];
 
 // ── state ───────────────────────────────────────────────────────────────────
-let track = clone(BUILTIN[0]);
+function loadSavedTrack() {
+  try { const r = localStorage.getItem("kartEditorTrack"); if (r) { const t = JSON.parse(r); if (t && Array.isArray(t.cp) && t.cp.length >= 4 && Array.isArray(t.bank)) return t; } } catch (_) {}
+  return clone(BUILTIN[0]);
+}
+let track = loadSavedTrack();
 let selected = -1;
+let selProp = -1;                     // selected scenery prop
 let geo = null;                       // sampled geometry + metrics
 const view = { cx: 0, cz: 0, scale: 3 }; // world→screen
-let drag = null;                      // { kind:'point'|'pan', ... }
+let drag = null;                      // { kind:'point'|'pan'|'prop', ... }
+
+// scenery you can drag onto the track (model names match main.js MODELS / assets)
+const PROP_CATALOG = [
+  { m: "treeLarge", l: "Tree (big)", s: 7 }, { m: "treeSmall", l: "Tree (small)", s: 4 },
+  { m: "tree_fat", l: "Fat tree", s: 7 }, { m: "tree_pineRoundB", l: "Pine", s: 7 }, { m: "cactus_tall", l: "Cactus", s: 6 },
+  { m: "rock_largeA", l: "Rock (big)", s: 5 }, { m: "rock_smallA", l: "Rock", s: 2.5 }, { m: "log", l: "Log", s: 2 },
+  { m: "stump_round", l: "Stump", s: 2 }, { m: "flower_redA", l: "Flowers", s: 1.5 }, { m: "plant_bushLarge", l: "Bush", s: 3 },
+  { m: "barrel", l: "Barrel", s: 2.5 }, { m: "pylon", l: "Pylon", s: 2 }, { m: "grandStand", l: "Grandstand", s: 9 },
+  { m: "satelliteDish_detailed", l: "Dish", s: 5 }, { m: "gate_complex", l: "Arch gate", s: 14 },
+];
+const propLabel = (m) => (PROP_CATALOG.find((p) => p.m === m) || { l: m }).l;
+function props() { if (!track.props) track.props = []; return track.props; }
 
 const $ = (id) => document.getElementById(id);
 const canvas = $("edit");
@@ -66,18 +84,35 @@ function resample() {
   const center = curve.getSpacedPoints(SAMPLES);
   const tan = [];
   for (let i = 0; i <= SAMPLES; i++) tan.push(curve.getTangentAt((i % SAMPLES) / SAMPLES).normalize());
+  const length = curve.getLength();
+  const seg = length / SAMPLES;
+  // asymmetric width: pull the INNER edge in on tight corners so hairpin edges
+  // merge to a clean apex instead of crossing (matches main.js buildRoad).
+  const rawInner = [], radii = [];
+  for (let i = 0; i <= SAMPLES; i++) {
+    const a = tan[i % SAMPLES], b = tan[(i + 1) % SAMPLES];
+    const ang = Math.acos(THREE.MathUtils.clamp(a.x * b.x + a.y * b.y + a.z * b.z, -1, 1));
+    const radius = ang > 1e-4 ? seg / ang : 1e6;
+    radii.push(radius);
+    rawInner.push(Math.min(ROAD_HALF, Math.max(0.5, radius * 0.82)));
+  }
   const left = [], right = [];
+  const RW = 6;
   for (let i = 0; i <= SAMPLES; i++) {
     const t = tan[i % SAMPLES];
     const nx = t.z, nz = -t.x; // horizontal road-right (XZ)
     const len = Math.hypot(nx, nz) || 1;
     const ux = nx / len, uz = nz / len;
     const c = center[i];
-    left.push([c.x + ux * ROAD_HALF, c.z + uz * ROAD_HALF]);
-    right.push([c.x - ux * ROAD_HALF, c.z - uz * ROAD_HALF]);
+    let inner = 0; for (let k = -RW; k <= RW; k++) inner += rawInner[((i + k) % SAMPLES + SAMPLES) % SAMPLES];
+    inner = Math.max(0.5, Math.min(inner / (RW * 2 + 1), radii[i] * 0.85)); // cap to local radius → 2-unit corners stay clean
+    const tn = tan[(i + 4) % SAMPLES];
+    const turn = Math.sign(t.x * tn.z - t.z * tn.x) || 0;
+    const lh = turn < 0 ? inner : ROAD_HALF;   // right turn → left edge inner
+    const rh = turn > 0 ? inner : ROAD_HALF;   // left turn → right edge inner
+    left.push([c.x + ux * lh, c.z + uz * lh]);
+    right.push([c.x - ux * rh, c.z - uz * rh]);
   }
-  const length = curve.getLength();
-  const seg = length / SAMPLES;
   let ymin = Infinity, ymax = -Infinity, maxGrade = 0, maxCurv = 1e-9;
   for (let i = 0; i < SAMPLES; i++) {
     ymin = Math.min(ymin, center[i].y); ymax = Math.max(ymax, center[i].y);
@@ -140,7 +175,7 @@ function render() {
   ctx.fill();
 
   // curbs (alternating stripes), with self-pinch warning colour if too tight
-  const pinch = geo.minRadius < ROAD_HALF;
+  const pinch = geo.minRadius < FOLD_RADIUS;
   drawEdge(geo.left, th, pinch);
   drawEdge(geo.right, th, pinch);
 
@@ -173,6 +208,15 @@ function render() {
     // elevation tick (height bar) for non-flat points
     if (Math.abs(p[1]) > 0.05) { ctx.strokeStyle = "rgba(251,191,36,0.7)"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y - p[1] * 2.2); ctx.stroke(); }
   });
+
+  // scenery props (diamonds with labels)
+  (track.props || []).forEach((o, i) => {
+    const x = sx(o.x), y = sy(o.z), r = i === selProp ? 7 : 5;
+    ctx.fillStyle = i === selProp ? "#fff" : "#34d399";
+    ctx.beginPath(); ctx.moveTo(x, y - r); ctx.lineTo(x + r, y); ctx.lineTo(x, y + r); ctx.lineTo(x - r, y); ctx.closePath(); ctx.fill();
+    if (i === selProp) { ctx.strokeStyle = "#fff"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, 12, 0, Math.PI * 2); ctx.stroke(); }
+    if (view.scale > 1.4) { ctx.fillStyle = "rgba(190,242,210,.85)"; ctx.font = "10px 'Space Grotesk',sans-serif"; ctx.textAlign = "center"; ctx.fillText(propLabel(o.model), x, y - r - 4); }
+  });
 }
 function drawEdge(edge, th, pinch) {
   ctx.lineWidth = 3;
@@ -203,21 +247,24 @@ function syncPanel() {
   $("mTheme").value = track.themeId;
 
   const m = geo;
-  // 3-state: BROKEN (< ROAD_HALF radius folds the road / strands overlap),
-  // tight-but-drivable, or clean (comfortable margin).
-  const rState = m.minRadius <= ROAD_HALF ? "bad" : m.minRadius < MIN_RADIUS_OK ? "warn" : "ok";
-  const sState = m.minSelf <= ROAD_HALF * 2 ? "bad" : m.minSelf < SELF_DIST_OK ? "warn" : "ok";
+  // Tight corners (hairpins) are GOOD — only flag a corner that physically folds
+  // the road in on itself, or two strands that actually cross. Everything else
+  // is clean; a sharp-but-valid corner gets a friendly hairpin call-out.
+  const folds = m.minRadius < FOLD_RADIUS;
+  const crosses = m.minSelf < OVERLAP_DIST;
+  const hairpin = m.minRadius < HAIRPIN_RADIUS;
   $("metrics").innerHTML = [
     metric("Length", m.length.toFixed(0) + " u", "ok"),
-    metric("Min corner radius", m.minRadius.toFixed(1) + " u", rState, "fold < " + ROAD_HALF),
-    metric("Closest self-gap", m.minSelf.toFixed(1) + " u", sState, "overlap < " + (ROAD_HALF * 2)),
-    metric("Max grade", m.maxGradeDeg.toFixed(0) + "°", m.maxGradeDeg < 18 ? "ok" : "warn"),
+    metric("Tightest corner", m.minRadius.toFixed(1) + " u", folds ? "bad" : hairpin ? "warn" : "ok", "folds < " + FOLD_RADIUS.toFixed(1)),
+    metric("Closest self-gap", m.minSelf.toFixed(1) + " u", crosses ? "bad" : "ok", "crosses < " + OVERLAP_DIST.toFixed(0)),
+    metric("Max grade", m.maxGradeDeg.toFixed(0) + "°", m.maxGradeDeg < 22 ? "ok" : "warn"),
     metric("Elevation range", m.elev.toFixed(1) + " u", "ok"),
     metric("Control points", String(track.cp.length), "ok"),
   ].join("");
   const v = $("verdict");
-  if (rState === "bad" || sState === "bad") { v.className = "issues"; v.textContent = "✗ BROKEN — road folds/overlaps (red)"; }
-  else if (rState === "warn" || sState === "warn") { v.className = "warn"; v.textContent = "⚠ tight, but drivable"; }
+  if (folds) { v.className = "issues"; v.textContent = "✗ that corner folds the road over itself — ease it out a touch"; }
+  else if (crosses) { v.className = "issues"; v.textContent = "✗ two parts of the track cross — pull them apart"; }
+  else if (hairpin) { v.className = "clean"; v.textContent = "✓ CLEAN — sharp hairpin in there 🌀 nice"; }
   else { v.className = "clean"; v.textContent = "✓ CLEAN — corners clear the road"; }
 
   const ptSec = $("ptSec");
@@ -230,6 +277,16 @@ function syncPanel() {
     $("ptBankV").textContent = (+track.bank[selected]).toFixed(2);
     $("ptDel").disabled = track.cp.length <= 6;
   } else ptSec.classList.add("hidden");
+
+  const propSec = $("propSec");
+  if (selProp >= 0 && track.props && track.props[selProp]) {
+    propSec.classList.remove("hidden");
+    const o = track.props[selProp];
+    $("prModel").textContent = propLabel(o.model);
+    $("prY").value = o.y || 0; $("prYV").textContent = (o.y || 0).toFixed(1);
+    $("prRot").value = o.ry || 0; $("prRotV").textContent = ((o.ry || 0) * 57.3).toFixed(0) + "°";
+    $("prScale").value = o.s || 4; $("prScaleV").textContent = (o.s || 4).toFixed(1);
+  } else propSec.classList.add("hidden");
 
   $("export").value = exportText();
 }
@@ -250,10 +307,13 @@ function exportText() {
   const th = THEMES[track.themeId];
   const cp = track.cp.map((p) => `[${r2(p[0])}, ${r2(p[1])}, ${r2(p[2])}]`).join(", ");
   const bank = track.bank.map((b) => +(+b).toFixed(2)).join(", ");
+  const props = (track.props || []).map((o) =>
+    `{ model: "${o.model}", x: ${r2(o.x)}, z: ${r2(o.z)}, y: ${r2(o.y || 0)}, ry: ${r2(o.ry || 0)}, s: ${r2(o.s || 4)} }`).join(", ");
   return `{
   id: "${slug(track.name)}", name: "${track.name}", blurb: "${track.blurb}", laps: ${track.laps},
   cp: [${cp}],
   bank: [${bank}],
+  props: [${props}],
   theme: ${themeLiteral(th)},
 },`;
 }
@@ -270,12 +330,19 @@ function nearestCenterIndex(x, z) {
   for (let i = 0; i < SAMPLES; i++) { const c = geo.center[i]; const d = (c.x - x) ** 2 + (c.z - z) ** 2; if (d < bd) { bd = d; bi = i; } }
   return { i: bi, dist: Math.sqrt(bd) };
 }
+function propAt(px, py) {
+  const ps = track.props || [];
+  for (let i = ps.length - 1; i >= 0; i--) if (Math.hypot(px - sx(ps[i].x), py - sy(ps[i].z)) < 11) return i;
+  return -1;
+}
 
 canvas.addEventListener("pointerdown", (e) => {
   canvas.setPointerCapture(e.pointerId);
   const px = e.offsetX, py = e.offsetY;
+  const ph = propAt(px, py);
+  if (ph >= 0) { selProp = ph; selected = -1; drag = { kind: "prop" }; render(); syncPanel(); return; }
   const hit = pointAt(px, py);
-  if (hit >= 0) { selected = hit; drag = { kind: "point" }; render(); syncPanel(); return; }
+  if (hit >= 0) { selected = hit; selProp = -1; drag = { kind: "point" }; render(); syncPanel(); return; }
   // click on/near the road → insert a point in the right segment
   const x = wx(px), z = wz(py);
   const near = nearestCenterIndex(x, z);
@@ -295,7 +362,11 @@ canvas.addEventListener("pointerdown", (e) => {
 });
 canvas.addEventListener("pointermove", (e) => {
   if (!drag) return;
-  if (drag.kind === "point" && selected >= 0) {
+  if (drag.kind === "prop" && selProp >= 0) {
+    const o = track.props[selProp];
+    o.x = r2(wx(e.offsetX)); o.z = r2(wz(e.offsetY));
+    render(); $("export").value = exportText();
+  } else if (drag.kind === "point" && selected >= 0) {
     track.cp[selected][0] = r2(wx(e.offsetX));
     track.cp[selected][2] = r2(wz(e.offsetY));
     resample(); render();
@@ -315,7 +386,9 @@ canvas.addEventListener("wheel", (e) => {
   render();
 }, { passive: false });
 addEventListener("keydown", (e) => {
-  if ((e.key === "Delete" || e.key === "Backspace") && selected >= 0 && track.cp.length > 6) {
+  if (e.key !== "Delete" && e.key !== "Backspace") return;
+  if (selProp >= 0) { track.props.splice(selProp, 1); selProp = -1; render(); syncPanel(); return; }
+  if (selected >= 0 && track.cp.length > 6) {
     track.cp.splice(selected, 1); track.bank.splice(selected, 1);
     selected = -1; resample(); render();
   }
@@ -330,12 +403,12 @@ $("ptY").addEventListener("input", (e) => { if (selected < 0) return; track.cp[s
 $("ptBank").addEventListener("input", (e) => { if (selected < 0) return; track.bank[selected] = +e.target.value; $("ptBankV").textContent = (+e.target.value).toFixed(2); $("export").value = exportText(); });
 $("ptDel").addEventListener("click", () => { if (selected >= 0 && track.cp.length > 6) { track.cp.splice(selected, 1); track.bank.splice(selected, 1); selected = -1; resample(); render(); } });
 
-$("loadBtn").addEventListener("click", () => { track = clone(BUILTIN.find((t) => t.id === $("loadSel").value) || BUILTIN[0]); selected = -1; fitView(); resample(); render(); });
+$("loadBtn").addEventListener("click", () => { track = clone(BUILTIN.find((t) => t.id === $("loadSel").value) || BUILTIN[0]); selected = -1; selProp = -1; fitView(); resample(); render(); });
 $("newBtn").addEventListener("click", () => {
   track = { id: "new-track", name: "New Track", blurb: "a fresh layout", laps: 3, themeId: $("mTheme").value || "sunset-bay",
     cp: [[0, 0, 50], [50, 0, 30], [55, 0, -25], [10, 0, -55], [-45, 0, -35], [-55, 0, 25]],
-    bank: [0, 0.3, 0.4, 0.4, 0.3, 0.3] };
-  selected = -1; fitView(); resample(); render();
+    bank: [0, 0.3, 0.4, 0.4, 0.3, 0.3], props: [] };
+  selected = -1; selProp = -1; fitView(); resample(); render();
 });
 $("copyBtn").addEventListener("click", async () => {
   try { await navigator.clipboard.writeText(exportText()); flash($("copyBtn"), "Copied!"); }
@@ -343,11 +416,28 @@ $("copyBtn").addEventListener("click", async () => {
 });
 $("previewBtn").addEventListener("click", () => {
   const th = THEMES[track.themeId];
-  const t = { id: slug(track.name), name: track.name, blurb: track.blurb, laps: track.laps, cp: track.cp, bank: track.bank.map(Number), theme: th };
+  const t = { id: slug(track.name), name: track.name, blurb: track.blurb, laps: track.laps, cp: track.cp, bank: track.bank.map(Number), props: track.props || [], theme: th };
   localStorage.setItem("kartPreviewTrack", JSON.stringify(t));
   window.open("index.html?preview=1", "_blank");
 });
 function flash(btn, txt) { const o = btn.textContent; btn.textContent = txt; setTimeout(() => (btn.textContent = o), 1100); }
+
+// ── scenery prop catalog + inspector ──────────────────────────────────────────
+function buildPropPalette() {
+  const host = $("propPal"); if (!host) return;
+  host.innerHTML = PROP_CATALOG.map((p) => `<button data-m="${p.m}">${p.l}</button>`).join("");
+  host.querySelectorAll("button").forEach((b) => b.onclick = () => addProp(b.dataset.m));
+}
+function addProp(model) {
+  const def = PROP_CATALOG.find((p) => p.m === model) || { s: 4 };
+  props().push({ model, x: r2(view.cx), z: r2(view.cz), y: 0, ry: 0, s: def.s });
+  selProp = track.props.length - 1; selected = -1;
+  render(); syncPanel();
+}
+$("prY").addEventListener("input", (e) => { if (selProp < 0) return; track.props[selProp].y = +e.target.value; $("prYV").textContent = (+e.target.value).toFixed(1); $("export").value = exportText(); });
+$("prRot").addEventListener("input", (e) => { if (selProp < 0) return; track.props[selProp].ry = +e.target.value; $("prRotV").textContent = (+e.target.value * 57.3).toFixed(0) + "°"; $("export").value = exportText(); });
+$("prScale").addEventListener("input", (e) => { if (selProp < 0) return; track.props[selProp].s = +e.target.value; $("prScaleV").textContent = (+e.target.value).toFixed(1); $("export").value = exportText(); });
+$("prDel").addEventListener("click", () => { if (selProp >= 0) { track.props.splice(selProp, 1); selProp = -1; render(); syncPanel(); } });
 
 // ── init ──────────────────────────────────────────────────────────────────────
 function buildSelects() {
@@ -355,6 +445,10 @@ function buildSelects() {
   $("loadSel").innerHTML = BUILTIN.map((t) => `<option value="${t.id}">${t.name}</option>`).join("");
 }
 buildSelects();
+buildPropPalette();
+// autosave the working track so a reload never loses your layout
+let _lastSaved = "";
+setInterval(() => { try { const s = JSON.stringify(track); if (s !== _lastSaved) { localStorage.setItem("kartEditorTrack", s); _lastSaved = s; } } catch (_) {} }, 1500);
 addEventListener("resize", resize);
 // initial layout pass after the canvas has its size
 requestAnimationFrame(() => { resize(); fitView(); resample(); render(); });

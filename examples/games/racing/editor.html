@@ -67,6 +67,8 @@
     #verdict.issues { background: rgba(239,68,68,.16); color: #fecaca; border: 1px solid #7f1d1d; }
 
     .btns { display: flex; flex-wrap: wrap; gap: .5rem; }
+    .pal { display: flex; flex-wrap: wrap; gap: .3rem; }
+    .pal button { flex: 0 0 auto; min-width: 0; padding: .3rem .5rem; font-size: .74rem; }
     button {
       flex: 1; min-width: 6rem; padding: .55rem .6rem; border-radius: .5rem; cursor: pointer;
       font-family: inherit; font-size: .82rem; font-weight: 600;
@@ -117,6 +119,19 @@
       <div class="row"><label>Elev (Y)</label><input type="range" id="ptY" min="-4" max="10" step="0.1" /><span class="val" id="ptYV"></span></div>
       <div class="row"><label>Bank</label><input type="range" id="ptBank" min="0" max="1" step="0.05" /><span class="val" id="ptBankV"></span></div>
       <div class="btns"><button class="danger" id="ptDel">Delete point</button></div>
+    </div>
+
+    <div class="sec">
+      <h3>Scenery catalog — click to drop, then drag on the map</h3>
+      <div id="propPal" class="pal"></div>
+    </div>
+
+    <div class="sec hidden" id="propSec">
+      <h3>Prop: <span id="prModel"></span></h3>
+      <div class="row"><label>Height</label><input type="range" id="prY" min="-2" max="14" step="0.5" /><span class="val" id="prYV"></span></div>
+      <div class="row"><label>Rotate</label><input type="range" id="prRot" min="0" max="6.28" step="0.08" /><span class="val" id="prRotV"></span></div>
+      <div class="row"><label>Size</label><input type="range" id="prScale" min="1" max="20" step="0.5" /><span class="val" id="prScaleV"></span></div>
+      <div class="btns"><button class="danger" id="prDel">Delete prop</button></div>
     </div>
 
     <div class="sec">

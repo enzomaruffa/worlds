@@ -187,6 +187,7 @@ let centerPts = [];      // SAMPLES+1 points, closed
 let tangents = [];
 let sideNormals = [];    // banked road-right direction
 let ups = [];            // banked surface up
+let leftHalf = [], rightHalf = []; // per-sample half-widths (inner edge narrows in tight corners)
 let bankCurve;
 let curTrack = TRACKS[0];
 let checkpoints = [];    // { index, center, forward, normal, up, mats?, group? }
@@ -238,6 +239,34 @@ function computeTrackGeometry(index) {
     const q = new THREE.Quaternion().setFromAxisAngle(t, roll);
     sideNormals.push(flatN.clone().applyQuaternion(q).normalize());
     ups.push(WORLD_UP.clone().applyQuaternion(q).normalize());
+  }
+
+  // Asymmetric road width: keep the OUTER edge at full width, but pull the INNER
+  // edge in on corners tighter than the road, so a hairpin's inner edges merge to
+  // a clean apex instead of crossing themselves into a spike. Gentle corners are
+  // untouched (radius ≫ ROAD_HALF → inner stays full).
+  const seg = TRACK_LEN / SAMPLES;
+  const rawInner = [], radii = [];
+  for (let i = 0; i <= SAMPLES; i++) {
+    const a = tangents[i % SAMPLES], b = tangents[(i + 1) % SAMPLES];
+    const dot = THREE.MathUtils.clamp(a.x * b.x + a.y * b.y + a.z * b.z, -1, 1);
+    const ang = Math.acos(dot);
+    const radius = ang > 1e-4 ? seg / ang : 1e6;
+    radii.push(radius);
+    rawInner.push(Math.min(ROAD_HALF, Math.max(0.5, radius * 0.82)));
+  }
+  leftHalf = []; rightHalf = [];
+  const RW = 6; // smooth the inner taper so the width eases in and out
+  for (let i = 0; i <= SAMPLES; i++) {
+    let s = 0; for (let k = -RW; k <= RW; k++) s += rawInner[((i + k) % SAMPLES + SAMPLES) % SAMPLES];
+    // cap the smoothed width to the LOCAL corner radius so even a ~2-unit corner's
+    // inner edge can't cross (smoothing alone could leave a tight apex too wide).
+    const inner = Math.max(0.5, Math.min(s / (RW * 2 + 1), radii[i] * 0.85));
+    const t = tangents[i % SAMPLES], tn = tangents[(i + 4) % SAMPLES];
+    const turn = Math.sign(t.x * tn.z - t.z * tn.x) || 0; // +left, -right (XZ)
+    if (turn > 0) { leftHalf.push(ROAD_HALF); rightHalf.push(inner); }       // left turn → right edge is inner
+    else if (turn < 0) { leftHalf.push(inner); rightHalf.push(ROAD_HALF); }  // right turn → left edge is inner
+    else { leftHalf.push(ROAD_HALF); rightHalf.push(ROAD_HALF); }
   }
 
   // finish frame at sample 0 (HORIZONTAL — lap math projects flat XZ onto it)
@@ -519,12 +548,13 @@ function edgeAt(i, lateral, lift) {
 function buildRoad(group, theme) {
   const left = [], right = [], curbL = [], curbR = [], shoulderL = [], shoulderR = [];
   for (let i = 0; i <= SAMPLES; i++) {
-    left.push(edgeAt(i, ROAD_HALF, ROAD_LIFT));
-    right.push(edgeAt(i, -ROAD_HALF, ROAD_LIFT));
-    curbL.push(edgeAt(i, ROAD_HALF + CURB_W, ROAD_LIFT + 0.04));
-    curbR.push(edgeAt(i, -(ROAD_HALF + CURB_W), ROAD_LIFT + 0.04));
-    const sL = edgeAt(i, ROAD_HALF + CURB_W + 7, 0);
-    const sR = edgeAt(i, -(ROAD_HALF + CURB_W + 7), 0);
+    const lh = leftHalf[i], rh = rightHalf[i];
+    left.push(edgeAt(i, lh, ROAD_LIFT));
+    right.push(edgeAt(i, -rh, ROAD_LIFT));
+    curbL.push(edgeAt(i, lh + CURB_W, ROAD_LIFT + 0.04));
+    curbR.push(edgeAt(i, -(rh + CURB_W), ROAD_LIFT + 0.04));
+    const sL = edgeAt(i, lh + CURB_W + 7, 0);
+    const sR = edgeAt(i, -(rh + CURB_W + 7), 0);
     // skirt down to the terrain level beside the road (road height minus berm),
     // following the elevation so the road never shows a floating lip on hills.
     const berm = centerPts[i % SAMPLES].y - EMB;
@@ -1043,8 +1073,27 @@ function buildTrackWorld(index) {
   buildFinishLine(group, curTrack.theme);
   buildCheckpointGates(group);
   addScenery(group, curTrack.theme);
+  buildProps(group, curTrack);
   scene.add(group);
   T.group = group; T.built = true;
+}
+
+// Hand-placed scenery props (from the editor's catalog). Each prop is
+// { model, x, z, y?, ry?, s? } — sits on the terrain at (x,z), `s` tall.
+function buildProps(group, track) {
+  if (!Array.isArray(track.props)) return;
+  for (const o of track.props) {
+    const src = MODELS[o.model];
+    if (!src) continue;
+    const m = src.clone();
+    _mbb.setFromObject(m); _mbb.getSize(_msz);
+    m.scale.setScalar((o.s || 4) / Math.max(_msz.y, 1e-3));
+    const sy = surfaceAt(o.x, o.z).y;
+    m.position.set(o.x, sy + (o.y || 0), o.z);
+    m.rotation.y = o.ry || 0;
+    m.traverse((c) => { if (c.isMesh) c.castShadow = true; });
+    group.add(m);
+  }
 }
 
 // Spawn slightly behind the finish line, facing along the track direction.
@@ -1069,7 +1118,10 @@ const MODELS = {};
 const SHARED = new Set(); // geometries/materials owned by MODELS — never disposed on rotation
 async function loadModels() {
   const loader = new GLTFLoader();
-  const names = ["raceCarRed", "pylon", "overhead", "grandStand", "treeLarge", "treeSmall"];
+  const names = ["raceCarRed", "pylon", "overhead", "grandStand", "treeLarge", "treeSmall",
+    // CC0 scenery props placeable from the editor's catalog
+    "rock_largeA", "rock_smallA", "log", "stump_round", "tree_fat", "tree_pineRoundB",
+    "flower_redA", "plant_bushLarge", "cactus_tall", "barrel", "satelliteDish_detailed", "gate_complex"];
   await Promise.all(names.map((n) => new Promise((res) => {
     loader.load(`assets/${n}.glb`, (g) => { g.scene.updateMatrixWorld(true); MODELS[n] = g.scene; res(); }, undefined, () => res());
   })));
