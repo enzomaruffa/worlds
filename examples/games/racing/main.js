@@ -1363,6 +1363,47 @@ function stampSkid(now) {
   skidMesh.instanceMatrix.needsUpdate = true;
 }
 
+// ── Drift smoke — short tyre-smoke puffs from the rear wheels while sliding ──
+const smoke = [];
+let lastPuffAt = 0;
+function puffSmoke(x, y, z) {
+  const n = 7;
+  const pos = new Float32Array(n * 3), vel = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) {
+    pos[i * 3] = x + (Math.random() - 0.5) * 0.4; pos[i * 3 + 1] = y; pos[i * 3 + 2] = z + (Math.random() - 0.5) * 0.4;
+    vel[i * 3] = (Math.random() - 0.5) * 1.2; vel[i * 3 + 1] = 0.8 + Math.random() * 1.4; vel[i * 3 + 2] = (Math.random() - 0.5) * 1.2;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+  const pts = new THREE.Points(geo, new THREE.PointsMaterial({ size: 0.9, color: 0xdfe3ea, transparent: true, opacity: 0.5, depthWrite: false }));
+  scene.add(pts); smoke.push({ pts, vel, life: 0 });
+}
+function emitDriftSmoke(now) {
+  if (now - lastPuffAt < 45) return;
+  lastPuffAt = now;
+  const fx = Math.sin(player.heading), fz = Math.cos(player.heading);
+  const sf = surfaceAt(player.pos.x, player.pos.z);
+  for (const side of [-1, 1]) {
+    const ox = fz * side * 0.78, oz = -fx * side * 0.78;
+    puffSmoke(player.pos.x - fx * 0.95 + ox, sf.y + 0.25, player.pos.z - fz * 0.95 + oz);
+  }
+}
+function stepSmoke(dt) {
+  for (let i = smoke.length - 1; i >= 0; i--) {
+    const s = smoke[i]; s.life += dt;
+    const p = s.pts.geometry.attributes.position.array;
+    for (let j = 0; j < p.length; j += 3) { p[j] += s.vel[j] * dt; p[j + 1] += s.vel[j + 1] * dt; p[j + 2] += s.vel[j + 2] * dt; s.vel[j] *= 0.94; s.vel[j + 2] *= 0.94; }
+    s.pts.geometry.attributes.position.needsUpdate = true;
+    s.pts.material.opacity = Math.max(0, 0.5 * (1 - s.life / 0.8));
+    s.pts.material.size = 0.9 + s.life * 1.6; // billow out as it rises
+    if (s.life > 0.8) { scene.remove(s.pts); s.pts.geometry.dispose(); s.pts.material.dispose(); smoke.splice(i, 1); }
+  }
+}
+function clearSmoke() {
+  for (const s of smoke) { scene.remove(s.pts); s.pts.geometry.dispose(); s.pts.material.dispose(); }
+  smoke.length = 0;
+}
+
 // ── Remote karts (keyed by HANDLE → one kart per player) ────────────────────
 const remotes = new Map();
 
@@ -1652,6 +1693,7 @@ function frame(now) {
   if (T.built) {
     stepPhysics(dt, now);
     stepRemotes(dt);
+    stepSmoke(dt);
     updateCamera(dt);
     maybeSendPose(now);
     pruneRemotes(now);
@@ -1752,8 +1794,8 @@ function stepPhysics(dt, now) {
   player.slip = lat;
   player.drift = handbrake || Math.abs(lat) > 5;
 
-  // skid marks + tyre screech while sliding on the ground at speed
-  if (player.drift && Math.abs(player.vel) > 9 && !onGrass) { stampSkid(now); SFX.screech(); }
+  // skid marks + tyre screech + smoke while sliding on the ground at speed
+  if (player.drift && Math.abs(player.vel) > 9 && !onGrass) { stampSkid(now); SFX.screech(); emitDriftSmoke(now); }
   // engine note tracks speed; grass gives a gravel rumble
   updateEngine(speedFrac, throttling, fwd < -0.5);
   if (onGrass && Math.abs(fwd) > 4) SFX.curb();
@@ -2122,6 +2164,7 @@ function startRound(idx) {
   buildTrackWorld(idx);
   spawnPlayerAtStart();
   clearSkid();
+  clearSmoke();
   raceStarted = false;
   preRace = true;
   lap.count = 0;
