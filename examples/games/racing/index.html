@@ -147,6 +147,15 @@
     #speedBox .racers { font-size: .74rem; color: var(--muted); margin-top: .2rem; }
     #speedBox .racers b { color: var(--gold-bright); }
 
+    /* mute toggle (desktop only — touch users use the device) */
+    #muteBtn {
+      position: absolute; right: .7rem; bottom: .7rem; z-index: 5; pointer-events: auto; cursor: pointer;
+      width: 2.6rem; height: 2.6rem; border-radius: .6rem; border: 1px solid var(--border);
+      background: rgba(12,12,15,.7); color: var(--text); font-size: 1.1rem; line-height: 1;
+    }
+    #muteBtn:hover { border-color: var(--muted); }
+    body.touch #muteBtn { display: none; }
+
     /* ── Touch controls (bottom) ───────────────────────────── */
     #touch {
       grid-column: 1 / 4; grid-row: 3;
@@ -273,6 +282,8 @@
           <div class="tbtn gas" id="btnGas" aria-label="accelerate">▲</div>
         </div>
       </div>
+
+      <button id="muteBtn" title="mute (M)">🔊</button>
     </div>
 
     <div id="countdown"><div class="num" id="cdNum"></div></div>
@@ -280,7 +291,7 @@
     <div id="loader">
       <div class="logo"><b>KART</b> LOOP</div>
       <div class="tag">Drop-in low-poly kart racing. Five tracks rotate on a shared clock — lap your friends and own each track's hotlap board.</div>
-      <div class="who" style="margin-top:.2rem">WASD / arrows to drive · <b>SPACE</b> to drift · <b>H</b> to honk</div>
+      <div class="who" style="margin-top:.2rem">WASD / arrows to drive · <b>SPACE</b> to drift · <b>H</b> to honk · <b>M</b> mute</div>
       <div class="bar"><i></i></div>
       <div class="who" id="loaderWho">connecting…</div>
       <div class="err" id="loaderErr"></div>

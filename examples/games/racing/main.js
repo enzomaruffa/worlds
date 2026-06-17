@@ -1414,6 +1414,7 @@ const KEYMAP = {
 };
 addEventListener("keydown", (e) => {
   if (e.key === "h" || e.key === "H") { honk(); return; }
+  if (e.key === "m" || e.key === "M") { setMuted(!muted); return; }
   const k = KEYMAP[e.key];
   if (k) { input[k] = true; e.preventDefault(); }
 }, { passive: false });
@@ -1468,6 +1469,7 @@ function resolveTrackWall() {
     player.vx -= ox * vDotN;       // remove the into-wall component (slide, no bounce)
     player.vz -= oz * vDotN;
     player.vx *= 0.94; player.vz *= 0.94; // mild scrub along the wall
+    if (vDotN > 4 && gate("wall", 250)) { SFX.bump(); addShake(0.3); }
   }
 }
 // Kart-to-kart: separate the local kart and BOUNCE both velocities apart. Each
@@ -1489,8 +1491,88 @@ function resolveKartCollisions() {
     const vDotN = player.vx * nx + player.vz * nz;
     if (vDotN < 0) { player.vx -= nx * vDotN * 1.6; player.vz -= nz * vDotN * 1.6; }
     player.vx += nx * 6; player.vz += nz * 6;
+    SFX.bump(); addShake(0.4); // kart-to-kart contact
   }
 }
+
+// ───────────────────────────────────────────────────────────────────────────
+// SFX — procedural WebAudio: a continuous engine drone whose pitch/volume track
+// speed, plus short one-shots (drift screech, bumps, countdown, lap chimes,
+// horn). No asset files; starts on first input per the autoplay policy.
+// ───────────────────────────────────────────────────────────────────────────
+const AudioCtx = window.AudioContext || window.webkitAudioContext;
+let actx = null, masterGain = null;
+let muted = localStorage.getItem("kartMuted") === "1";
+let engOsc = null, engSub = null, engGain = null, engFilter = null;
+function audioInit() {
+  if (actx || !AudioCtx) return;
+  actx = new AudioCtx();
+  masterGain = actx.createGain(); masterGain.gain.value = muted ? 0 : 0.5; masterGain.connect(actx.destination);
+  // engine: two detuned low oscillators → lowpass → gain, modulated by speed
+  engFilter = actx.createBiquadFilter(); engFilter.type = "lowpass"; engFilter.frequency.value = 700;
+  engGain = actx.createGain(); engGain.gain.value = 0;
+  engFilter.connect(engGain); engGain.connect(masterGain);
+  engOsc = actx.createOscillator(); engOsc.type = "sawtooth"; engOsc.frequency.value = 55;
+  engSub = actx.createOscillator(); engSub.type = "square"; engSub.frequency.value = 27; engSub.detune.value = 7;
+  engOsc.connect(engFilter); engSub.connect(engFilter);
+  engOsc.start(); engSub.start();
+}
+function audioResume() { audioInit(); if (actx && actx.state === "suspended") actx.resume(); }
+addEventListener("pointerdown", audioResume); addEventListener("keydown", audioResume);
+function setMuted(m) {
+  muted = m; localStorage.setItem("kartMuted", m ? "1" : "0");
+  if (masterGain) masterGain.gain.setTargetAtTime(m ? 0 : 0.5, actx.currentTime, 0.02);
+  const b = document.getElementById("muteBtn"); if (b) b.textContent = m ? "🔇" : "🔊";
+}
+// drive the engine note each physics frame
+function updateEngine(speedFrac, throttle, reversing) {
+  if (!actx || !engOsc || muted) { if (engGain) engGain.gain.setTargetAtTime(0, actx ? actx.currentTime : 0, 0.1); return; }
+  const t = actx.currentTime;
+  const f = (55 + speedFrac * 170) * (reversing ? 0.82 : 1); // 55Hz idle → ~225Hz flat-out
+  engOsc.frequency.setTargetAtTime(f, t, 0.06);
+  engSub.frequency.setTargetAtTime(f * 0.5, t, 0.06);
+  engFilter.frequency.setTargetAtTime(480 + speedFrac * 2600, t, 0.08);
+  engGain.gain.setTargetAtTime(0.05 + speedFrac * 0.12 + (throttle ? 0.05 : 0), t, 0.1);
+}
+function tone({ type = "sine", f0, f1, dur = 0.15, gain = 0.3, attack = 0.005, delay = 0 }) {
+  if (!actx || muted) return;
+  const t = actx.currentTime + delay;
+  const o = actx.createOscillator(); o.type = type; o.frequency.setValueAtTime(f0, t);
+  if (f1 && f1 !== f0) o.frequency.exponentialRampToValueAtTime(Math.max(1, f1), t + dur);
+  const g = actx.createGain();
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(gain, t + attack); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(g); g.connect(masterGain); o.start(t); o.stop(t + dur + 0.02);
+}
+function noise({ dur = 0.12, gain = 0.3, lp = 2000, hp = 0 }) {
+  if (!actx || muted) return;
+  const t = actx.currentTime, n = Math.floor(actx.sampleRate * dur);
+  const buf = actx.createBuffer(1, n, actx.sampleRate), d = buf.getChannelData(0);
+  for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / n);
+  const src = actx.createBufferSource(); src.buffer = buf;
+  const lpF = actx.createBiquadFilter(); lpF.type = "lowpass"; lpF.frequency.value = lp;
+  const g = actx.createGain(); g.gain.setValueAtTime(gain, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  let head = src; if (hp) { const hpF = actx.createBiquadFilter(); hpF.type = "highpass"; hpF.frequency.value = hp; src.connect(hpF); head = hpF; }
+  head.connect(lpF); lpF.connect(g); g.connect(masterGain); src.start(t);
+}
+const _cd = {};
+function gate(key, ms) { const n = performance.now(); if ((_cd[key] || 0) > n) return false; _cd[key] = n + ms; return true; }
+const SFX = {
+  beep: () => tone({ type: "square", f0: 440, dur: 0.16, gain: 0.2 }),
+  go: () => { tone({ type: "square", f0: 880, dur: 0.34, gain: 0.26 }); tone({ type: "sawtooth", f0: 440, f1: 880, dur: 0.34, gain: 0.12 }); },
+  lap: () => [660, 880].forEach((f, i) => tone({ type: "triangle", f0: f, dur: 0.18, gain: 0.2, delay: i * 0.11 })),
+  best: () => [659, 784, 988, 1319].forEach((f, i) => tone({ type: "triangle", f0: f, dur: 0.22, gain: 0.22, delay: i * 0.1 })),
+  bump: () => { if (!gate("bump", 110)) return; noise({ dur: 0.16, gain: 0.34, lp: 1100 }); tone({ type: "square", f0: 150, f1: 55, dur: 0.16, gain: 0.18 }); },
+  horn: () => { tone({ type: "sawtooth", f0: 330, dur: 0.45, gain: 0.16 }); tone({ type: "sawtooth", f0: 247, dur: 0.45, gain: 0.14 }); },
+  screech: () => { if (!gate("screech", 85)) return; noise({ dur: 0.14, gain: 0.11, lp: 5500, hp: 1600 }); },
+  curb: () => { if (!gate("curb", 130)) return; noise({ dur: 0.09, gain: 0.13, lp: 2400 }); },
+};
+
+// ── screen shake — additive camera kick on impacts, decays each frame ──
+let camShake = 0;
+function addShake(a) { camShake = Math.min(1.2, camShake + a); }
+
+// mute toggle button (desktop)
+{ const mb = document.getElementById("muteBtn"); if (mb) { mb.textContent = muted ? "🔇" : "🔊"; mb.addEventListener("click", () => { audioResume(); setMuted(!muted); }); } }
 
 // ───────────────────────────────────────────────────────────────────────────
 // LAP detection
@@ -1535,10 +1617,12 @@ function onCrossFinish(forward, now) {
       dom.last.classList.add("good");
       saveBest(ms);
       toast("🏁 new best · " + fmtTime(ms));
+      SFX.best();
     } else {
       dom.last.textContent = "last " + fmtTime(ms);
       dom.last.classList.remove("good");
       toast("lap " + lap.count + " · " + fmtTime(ms));
+      SFX.lap();
     }
   }
   lap.count++;
@@ -1668,8 +1752,11 @@ function stepPhysics(dt, now) {
   player.slip = lat;
   player.drift = handbrake || Math.abs(lat) > 5;
 
-  // skid marks while sliding on the ground at speed
-  if (player.drift && Math.abs(player.vel) > 9 && !onGrass) stampSkid(now);
+  // skid marks + tyre screech while sliding on the ground at speed
+  if (player.drift && Math.abs(player.vel) > 9 && !onGrass) { stampSkid(now); SFX.screech(); }
+  // engine note tracks speed; grass gives a gravel rumble
+  updateEngine(speedFrac, throttling, fwd < -0.5);
+  if (onGrass && Math.abs(fwd) > 4) SFX.curb();
 
   const sf = surfaceAt(player.pos.x, player.pos.z);
   const onGround = sf.dist < ROAD_HALF + CURB_W + 3;
@@ -1778,6 +1865,12 @@ function updateCamera(dt) {
   const aheadY = surfaceAt(aheadX, aheadZ).y;
   tmpLook.set(aheadX, aheadY + 1.4, aheadZ);
   camera.lookAt(tmpLook);
+  if (camShake > 0.001) { // additive impact kick, decays fast
+    camera.position.x += (Math.random() - 0.5) * camShake * 1.4;
+    camera.position.y += (Math.random() - 0.5) * camShake * 1.0;
+    camera.position.z += (Math.random() - 0.5) * camShake * 1.4;
+    camShake *= Math.exp(-9 * dt);
+  }
   sun.position.set(player.pos.x + sunOffset.x, baseY + sunOffset.y, player.pos.z + sunOffset.z);
   sun.target.position.set(player.pos.x, baseY, player.pos.z);
 }
@@ -1875,7 +1968,7 @@ function onActorEvent(cid, payload) {
   if (!payload || payload.t !== "horn") return;
   const handle = cidToHandle.get(cid);
   const r = handle && remotes.get(handle);
-  if (r) honkOver(r.mesh);
+  if (r) { honkOver(r.mesh); SFX.horn(); }
 }
 let lastHorn = 0;
 function honk() {
@@ -1884,6 +1977,7 @@ function honk() {
   lastHorn = now;
   if (net) try { net.send({ t: "horn" }); } catch (_) {}
   honkOver(player.mesh);
+  SFX.horn();
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -2125,7 +2219,7 @@ function runCountdown() {
     dom.cdNum.classList.remove("pop", "go");
     void dom.cdNum.offsetWidth;
     dom.cdNum.classList.add("pop");
-    if (isGo) dom.cdNum.classList.add("go");
+    if (isGo) { dom.cdNum.classList.add("go"); SFX.go(); } else SFX.beep();
     i++;
     setTimeout(show, 900);
   }
