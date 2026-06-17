@@ -1,4 +1,6 @@
 import * as THREE from "three";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { instantiate, assetNames } from "./level.js";
 
 // ───────────────────────────────────────────────────────────────────────────
 // TUMBLE — an endless, synchronized multiplayer obstacle gauntlet on Worlds.
@@ -98,12 +100,145 @@ scene.add(sun);
 // Shared materials (recoloured per level for variety).
 const matPlatform = new THREE.MeshStandardMaterial({ color: 0x2b3b6b, roughness: 0.9, metalness: 0.05 });
 const matSafe = new THREE.MeshStandardMaterial({ color: 0x35507f, roughness: 0.85 });
-const matHazard = new THREE.MeshStandardMaterial({ color: 0xef4444, emissive: 0x661010, roughness: 0.5 });
-const matPillar = new THREE.MeshStandardMaterial({ color: 0x22d3ee, emissive: 0x07383f, roughness: 0.5 });
+const matHazard = new THREE.MeshStandardMaterial({ color: 0xef4444, emissive: 0xb01515, emissiveIntensity: 0.6, roughness: 0.45 });
+const matPillar = new THREE.MeshStandardMaterial({ color: 0x22d3ee, emissive: 0x0e6a78, emissiveIntensity: 0.5, roughness: 0.45 });
 const matFinish = new THREE.MeshStandardMaterial({ color: 0x22c55e, emissive: 0x0a4020, roughness: 0.6 });
 const matStart = new THREE.MeshStandardMaterial({ color: 0xf59e0b, emissive: 0x3a2502, roughness: 0.7 });
 const GEO_BOX = new THREE.BoxGeometry(1, 1, 1);
 const GEO_CYL = new THREE.CylinderGeometry(0.5, 0.5, 1, 14);
+
+// ── Kenney Space Kit props (CC0) — station hardware flanking the gauntlet ──
+const ASSETS = {}, ASSET_BOX = {};
+// Load authored levels: the editor's live preview (localStorage) when opened
+// with ?preview=1, otherwise an optional levels.json shipped in the site folder.
+async function loadLevels() {
+  try {
+    if (new URLSearchParams(location.search).has("preview")) {
+      const raw = localStorage.getItem("tumblePreviewLevels");
+      if (raw) { const d = JSON.parse(raw); LEVELS = Array.isArray(d) ? d : d.levels; }
+      return;
+    }
+    const res = await fetch("./levels.json", { cache: "no-store" });
+    if (!res.ok) return; // no pack shipped → procedural endless
+    const d = await res.json();
+    const levels = Array.isArray(d) ? d : d.levels;
+    if (Array.isArray(levels) && levels.length) LEVELS = levels;
+  } catch (_) { /* malformed/missing pack → fall back to procedural */ }
+}
+
+async function preloadAssets() {
+  const loader = new GLTFLoader();
+  const names = [
+    // Space Kit station hardware
+    "barrel", "barrels", "machine_generatorLarge", "machine_wireless", "satelliteDish",
+    "turret_single", "structure_detailed", "rocks_smallA", "rocks_smallB", "meteor",
+    "meteor_detailed", "platform_large", "monorail_trackSupport", "hangar_smallA",
+    // Platformer Kit — festive obstacle-course props, hazards & collectibles
+    "sign", "flag", "crate", "crate-strong", "fence-straight", "fence-corner", "poles",
+    "tree", "tree-pine", "tree-pine-small", "mushrooms", "rocks", "ladder", "grass",
+    "saw", "spike-block", "trap-spikes", "coin-gold",
+    ...assetNames(), // every model the level catalog can place
+  ];
+  await Promise.all(names.map(async (n) => {
+    try {
+      const g = await loader.loadAsync(`./assets/${n}.glb`);
+      ASSETS[n] = g.scene; ASSET_BOX[n] = new THREE.Box3().setFromObject(g.scene);
+    } catch (e) { console.warn("asset failed", n, e && e.message); }
+  }));
+}
+const modelHeight = (n) => { const b = ASSET_BOX[n]; return b ? Math.max(b.max.y - b.min.y, 1e-3) : 1; };
+function placedClone(name, parent, h, x, y, z, rotY, emissive) {
+  if (!ASSETS[name]) return null;
+  const m = ASSETS[name].clone();
+  m.scale.setScalar(h / modelHeight(name));
+  m.position.set(x, y, z);
+  if (rotY != null) m.rotation.y = rotY;
+  m.traverse((c) => {
+    if (!c.isMesh) return;
+    c.castShadow = true; c.receiveShadow = false;
+    if (emissive && c.material) {
+      c.material = c.material.clone();
+      if (c.material.color) c.material.emissive = c.material.color.clone();
+      c.material.emissiveIntensity = emissive;
+    }
+  });
+  parent.add(m);
+  return m;
+}
+
+// Procedural neon-grid texture → the track reads as a polished arcade level
+// instead of flat colour, and still tints per-level via material.color.
+function gridTexture() {
+  const c = document.createElement("canvas"); c.width = c.height = 256;
+  const x = c.getContext("2d");
+  x.fillStyle = "#ffffff"; x.fillRect(0, 0, 256, 256);
+  x.strokeStyle = "rgba(0,0,0,0.34)"; x.lineWidth = 7;
+  for (let i = 0; i <= 256; i += 64) { x.beginPath(); x.moveTo(i, 0); x.lineTo(i, 256); x.stroke(); x.beginPath(); x.moveTo(0, i); x.lineTo(256, i); x.stroke(); }
+  x.strokeStyle = "rgba(0,0,0,0.12)"; x.lineWidth = 2;
+  for (let i = 0; i <= 256; i += 16) { x.beginPath(); x.moveTo(i, 0); x.lineTo(i, 256); x.stroke(); x.beginPath(); x.moveTo(0, i); x.lineTo(256, i); x.stroke(); }
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(3, 3); t.anisotropy = 4;
+  return t;
+}
+const TRACK_TEX = gridTexture();
+matPlatform.map = TRACK_TEX; matPlatform.metalness = 0.15; matPlatform.roughness = 0.75;
+matSafe.map = TRACK_TEX;
+
+// Deep-space gradient backdrop + a starfield that follows the runner down the track.
+(function sky() {
+  const c = document.createElement("canvas"); c.width = 16; c.height = 256;
+  const x = c.getContext("2d");
+  const g = x.createLinearGradient(0, 0, 0, 256);
+  g.addColorStop(0, "#05060f"); g.addColorStop(0.55, "#0a0a1c"); g.addColorStop(1, "#1a1230");
+  x.fillStyle = g; x.fillRect(0, 0, 16, 256);
+  scene.background = new THREE.CanvasTexture(c);
+})();
+const starfield = (function () {
+  const N = 700, pos = new Float32Array(N * 3);
+  for (let i = 0; i < N; i++) {
+    const r = 120 + Math.random() * 140, th = Math.random() * 6.283, ph = Math.acos(2 * Math.random() - 1);
+    pos[i * 3] = r * Math.sin(ph) * Math.cos(th);
+    pos[i * 3 + 1] = Math.abs(r * Math.cos(ph)) * 0.7 + 10;
+    pos[i * 3 + 2] = r * Math.sin(ph) * Math.sin(th);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+  const pts = new THREE.Points(geo, new THREE.PointsMaterial({ color: 0xbcd0ff, size: 1.1, sizeAttenuation: true, transparent: true, opacity: 0.85 }));
+  scene.add(pts);
+  return pts;
+})();
+
+// Confetti burst on finishing a level.
+const confetti = [];
+function burstConfetti(at) {
+  const N = 150;
+  const pos = new Float32Array(N * 3), col = new Float32Array(N * 3), vel = new Float32Array(N * 3);
+  const c = new THREE.Color();
+  for (let i = 0; i < N; i++) {
+    pos[i * 3] = at.x; pos[i * 3 + 1] = at.y + 1.2; pos[i * 3 + 2] = at.z;
+    vel[i * 3] = (Math.random() - 0.5) * 11; vel[i * 3 + 1] = 7 + Math.random() * 10; vel[i * 3 + 2] = (Math.random() - 0.5) * 11;
+    c.setHSL(Math.random(), 0.85, 0.62); col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
+  const pts = new THREE.Points(geo, new THREE.PointsMaterial({ size: 0.34, vertexColors: true, transparent: true, opacity: 1 }));
+  scene.add(pts);
+  confetti.push({ pts, vel, life: 0 });
+}
+function stepConfetti(dt) {
+  for (let i = confetti.length - 1; i >= 0; i--) {
+    const cf = confetti[i]; cf.life += dt;
+    const p = cf.pts.geometry.attributes.position.array;
+    for (let j = 0; j < p.length; j += 3) {
+      cf.vel[j + 1] -= 24 * dt;
+      p[j] += cf.vel[j] * dt; p[j + 1] += cf.vel[j + 1] * dt; p[j + 2] += cf.vel[j + 2] * dt;
+    }
+    cf.pts.geometry.attributes.position.needsUpdate = true;
+    cf.pts.material.opacity = Math.max(0, 1 - cf.life / 2.3);
+    if (cf.life > 2.3) { scene.remove(cf.pts); cf.pts.geometry.dispose(); cf.pts.material.dispose(); confetti.splice(i, 1); }
+  }
+}
 
 function box(mat, w, h, d, x, y, z, parent) {
   const m = new THREE.Mesh(GEO_BOX, mat);
@@ -122,113 +257,268 @@ let level = null; // { index, group, nChunks, chunks:[{type,halfW,pits}], hazard
 function disposeLevel() {
   if (!level) return;
   scene.remove(level.group);
-  level.group.traverse((o) => { if (o.isMesh && o.geometry !== GEO_BOX && o.geometry !== GEO_CYL) o.geometry.dispose(); });
+  // dispose ONLY per-level geometries (flagged). Shared GEO_BOX/GEO_CYL and all
+  // GLB-derived geometries are reused across levels — disposing them corrupts ASSETS.
+  level.group.traverse((o) => { if (o.isMesh && o.userData._disposeGeo) o.geometry.dispose(); });
   level = null;
+}
+
+// Authored level packs (from levels.json or the editor preview). When present,
+// the level rotation cycles these by index instead of procedural generation;
+// every client ships the same file, so index → level is identical for all.
+let LEVELS = null;
+const CHUNK_TYPES = ["FLAT", "GAPS", "SPINNER", "NARROW", "SLALOM", "SWEEPER", "FINISH"];
+
+// Build ONE chunk of `type` at z0 with an explicit 0..1 `intensity`. Shared by
+// the procedural generator and authored levels (the editor speaks the same types).
+function buildChunk(type, ci, z0, intensity, rng, group, hazards) {
+  const chunk = { type, halfW: TRACK_HALF, pits: [] };
+  box(matSafe, TRACK_HALF * 2, 1, SAFE_LEN, 0, -0.5, z0 + SAFE_LEN / 2, group); // checkpoint strip
+  const bodyLen = CHUNK_LEN - SAFE_LEN;
+  const bodyMidZ = z0 + SAFE_LEN + bodyLen / 2;
+
+  if (type === "FLAT" || type === "FINISH") {
+    box(matPlatform, TRACK_HALF * 2, 1, bodyLen, 0, -0.5, bodyMidZ, group);
+    if (type === "FINISH") {
+      const line = new THREE.Mesh(new THREE.PlaneGeometry(TRACK_HALF * 2, 1.4), matFinish);
+      line.rotation.x = -Math.PI / 2; line.position.set(0, 0.02, z0 + SAFE_LEN + 1.2);
+      line.userData._disposeGeo = true; // per-level plane — safe to dispose
+      group.add(line);
+      for (const s of [-1, 1]) box(matFinish, 0.6, 6, 0.6, s * (TRACK_HALF - 0.4), 3, z0 + SAFE_LEN + 1.2, group);
+      box(matFinish, TRACK_HALF * 2, 1.1, 0.4, 0, 6, z0 + SAFE_LEN + 1.2, group);
+    }
+  } else if (type === "GAPS") {
+    const nPits = 1 + (intensity > 0.5 ? Math.floor(rng() * 2) : 0);
+    const pits = [];
+    let cursor = SAFE_LEN;
+    for (let p = 0; p < nPits; p++) {
+      const solid = 4 + rng() * 4;
+      box(matPlatform, TRACK_HALF * 2, 1, solid, 0, -0.5, z0 + cursor + solid / 2, group);
+      cursor += solid;
+      const gap = 3.2 + intensity * 3.2 + rng() * 1.5;
+      pits.push({ z0: cursor, z1: cursor + gap });
+      cursor += gap;
+    }
+    box(matPlatform, TRACK_HALF * 2, 1, Math.max(2, CHUNK_LEN - cursor), 0, -0.5, z0 + cursor + Math.max(2, CHUNK_LEN - cursor) / 2, group);
+    chunk.pits = pits;
+  } else if (type === "NARROW") {
+    const halfW = clamp(3.2 - intensity * 1.4, 1.6, 3.2);
+    chunk.halfW = halfW;
+    box(matPlatform, halfW * 2, 1, bodyLen, 0, -0.5, bodyMidZ, group);
+    box(matSafe, halfW * 2 + 1.2, 0.4, 1, 0, 0.2, z0 + SAFE_LEN + 0.5, group);
+  } else if (type === "SLALOM") {
+    box(matPlatform, TRACK_HALF * 2, 1, bodyLen, 0, -0.5, bodyMidZ, group);
+    const n = 3 + Math.floor(intensity * 3);
+    for (let p = 0; p < n; p++) {
+      const px = (p % 2 === 0 ? -1 : 1) * (TRACK_HALF * 0.5);
+      const pz = z0 + SAFE_LEN + (bodyLen * (p + 0.5)) / n;
+      const m = new THREE.Mesh(GEO_CYL, matPillar);
+      m.scale.set(1.6, 3, 1.6); m.position.set(px, 1.5, pz);
+      m.castShadow = true; group.add(m);
+      hazards.push({ kind: "pillar", x: px, z: pz, r: 1.2 });
+    }
+  } else if (type === "SPINNER") {
+    box(matPlatform, TRACK_HALF * 2, 1, bodyLen, 0, -0.5, bodyMidZ, group);
+    const cz = bodyMidZ, arm = TRACK_HALF - 0.3;
+    const bar = box(matHazard, arm * 2, 0.7, 0.7, 0, 1.1, cz, group);
+    const post = new THREE.Mesh(GEO_CYL, matSafe);
+    post.scale.set(0.8, 2.4, 0.8); post.position.set(0, 1.2, cz); group.add(post);
+    const speed = (rng() < 0.5 ? 1 : -1) * (1.1 + intensity * 1.3);
+    hazards.push({ kind: "spinner", x: 0, z: cz, arm, speed, mesh: bar });
+  } else if (type === "SWEEPER") {
+    box(matPlatform, TRACK_HALF * 2, 1, bodyLen, 0, -0.5, bodyMidZ, group);
+    const cz = bodyMidZ;
+    const bar = box(matHazard, 2.4, 0.8, 0.7, 0, 0.6, cz, group);
+    const amp = TRACK_HALF - 1.2;
+    const speed = 1.4 + intensity * 1.6;
+    hazards.push({ kind: "sweeper", z: cz, amp, speed, mesh: bar });
+  }
+  return chunk;
+}
+
+// Decide the chunk plan for a level: an authored sequence (from LEVELS) or the
+// procedural ramp. Returns { plan:[{type,intensity}], hue, seed, name }.
+function levelPlan(index) {
+  const difficulty = clamp(0.2 + index * 0.06, 0.2, 1);
+  if (LEVELS && LEVELS.length) {
+    const a = LEVELS[(((index - 1) % LEVELS.length) + LEVELS.length) % LEVELS.length];
+    const plan = (a.chunks || []).map((c) =>
+      typeof c === "string" ? { type: c, intensity: difficulty }
+        : { type: c.type, intensity: c.intensity != null ? clamp(+c.intensity, 0, 1) : difficulty });
+    if (!plan.length || plan[0].type !== "FLAT") plan.unshift({ type: "FLAT", intensity: 0 });
+    if (plan[plan.length - 1].type !== "FINISH") plan.push({ type: "FINISH", intensity: 0 });
+    return { plan, hue: a.hue != null ? a.hue : ((index * 47) % 360) / 360, seed: (a.seed != null ? a.seed : index * 2654435761) >>> 0, name: a.name || ("Level " + index) };
+  }
+  const nChunks = Math.min(5 + Math.floor((index - 1) * 0.8), 18);
+  const TYPES = ["GAPS", "SPINNER", "NARROW", "SLALOM", "SWEEPER"];
+  const r = mulberry32((index * 2654435761) >>> 0);
+  const plan = [];
+  for (let ci = 0; ci < nChunks; ci++) {
+    const type = ci === 0 ? "FLAT" : ci === nChunks - 1 ? "FINISH" : TYPES[Math.floor(r() * TYPES.length)];
+    plan.push({ type, intensity: difficulty });
+  }
+  return { plan, hue: ((index * 47) % 360) / 360, seed: 0, name: "Level " + index };
 }
 
 function buildLevel(seed, index) {
   disposeLevel();
-  const rng = mulberry32(seed >>> 0);
+  // authored object-based level (from the 3D editor) takes precedence
+  const authored = LEVELS && LEVELS.length ? LEVELS[(((index - 1) % LEVELS.length) + LEVELS.length) % LEVELS.length] : null;
+  if (authored && Array.isArray(authored.objects) && authored.objects.length) { buildObjectLevel(authored, index); return; }
+
+  const { plan, hue, seed: planSeed, name } = levelPlan(index);
+  const rng = mulberry32((planSeed || seed) >>> 0);
   const group = new THREE.Group();
 
   // Per-level palette tint keeps successive levels feeling fresh.
-  const hue = ((index * 47) % 360) / 360;
   matPlatform.color.setHSL(hue, 0.4, 0.32);
   matSafe.color.setHSL(hue, 0.45, 0.45);
 
-  const nChunks = Math.min(5 + Math.floor((index - 1) * 0.8), 18);
-  const difficulty = clamp(0.2 + index * 0.06, 0.2, 1); // ramps hazard intensity
+  const nChunks = plan.length;
   const chunks = [];
   const hazards = [];
 
-  // start pad (z < 0)
-  box(matStart, TRACK_HALF * 2 + 2, 1, 8, 0, -0.5, -4, group);
-
-  const TYPES = ["GAPS", "SPINNER", "NARROW", "SLALOM", "SWEEPER"];
+  box(matStart, TRACK_HALF * 2 + 2, 1, 8, 0, -0.5, -4, group); // start pad (z < 0)
   for (let ci = 0; ci < nChunks; ci++) {
-    const z0 = ci * CHUNK_LEN;
-    let type = "FLAT";
-    if (ci === 0) type = "FLAT";
-    else if (ci === nChunks - 1) type = "FINISH";
-    else type = TYPES[Math.floor(rng() * TYPES.length)];
-    const chunk = { type, halfW: TRACK_HALF, pits: [] };
-
-    // Solid entry strip (always safe — this is the chunk's checkpoint).
-    box(matSafe, TRACK_HALF * 2, 1, SAFE_LEN, 0, -0.5, z0 + SAFE_LEN / 2, group);
-    const bodyLen = CHUNK_LEN - SAFE_LEN;
-    const bodyMidZ = z0 + SAFE_LEN + bodyLen / 2;
-
-    if (type === "FLAT" || type === "FINISH") {
-      box(matPlatform, TRACK_HALF * 2, 1, bodyLen, 0, -0.5, bodyMidZ, group);
-      if (type === "FINISH") {
-        const line = new THREE.Mesh(new THREE.PlaneGeometry(TRACK_HALF * 2, 1.4), matFinish);
-        line.rotation.x = -Math.PI / 2; line.position.set(0, 0.02, z0 + SAFE_LEN + 1.2);
-        group.add(line);
-        for (const s of [-1, 1]) box(matFinish, 0.6, 6, 0.6, s * (TRACK_HALF - 0.4), 3, z0 + SAFE_LEN + 1.2, group);
-        const banner = box(matFinish, TRACK_HALF * 2, 1.1, 0.4, 0, 6, z0 + SAFE_LEN + 1.2, group);
-        banner.material = matFinish;
-      }
-    } else if (type === "GAPS") {
-      // 1–2 pits you must jump. Draw the solid segments around them.
-      const nPits = 1 + (difficulty > 0.5 ? Math.floor(rng() * 2) : 0);
-      const pits = [];
-      let cursor = SAFE_LEN;
-      for (let p = 0; p < nPits; p++) {
-        const solid = 4 + rng() * 4;
-        box(matPlatform, TRACK_HALF * 2, 1, solid, 0, -0.5, z0 + cursor + solid / 2, group);
-        cursor += solid;
-        const gap = 3.2 + difficulty * 3.2 + rng() * 1.5;
-        pits.push({ z0: cursor, z1: cursor + gap });
-        cursor += gap;
-      }
-      box(matPlatform, TRACK_HALF * 2, 1, Math.max(2, CHUNK_LEN - cursor), 0, -0.5, z0 + cursor + Math.max(2, CHUNK_LEN - cursor) / 2, group);
-      chunk.pits = pits;
-    } else if (type === "NARROW") {
-      const halfW = clamp(3.2 - difficulty * 1.4, 1.6, 3.2);
-      chunk.halfW = halfW;
-      box(matPlatform, halfW * 2, 1, bodyLen, 0, -0.5, bodyMidZ, group);
-      box(matSafe, halfW * 2 + 1.2, 0.4, 1, 0, 0.2, z0 + SAFE_LEN + 0.5, group); // little ramp lip
-    } else if (type === "SLALOM") {
-      box(matPlatform, TRACK_HALF * 2, 1, bodyLen, 0, -0.5, bodyMidZ, group);
-      const n = 3 + Math.floor(difficulty * 3);
-      for (let p = 0; p < n; p++) {
-        const px = (p % 2 === 0 ? -1 : 1) * (TRACK_HALF * 0.5);
-        const pz = z0 + SAFE_LEN + (bodyLen * (p + 0.5)) / n;
-        const m = new THREE.Mesh(GEO_CYL, matPillar);
-        m.scale.set(1.6, 3, 1.6); m.position.set(px, 1.5, pz);
-        m.castShadow = true; group.add(m);
-        hazards.push({ kind: "pillar", x: px, z: pz, r: 1.2 });
-      }
-    } else if (type === "SPINNER") {
-      box(matPlatform, TRACK_HALF * 2, 1, bodyLen, 0, -0.5, bodyMidZ, group);
-      const cz = bodyMidZ;
-      const arm = TRACK_HALF - 0.3;
-      const bar = box(matHazard, arm * 2, 0.7, 0.7, 0, 1.1, cz, group);
-      const post = new THREE.Mesh(GEO_CYL, matSafe);
-      post.scale.set(0.8, 2.4, 0.8); post.position.set(0, 1.2, cz); group.add(post);
-      const speed = (rng() < 0.5 ? 1 : -1) * (1.1 + difficulty * 1.3);
-      hazards.push({ kind: "spinner", x: 0, z: cz, arm, speed, mesh: bar });
-    } else if (type === "SWEEPER") {
-      box(matPlatform, TRACK_HALF * 2, 1, bodyLen, 0, -0.5, bodyMidZ, group);
-      const cz = bodyMidZ;
-      const bar = box(matHazard, 2.4, 0.8, 0.7, 0, 0.6, cz, group); // LOW bar — jump it
-      const amp = TRACK_HALF - 1.2;
-      const speed = 1.4 + difficulty * 1.6;
-      hazards.push({ kind: "sweeper", z: cz, amp, speed, mesh: bar });
-    }
-
-    chunks.push(chunk);
+    chunks.push(buildChunk(plan[ci].type, ci, ci * CHUNK_LEN, plan[ci].intensity, rng, group, hazards));
   }
+  box(matFinish, TRACK_HALF * 2 + 4, 1, 10, 0, -0.5, nChunks * CHUNK_LEN + 5, group); // finish pad
 
-  // finish pad past the last chunk
-  box(matFinish, TRACK_HALF * 2 + 4, 1, 10, 0, -0.5, nChunks * CHUNK_LEN + 5, group);
+  dressLevel(group, rng, nChunks);
 
   scene.add(group);
-  level = { index, group, nChunks, chunks, hazards, finishZ: nChunks * CHUNK_LEN + 1 };
+  level = { index, group, nChunks, chunks, hazards, name, finishZ: nChunks * CHUNK_LEN + 1 };
+}
+
+// Build a hand-authored level from placed objects (3D editor output). Collision
+// is derived from each object's role: walkable AABBs, hazard volumes, jump pads,
+// moving platforms, a start spawn and a finish zone.
+function buildObjectLevel(def, index) {
+  coins.length = 0; // chunk-dress coins (if any) belonged to the disposed level
+  const group = new THREE.Group();
+  if (def.hue != null) { matPlatform.color.setHSL(def.hue, 0.4, 0.32); matSafe.color.setHSL(def.hue, 0.45, 0.45); }
+  const obj = { walk: [], movers: [], pads: [], hazards: [], coins: [], saws: [], start: null, finish: null };
+  let maxZ = 8;
+  for (const o of def.objects) {
+    const built = instantiate(ASSETS, o);
+    group.add(built.group);
+    const x = o.x || 0, y = o.y || 0, z = o.z || 0;
+    maxZ = Math.max(maxZ, z);
+    const aabb = (w, d, top) => ({ minX: x - w / 2, maxX: x + w / 2, minZ: z - d / 2, maxZ: z + d / 2, top });
+    if (built.role === "walk" || built.role === "start" || built.role === "finish") {
+      const a = aabb(built.w, built.d, y + built.h / 2);
+      obj.walk.push(a);
+      if (built.role === "start") obj.start = { x, y: a.top + 0.9, z };
+      if (built.role === "finish") obj.finish = a;
+    } else if (built.role === "mover") {
+      obj.movers.push({ group: built.group, base: new THREE.Vector3(x, y, z), axis: (o.p && o.p.axis) || "x",
+        amp: (o.p && o.p.amp) || 7, speed: (o.p && o.p.speed) || 1, w: built.w, d: built.d, h: built.h,
+        prev: new THREE.Vector3(x, y, z), delta: new THREE.Vector3(), aabb: aabb(built.w, built.d, y + built.h / 2) });
+    } else if (built.role === "pad") {
+      obj.pads.push({ ...aabb(built.w, built.d, y + built.h / 2), boost: (o.p && o.p.boost) || 22 });
+    } else if (built.role === "spinner") {
+      obj.hazards.push({ kind: "spinner", x, z, arm: 6.2, speed: (o.p && o.p.speed) || 1.6, mesh: built.bar });
+    } else if (built.role === "sweeper") {
+      obj.hazards.push({ kind: "sweeper", x, z, amp: (o.p && o.p.amp) || 5.5, speed: (o.p && o.p.speed) || 1.8, mesh: built.bar });
+    } else if (built.role === "pillar") {
+      obj.hazards.push({ kind: "pillar", x, z, r: 1.5 });
+    } else if (built.role === "kill" || built.role === "saw") {
+      obj.hazards.push({ kind: "kill", x, z, r: built.role === "saw" ? 2.2 : 2.0 });
+      if (built.role === "saw") obj.saws.push(built.group);
+    } else if (built.role === "coin") {
+      obj.coins.push(built.group);
+    }
+  }
+  scene.add(group);
+  level = { index, group, name: def.name || "Level " + index, obj, finishZ: obj.finish ? obj.finish.maxZ : maxZ + 6 };
+}
+
+// per-frame: moving platforms slide, saws & coins spin
+function updateObjects(dt, t) {
+  if (!level || !level.obj) return;
+  for (const m of level.obj.movers) {
+    m.prev.copy(m.group.position);
+    const off = Math.sin(t * m.speed) * m.amp;
+    if (m.axis === "z") m.group.position.set(m.base.x, m.base.y, m.base.z + off);
+    else m.group.position.set(m.base.x + off, m.base.y, m.base.z);
+    m.delta.subVectors(m.group.position, m.prev);
+    const c = m.group.position;
+    m.aabb.minX = c.x - m.w / 2; m.aabb.maxX = c.x + m.w / 2;
+    m.aabb.minZ = c.z - m.d / 2; m.aabb.maxZ = c.z + m.d / 2; m.aabb.top = c.y + m.h / 2;
+  }
+  for (const s of level.obj.saws) s.rotation.z += dt * 5;
+  for (const c of level.obj.coins) c.rotation.y += dt * 3.2;
+}
+
+// Flank the gauntlet with Kenney station hardware + drifting asteroids in the
+// void below — pure decoration (parented to the level group, disposed with it).
+const EDGE_PROPS = ["sign", "flag", "crate", "crate-strong", "fence-straight", "poles", "tree", "tree-pine", "tree-pine-small", "mushrooms", "rocks", "ladder", "barrels", "machine_wireless"];
+const coins = []; // floating collectible-look coins (decoration; spun in the loop)
+function dressLevel(group, rng, nChunks) {
+  coins.length = 0; // old coins lived on the disposed level group
+  if (!Object.keys(ASSETS).length) return; // assets not ready yet — next rebuild dresses it
+  const edgeX = TRACK_HALF + 3.0;
+  for (let ci = 0; ci < nChunks; ci++) {
+    for (const side of [-1, 1]) {
+      if (rng() < 0.3) continue; // gaps keep it from feeling like a wall
+      const z = ci * CHUNK_LEN + SAFE_LEN + rng() * (CHUNK_LEN - SAFE_LEN);
+      const name = EDGE_PROPS[Math.floor(rng() * EDGE_PROPS.length)];
+      const h = 2.6 + rng() * 3.2;
+      placedClone(name, group, h, side * (edgeX + rng() * 3.5), 0, z, side > 0 ? -Math.PI / 2 + (rng() - 0.5) : Math.PI / 2 + (rng() - 0.5), 0.25);
+    }
+  }
+  // glowing checkpoint posts marking each chunk's safe strip
+  for (let ci = 0; ci < nChunks; ci++) {
+    for (const side of [-1, 1]) {
+      const m = new THREE.Mesh(GEO_CYL, matFinish);
+      m.scale.set(0.35, 2.6, 0.35);
+      m.position.set(side * (TRACK_HALF + 0.6), 1.0, ci * CHUNK_LEN + 0.4);
+      group.add(m);
+    }
+  }
+  // floating coins arcing over the track — pure sparkle (no scoring), spun in the loop
+  if (ASSETS["coin-gold"]) {
+    for (let ci = 1; ci < nChunks - 1; ci++) {
+      if (rng() < 0.45) continue;
+      const n = 3;
+      for (let k = 0; k < n; k++) {
+        const z = ci * CHUNK_LEN + SAFE_LEN + 3 + k * 3;
+        const c = placedClone("coin-gold", group, 1.5, (rng() - 0.5) * TRACK_HALF, 2.2 + Math.sin(k) * 0.4, z, 0, 0.5);
+        if (c) coins.push(c);
+      }
+    }
+  }
+  // flag pairs at the start and finish lines
+  for (const z of [-1, nChunks * CHUNK_LEN + 1]) {
+    for (const side of [-1, 1]) placedClone("flag", group, 4.5, side * (TRACK_HALF + 1.2), 0, z, side > 0 ? -1.2 : 1.2, 0.3);
+  }
+  // hazard dressing — saws & spikes lining the edges signal danger ahead
+  const danger = ["saw", "spike-block", "trap-spikes"].filter((n) => ASSETS[n]);
+  for (let ci = 2; ci < nChunks - 1 && danger.length; ci++) {
+    if (rng() < 0.5) continue;
+    const side = rng() < 0.5 ? -1 : 1;
+    placedClone(danger[Math.floor(rng() * danger.length)], group, 2.2 + rng() * 1.6,
+      side * (TRACK_HALF + 1.4), 0, ci * CHUNK_LEN + SAFE_LEN + rng() * 6, 0, 0.4);
+  }
+  // drifting debris in the void for depth
+  const junk = ["rocks", "meteor", "rocks_smallA", "barrel"].filter((n) => ASSETS[n]);
+  for (let i = 0; i < 24 && junk.length; i++) {
+    const z = rng() * nChunks * CHUNK_LEN;
+    const side = rng() < 0.5 ? -1 : 1;
+    placedClone(junk[Math.floor(rng() * junk.length)], group, 1.5 + rng() * 4,
+      side * (TRACK_HALF + 12 + rng() * 40), -8 - rng() * 26, z, rng() * 6.283);
+  }
 }
 
 function groundY(x, z) {
   if (!level) return 0;
+  if (level.obj) {
+    let best = null;
+    const consider = (a) => { if (x >= a.minX && x <= a.maxX && z >= a.minZ && z <= a.maxZ && a.top <= player.pos.y + 0.7 && (best === null || a.top > best)) best = a.top; };
+    for (const a of level.obj.walk) consider(a);
+    for (const m of level.obj.movers) consider(m.aabb);
+    return best; // null = over the void → fall
+  }
   if (z < 0) return Math.abs(x) <= TRACK_HALF + 1 ? 0 : null; // start pad
   const ci = Math.floor(z / CHUNK_LEN);
   if (ci >= level.nChunks) return Math.abs(x) <= TRACK_HALF + 2 ? 0 : null; // finish pad
@@ -243,7 +533,13 @@ function groundY(x, z) {
 // Apply hazards near the player. Returns true if the player should respawn.
 function hazardEffect(p, t) {
   if (!level) return false;
-  for (const h of level.hazards) {
+  const hazards = level.obj ? level.obj.hazards : level.hazards;
+  for (const h of hazards) {
+    if (h.kind === "kill") {
+      const dx = p.pos.x - h.x, dz = p.pos.z - h.z;
+      if (Math.hypot(dx, dz) < h.r && p.pos.y < 2.2) return true; // touched a saw/spikes → reset
+      continue;
+    }
     if (h.kind === "pillar") {
       const dx = p.pos.x - h.x, dz = p.pos.z - h.z;
       const d = Math.hypot(dx, dz);
@@ -279,12 +575,25 @@ function hazardEffect(p, t) {
 // ───────────────────────────────────────────────────────────────────────────
 // Player
 // ───────────────────────────────────────────────────────────────────────────
+const GEO_EYE = new THREE.SphereGeometry(0.13, 10, 10);
+const GEO_PUPIL = new THREE.SphereGeometry(0.06, 8, 8);
+const MAT_EYE = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4 });
+const MAT_PUPIL = new THREE.MeshStandardMaterial({ color: 0x101018, roughness: 0.5 });
 function makeBean(color) {
   const g = new THREE.Group();
   const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.55, 0.7, 4, 10), new THREE.MeshStandardMaterial({ color, roughness: 0.5 }));
   body.castShadow = true; body.position.y = 0.9;
+  // a little face so the runners read as characters, not pills (faces +Z)
+  for (const sx of [-1, 1]) {
+    const eye = new THREE.Mesh(GEO_EYE, MAT_EYE);
+    eye.position.set(sx * 0.22, 1.18, 0.46);
+    const pupil = new THREE.Mesh(GEO_PUPIL, MAT_PUPIL);
+    pupil.position.set(sx * 0.22, 1.18, 0.57);
+    g.add(eye, pupil);
+  }
   g.add(body);
   g.userData.mat = body.material;
+  g.userData.body = body; // for squash-stretch
   return g;
 }
 
@@ -301,11 +610,12 @@ const player = {
 scene.add(player.mesh);
 
 function resetPlayer() {
-  player.pos.set(0, 1.4, -2);
+  const s = level && level.obj && level.obj.start;
+  if (s) player.pos.set(s.x, s.y + 0.5, s.z); else player.pos.set(0, 1.4, -2);
   player.vel.set(0, 0, 0);
   player.heading = 0;
   player.finished = false;
-  player.checkpoint.set(0, 1.4, -2);
+  player.checkpoint.copy(player.pos);
   player.curChunk = -1;
 }
 
@@ -412,7 +722,7 @@ function applyRoom(s) {
     buildLevel(s.seed >>> 0, s.levelIndex | 0);
     resetPlayer();
     finishers = new Set();
-    flashMessage("LEVEL " + (s.levelIndex | 0), false);
+    flashMessage(LEVELS ? (level.name || "LEVEL " + level.index) : "LEVEL " + (s.levelIndex | 0), false);
     updateHud();
   }
 }
@@ -477,6 +787,7 @@ function onFinish() {
   player.finished = true;
   finishers.add(me.handle);
   flashMessage("FINISHED!  +1", true);
+  burstConfetti(player.pos);
   scorePoint();
   try { roomCh && roomCh.publish({ t: "fin", handle: me.handle, lvl: level ? level.index : 0 }); } catch (_) {}
   updateHud();
@@ -570,27 +881,51 @@ function stepPlayer(dt, t) {
     player.grounded = false;
   }
 
-  hazardEffect(player, t);
-
+  if (hazardEffect(player, t)) { respawn(); return; } // touched a kill hazard
   if (player.pos.y < VOID_Y) respawn();
 
-  // rolling checkpoint at each chunk's safe entry strip
-  if (player.grounded && player.pos.z >= 0) {
-    const ci = Math.floor(player.pos.z / CHUNK_LEN);
-    if (ci > player.curChunk && level && ci < level.nChunks) {
-      player.curChunk = ci;
-      player.checkpoint.set(0, 1.4, ci * CHUNK_LEN + 2);
+  if (level && level.obj) {
+    // ride moving platforms you're standing on
+    if (player.grounded) for (const m of level.obj.movers) {
+      const a = m.aabb;
+      if (player.pos.x >= a.minX && player.pos.x <= a.maxX && player.pos.z >= a.minZ && player.pos.z <= a.maxZ && Math.abs(a.top + 0.9 - player.pos.y) < 0.25) {
+        player.pos.x += m.delta.x; player.pos.z += m.delta.z;
+      }
     }
+    // jump pads fling you skyward
+    if (player.grounded) for (const p of level.obj.pads) {
+      if (player.pos.x >= p.minX && player.pos.x <= p.maxX && player.pos.z >= p.minZ && player.pos.z <= p.maxZ) {
+        player.vel.y = p.boost; player.grounded = false; kbFlash(); break;
+      }
+    }
+    // forgiving checkpoint: remember the last solid spot you stood on
+    if (player.grounded) player.checkpoint.set(player.pos.x, player.pos.y, player.pos.z);
+    // finish zone
+    const f = level.obj.finish;
+    if (f && !player.finished && player.pos.x >= f.minX && player.pos.x <= f.maxX && player.pos.z >= f.minZ && player.pos.z <= f.maxZ) onFinish();
+  } else {
+    // rolling checkpoint at each chunk's safe entry strip
+    if (player.grounded && player.pos.z >= 0) {
+      const ci = Math.floor(player.pos.z / CHUNK_LEN);
+      if (ci > player.curChunk && level && ci < level.nChunks) {
+        player.curChunk = ci;
+        player.checkpoint.set(0, 1.4, ci * CHUNK_LEN + 2);
+      }
+    }
+    if (level && !player.finished && player.pos.z >= level.finishZ) onFinish();
   }
-
-  // finish
-  if (level && !player.finished && player.pos.z >= level.finishZ) onFinish();
 
   player.mesh.position.copy(player.pos);
   player.mesh.position.y -= 0.9; // bean origin sits at feet
   let d = player.heading - player.mesh.rotation.y;
   d = Math.atan2(Math.sin(d), Math.cos(d));
   player.mesh.rotation.y += d * (1 - Math.exp(-14 * dt));
+  // squash & stretch — stretch tall while airborne, squash on the ground
+  const body = player.mesh.userData.body;
+  if (body) {
+    const stretch = player.grounded ? -0.12 : clamp(player.vel.y * 0.018, -0.16, 0.28);
+    body.scale.set(1 - stretch * 0.6, 1 + stretch, 1 - stretch * 0.6);
+  }
   // knockback flash tint
   player.mesh.userData.mat.emissive.setHex(performance.now() < flashUntil ? 0x661010 : 0x000000);
 }
@@ -619,9 +954,13 @@ function frame(now) {
   lastT = now;
   const t = now / 1000;
 
+  updateObjects(dt, t);
   stepPlayer(dt, t);
   stepGhosts(dt);
   stepCamera(dt);
+  stepConfetti(dt);
+  for (const c of coins) { c.rotation.y += dt * 3.2; c.position.y += Math.sin(t * 2 + c.position.z) * dt * 0.3; } // shimmer
+  starfield.position.set(player.pos.x, 0, player.pos.z); // keep the stars wrapped around the runner
   publishState(now);
   tickTimerBar();
 
@@ -646,6 +985,8 @@ addEventListener("resize", resize);
 // ───────────────────────────────────────────────────────────────────────────
 async function boot() {
   resize();
+  await preloadAssets(); // station props ready before the first level builds
+  await loadLevels();    // authored level pack (levels.json) or editor preview
   try {
     const who = await worlds.me();
     me.handle = who.handle; me.name = who.name || who.handle || "you";
@@ -690,7 +1031,7 @@ async function boot() {
   await initBoard();
 
   dom.loader.classList.add("hide");
-  flashMessage("LEVEL " + (level ? level.index : 1), false);
+  flashMessage(level && level.name && LEVELS ? level.name : "LEVEL " + (level ? level.index : 1), false);
   requestAnimationFrame(frame);
 }
 

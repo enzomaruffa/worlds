@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Tumble · 3D Level Editor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #09090b; --surface: #0c0c0f; --surface-2: #131317; --border: #27272a;
+      --gold: #f59e0b; --gold-bright: #fbbf24; --green: #22c55e; --red: #ef4444; --cyan: #22d3ee;
+      --text: #e4e4e7; --muted: #a1a1aa; --dim: #71717a;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body { background: var(--bg); color: var(--text); overflow: hidden; font-family: "Space Grotesk", ui-sans-serif, system-ui, sans-serif; display: flex; }
+    #stage { flex: 1; position: relative; min-width: 0; }
+    canvas#view { display: block; width: 100%; height: 100%; touch-action: none; }
+    #hint { position: absolute; left: .8rem; bottom: .8rem; font-size: .74rem; color: var(--dim);
+      background: rgba(12,12,15,.72); padding: .45rem .65rem; border-radius: .5rem; border: 1px solid var(--border); pointer-events: none; line-height: 1.55; }
+    #hint b { color: var(--muted); }
+
+    #panel { width: 23rem; flex-shrink: 0; height: 100%; overflow-y: auto; background: var(--surface);
+      border-left: 1px solid var(--border); padding: 1rem; display: flex; flex-direction: column; gap: .85rem; }
+    .panel-h { font-size: 1.15rem; font-weight: 700; margin: 0; }
+    .panel-h b { color: var(--gold); }
+    .sec { background: var(--surface-2); border: 1px solid var(--border); border-radius: .6rem; padding: .7rem .75rem; }
+    .sec h3 { margin: 0 0 .55rem; font-size: .68rem; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: var(--dim); }
+    .row { display: flex; align-items: center; gap: .5rem; margin: .35rem 0; }
+    .row label { font-size: .8rem; color: var(--muted); width: 4rem; flex-shrink: 0; }
+    .row input[type="text"], .row input[type="number"], .row select {
+      flex: 1; min-width: 0; background: var(--bg); color: var(--text); border: 1px solid var(--border);
+      border-radius: .4rem; padding: .35rem .5rem; font-family: inherit; font-size: .82rem; }
+    .row input[type="range"] { flex: 1; min-width: 0; accent-color: var(--gold); }
+    .row .val { font-size: .76rem; color: var(--gold-bright); width: 2.6rem; text-align: right; font-variant-numeric: tabular-nums; }
+
+    .cat { margin-bottom: .5rem; }
+    .cat h4 { margin: .3rem 0 .25rem; font-size: .7rem; color: var(--dim); font-weight: 600; }
+    .pal { display: flex; flex-wrap: wrap; gap: .3rem; }
+    .pal button { flex: 0 0 auto; min-width: 0; padding: .3rem .5rem; font-size: .74rem; display: flex; align-items: center; gap: .3rem; }
+    .pal .sw { width: .7rem; height: .7rem; border-radius: 50%; }
+
+    .btns { display: flex; flex-wrap: wrap; gap: .5rem; }
+    button { flex: 1; min-width: 5rem; padding: .5rem .6rem; border-radius: .5rem; cursor: pointer; font-family: inherit; font-size: .8rem; font-weight: 600;
+      border: 1px solid var(--border); background: var(--surface-2); color: var(--text); transition: background .1s, border-color .1s, transform .05s; }
+    button:hover { border-color: var(--muted); }
+    button:active { transform: translateY(1px); }
+    button.primary { border-color: var(--gold); background: rgba(245,158,11,.16); color: var(--gold-bright); }
+    button.go { border-color: var(--green); background: rgba(34,197,94,.16); color: #bbf7d0; }
+    button.danger { border-color: #7f1d1d; color: #fecaca; }
+    button:disabled { opacity: .4; cursor: default; }
+    #inspect.hidden { display: none; }
+    #export { width: 100%; height: 7rem; resize: vertical; background: var(--bg); color: var(--text); border: 1px solid var(--border);
+      border-radius: .4rem; padding: .5rem; font-family: ui-monospace, monospace; font-size: .7rem; }
+    .note { font-size: .72rem; color: var(--dim); line-height: 1.5; } .note code { color: var(--muted); }
+    #loading { position:absolute; inset:0; display:grid; place-items:center; background:var(--bg); color:var(--muted); font-size:.9rem; }
+  </style>
+  <script type="importmap">
+  { "imports": { "three": "./three.module.js", "three/addons/": "./addons/" } }
+  </script>
+</head>
+<body>
+  <div id="stage">
+    <canvas id="view"></canvas>
+    <div id="loading">loading asset catalog…</div>
+    <div id="hint">
+      <b>click a catalog item</b> to drop it · <b>click</b> a piece to select · <b>drag</b> it on the ground to move<br />
+      <b>orbit</b> drag empty space · <b>scroll</b> zoom · set <b>height / rotation / size</b> on the right · <b>Del</b> removes
+    </div>
+  </div>
+
+  <div id="panel">
+    <h2 class="panel-h"><b>TUMBLE</b> · 3D level editor</h2>
+
+    <div class="sec">
+      <h3>Level pack</h3>
+      <div class="row"><label>Editing</label><select id="lvlSel"></select></div>
+      <div class="btns"><button id="addLvl">+ Level</button><button id="dupLvl">Duplicate</button><button class="danger" id="delLvl">Delete</button></div>
+    </div>
+
+    <div class="sec">
+      <h3>This level</h3>
+      <div class="row"><label>Name</label><input type="text" id="mName" /></div>
+      <div class="row"><label>Hue</label><input type="range" id="mHue" min="0" max="1" step="0.01" /><span class="val" id="mHueV"></span></div>
+    </div>
+
+    <div class="sec">
+      <h3>Catalog — click to drop</h3>
+      <div id="catalog"></div>
+    </div>
+
+    <div class="sec hidden" id="inspect">
+      <h3>Selected: <span id="insKind"></span></h3>
+      <div class="row"><label>Height</label><input type="range" id="insY" min="-4" max="20" step="0.5" /><span class="val" id="insYV"></span></div>
+      <div class="row"><label>Rotate</label><input type="range" id="insRot" min="0" max="6.28" step="0.08" /><span class="val" id="insRotV"></span></div>
+      <div id="insExtra"></div>
+      <div class="btns"><button id="insDup">Duplicate</button><button class="danger" id="insDel">Delete</button></div>
+    </div>
+
+    <div class="sec">
+      <h3>Export &amp; preview</h3>
+      <div class="btns">
+        <button class="go" id="previewBtn">▶ Preview</button>
+        <button id="copyBtn">Copy</button>
+        <button class="primary" id="dlBtn">⬇ levels.json</button>
+      </div>
+      <p class="note">Drop the downloaded <code>levels.json</code> into <code>tumble/</code> and re-deploy — the game auto-loads it. Every level needs a <b>start</b> and a <b>finish</b> pad.</p>
+      <textarea id="export" readonly spellcheck="false"></textarea>
+    </div>
+  </div>
+
+  <script type="module" src="./editor.js"></script>
+</body>
+</html>
