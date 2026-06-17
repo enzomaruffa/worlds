@@ -449,6 +449,58 @@ buildPropPalette();
 // autosave the working track so a reload never loses your layout
 let _lastSaved = "";
 setInterval(() => { try { const s = JSON.stringify(track); if (s !== _lastSaved) { localStorage.setItem("kartEditorTrack", s); _lastSaved = s; } } catch (_) {} }, 1500);
+
+// ── 🌐 shared garage (worlds.db — live, deploy-free) ──────────────────────────
+function trackForDb() {
+  return {
+    id: slug(track.name), name: track.name, blurb: track.blurb, laps: track.laps, themeId: track.themeId,
+    cp: track.cp.map((p) => [r2(p[0]), r2(p[1]), r2(p[2])]),
+    bank: track.bank.map((b) => +(+b).toFixed(2)),
+    props: (track.props || []).map((o) => ({ model: o.model, x: r2(o.x), z: r2(o.z), y: r2(o.y || 0), ry: r2(o.ry || 0), s: r2(o.s || 4) })),
+    theme: THEMES[track.themeId],
+  };
+}
+const validTrackData = (d) => d && Array.isArray(d.cp) && d.cp.length >= 4 && Array.isArray(d.bank);
+let tracksCol = null;
+async function initShared() {
+  try { await worlds.ready; tracksCol = worlds.db.collection("tracks"); } catch (_) { return; }
+  refreshShared();
+  try { tracksCol.subscribe(() => refreshShared()); } catch (_) {}
+}
+$("pubBtn").addEventListener("click", async () => {
+  if (!tracksCol) { flash($("pubBtn"), "sign in to publish"); return; }
+  const data = trackForDb();
+  try {
+    if (track._docId) { await tracksCol.update(track._docId, data); flash($("pubBtn"), "Updated for all ✓"); }
+    else { const doc = await tracksCol.create(data); track._docId = doc.id; flash($("pubBtn"), "Published to all ✓"); }
+    refreshShared();
+  } catch (_) { flash($("pubBtn"), "publish failed"); }
+});
+function refreshShared() {
+  const host = $("sharedList"); if (!host || !tracksCol) return;
+  tracksCol.list({ limit: 100 }).then((res) => {
+    const items = res.items || [];
+    if (!items.length) { host.innerHTML = '<span class="note">no shared tracks yet — publish one!</span>'; return; }
+    host.innerHTML = "";
+    for (const it of items) {
+      const row = document.createElement("div"); row.className = "row"; row.style.margin = "0";
+      const span = document.createElement("span");
+      span.style.cssText = "flex:1;min-width:0;font-size:.8rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:" + (it.id === track._docId ? "var(--gold-bright)" : "var(--muted)");
+      span.textContent = (it.data && it.data.name) || "track";
+      const edit = document.createElement("button"); edit.textContent = "Edit"; edit.style.cssText = "flex:0;min-width:0;padding:.25rem .5rem;font-size:.74rem"; edit.onclick = () => loadShared(it);
+      const del = document.createElement("button"); del.textContent = "✕"; del.className = "danger"; del.style.cssText = "flex:0;min-width:0;padding:.25rem .5rem;font-size:.74rem"; del.onclick = async () => { try { await tracksCol.delete(it.id); refreshShared(); } catch (_) {} };
+      row.append(span, edit, del); host.appendChild(row);
+    }
+  }).catch(() => {});
+}
+function loadShared(it) {
+  const d = it.data || {};
+  if (!validTrackData(d)) return;
+  track = { id: d.id || slug(d.name || "track"), name: d.name || "Track", blurb: d.blurb || "", laps: d.laps || 3,
+    themeId: THEMES[d.themeId] ? d.themeId : "sunset-bay", cp: d.cp, bank: d.bank, props: Array.isArray(d.props) ? d.props : [], _docId: it.id };
+  selected = -1; selProp = -1; fitView(); resample(); render(); syncPanel();
+}
+initShared();
 addEventListener("resize", resize);
 // initial layout pass after the canvas has its size
 requestAnimationFrame(() => { resize(); fitView(); resample(); render(); });

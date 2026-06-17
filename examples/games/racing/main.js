@@ -190,6 +190,7 @@ let ups = [];            // banked surface up
 let leftHalf = [], rightHalf = []; // per-sample half-widths (inner edge narrows in tight corners)
 let bankCurve;
 let curTrack = TRACKS[0];
+const BUILTIN_TRACK_COUNT = TRACKS.length; // db-published tracks are appended after these
 let checkpoints = [];    // { index, center, forward, normal, up, mats?, group? }
 let finishNormal, finishCenter, finishForward;
 let trackEdges = null;   // { left, right, curbL, curbR } of the current build
@@ -2151,6 +2152,23 @@ resize();
 // ───────────────────────────────────────────────────────────────────────────
 // BOOT
 // ───────────────────────────────────────────────────────────────────────────
+function validTrack(t) { return t && Array.isArray(t.cp) && t.cp.length >= 4 && Array.isArray(t.bank); }
+async function loadSharedTracks() {
+  try {
+    const col = worlds.db.collection("tracks");
+    const r = await col.list({ limit: 100 });
+    for (const it of (r.items || [])) if (validTrack(it.data)) TRACKS.push(it.data);
+    // live: re-pull on any change; keep the built-ins, swap in the latest db set
+    col.subscribe(async () => {
+      try {
+        const rr = await col.list({ limit: 100 });
+        const v = (rr.items || []).map((it) => it.data).filter(validTrack);
+        TRACKS.splice(BUILTIN_TRACK_COUNT, TRACKS.length - BUILTIN_TRACK_COUNT, ...v);
+      } catch (_) {}
+    });
+  } catch (_) { /* no db / signed out → just the built-ins */ }
+}
+
 (async function boot() {
   // Track-editor preview: `?preview` loads a single track from localStorage
   // (written by editor.html) and races it solo — handy for iterating on a design.
@@ -2162,6 +2180,11 @@ resize();
   } catch (_) {}
 
   try { if (window.worlds && worlds.ready) await worlds.ready; } catch (_) {}
+
+  // 🌐 shared tracks from worlds.db — published live by anyone, no re-deploy.
+  // Appended after the built-ins so the rotation index stays consistent for all.
+  if (!new URLSearchParams(location.search).has("preview")) await loadSharedTracks();
+
   try {
     const info = await worlds.me();
     if (info && info.handle) { me.handle = info.handle; me.name = info.name || info.handle; }

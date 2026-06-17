@@ -141,16 +141,24 @@
     </div>
 
     <div class="sec">
-      <h3>Export &amp; preview</h3>
+      <h3>🌐 Shared garage — live, no deploy</h3>
+      <div class="btns"><button class="go" id="pubBtn">🌐 Publish this track to all</button></div>
+      <p class="note">Publishing adds the track to the live game's rotation for <b>everyone</b> instantly — no re-deploy. Pick one below to edit or remove it.</p>
+      <div id="sharedList" class="pal" style="flex-direction:column; align-items:stretch; gap:.3rem; max-height:12rem; overflow-y:auto"></div>
+    </div>
+
+    <div class="sec">
+      <h3>Export (offline backup)</h3>
       <div class="btns">
         <button class="go" id="previewBtn">▶ Preview in game</button>
         <button class="primary" id="copyBtn">Copy track def</button>
       </div>
-      <p class="note">Paste the copied object into the <code>TRACKS</code> array in <code>main.js</code> to keep it. Preview opens the real game with this track (solo).</p>
+      <p class="note">Or paste the copied object into the <code>TRACKS</code> array in <code>main.js</code>. Preview opens the real game with this track (solo).</p>
       <textarea id="export" readonly spellcheck="false"></textarea>
     </div>
   </div>
 
+  <script src="/worlds.js"></script>
   <script type="module" src="./editor.js"></script>
 </body>
 </html>
