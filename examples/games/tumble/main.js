@@ -518,8 +518,16 @@ function genLevel(index) {
   return { name: "Level " + index, hue: ((index * 47) % 360) / 360, objects };
 }
 
+// Per-level mood: tint the sky light + distance fog by the level's hue so the
+// endless gauntlet doesn't read as one long identical corridor.
+function setAmbiance(hue) {
+  hemi.color.setHSL(hue, 0.5, 0.62);
+  scene.fog.color.setHSL(hue, 0.5, 0.07);
+}
+
 function buildLevel(seed, index) {
   disposeLevel();
+  setAmbiance(((index * 47) % 360) / 360);
   // authored object-based level (from the 3D editor) takes precedence
   const authored = LEVELS && LEVELS.length ? LEVELS[(((index - 1) % LEVELS.length) + LEVELS.length) % LEVELS.length] : null;
   if (authored && Array.isArray(authored.objects) && authored.objects.length) { buildObjectLevel(authored, index); return; }
@@ -859,12 +867,13 @@ function makeAvatar(color, seed) {
   const find = (re) => clips.find((c) => re.test(c.name));
   const actions = {};
   const reg = (key, re) => { const c = find(re); if (c) actions[key] = mixer.clipAction(c); };
-  reg("idle", /^idle$/i); reg("walk", /^walk$/i); reg("sprint", /^sprint$/i); reg("jump", /^jump$/i); reg("fall", /^fall$/i);
+  reg("idle", /^idle$/i); reg("walk", /^walk$/i); reg("sprint", /^sprint$/i); reg("jump", /^jump$/i); reg("fall", /^fall$/i); reg("cheer", /emote-yes|cheer|celebrate|wave/i);
   if (!actions.idle) actions.idle = mixer.clipAction(clips[0]);
   actions.walk = actions.walk || actions.sprint || actions.idle;
   actions.sprint = actions.sprint || actions.walk;
   actions.jump = actions.jump || actions.idle;
   actions.fall = actions.fall || actions.jump;
+  actions.cheer = actions.cheer || actions.jump || actions.idle;
   let cur = null;
   const play = (key) => {
     const a = actions[key]; if (!a || a === cur) return;
@@ -956,6 +965,7 @@ function upsertGhost(gid, s) {
   g.target.set(s.x, typeof s.y === "number" ? s.y : g.target.y, s.z);
   g.vel.x = s.vx || 0; g.vel.z = s.vz || 0;
   g.heading = typeof s.ry === "number" ? s.ry : g.heading;
+  g.fin = !!s.fin;
   g.lastAt = performance.now();
   if (typeof s.color === "number" && s.color !== g.color) { g.color = s.color; g.mat.color.setHex(s.color); }
   if (s.name && s.name !== g.name) { g.name = s.name; g.mesh.remove(g.label); g.label = makeLabel(s.name, g.color); g.mesh.add(g.label); }
@@ -980,7 +990,7 @@ function stepGhosts(dt) {
     let d = g.heading - g.mesh.rotation.y;
     d = Math.atan2(Math.sin(d), Math.cos(d));
     g.mesh.rotation.y += d * a;
-    if (g.mesh.userData.anim) { const sp = Math.hypot(g.vel.x, g.vel.z); g.mesh.userData.anim.play(sp > 6 ? "sprint" : sp > 1.2 ? "walk" : "idle"); }
+    if (g.mesh.userData.anim) { const sp = Math.hypot(g.vel.x, g.vel.z); g.mesh.userData.anim.play(g.fin ? "cheer" : sp > 6 ? "sprint" : sp > 1.2 ? "walk" : "idle"); }
   }
 }
 
@@ -1255,7 +1265,7 @@ function stepPlayer(dt, t) {
   const anim = player.mesh.userData.anim;
   if (anim) {
     const sp = Math.hypot(player.vel.x, player.vel.z);
-    anim.play(!player.grounded ? (player.vel.y > 1 ? "jump" : "fall") : diving ? "jump" : sp > 6 ? "sprint" : sp > 1.2 ? "walk" : "idle");
+    anim.play(player.finished ? "cheer" : !player.grounded ? (player.vel.y > 1 ? "jump" : "fall") : diving ? "jump" : sp > 6 ? "sprint" : sp > 1.2 ? "walk" : "idle");
   }
   // squash & stretch — stretch tall while airborne, squash on the ground
   const body = player.mesh.userData.body;
