@@ -852,18 +852,6 @@ function instedGLB(group, model, targetH, count, place, opts = {}) {
 function addScenery(group, theme) {
   const rng = mulberry32(hashStr(curTrack.id) || 1337);
 
-  // Cones along both curbs — Kenney pylon, recoloured to the theme.
-  const coneCount = 60;
-  if (MODELS.pylon) {
-    instedGLB(group, MODELS.pylon, 1.5, coneCount, (k, pos) => {
-      const i = Math.floor((k / coneCount) * SAMPLES);
-      const edge = k % 2 === 0 ? trackEdges.curbL[i] : trackEdges.curbR[i];
-      const off = (k % 2 === 0 ? 1 : -1) * 1.1;
-      const n = finishNormalAt(i).multiplyScalar(off);
-      pos.set(edge.x + n.x, edge.y, edge.z + n.z);
-    }, { recolor: theme.cone, emissive: theme.neon ? theme.cone : null, noShadow: theme.neon });
-  }
-
   // Trees from Kenney models for the leafy biomes; the others stay procedural
   // (no cactus/pine/neon-pylon in the kit).
   if ((theme.scenery === "trees" || theme.scenery === "stands") && MODELS.treeLarge) {
@@ -1163,7 +1151,7 @@ function makeKart(colorHex) {
   _mbb.setFromObject(car); _mbb.getSize(_msz);
   const s = 3.0 / Math.max(_msz.x, _msz.z); // longest horizontal dim → ~3 units
   car.scale.setScalar(s);
-  car.rotation.y = Math.PI; // Kenney cars face -Z; our forward is +Z
+  car.rotation.y = 0; // model already faces our forward (+Z)
   _mbb.setFromObject(car);
   car.position.y -= _mbb.min.y; // wheels rest on y=0
   wrap.add(car);
@@ -1316,13 +1304,13 @@ const PHYS = {
   engineBrake: 7,        // coast slowdown when off the gas
   turn: 2.9,             // base yaw rate (rad/s)
   turnSpeedFalloff: 0.5, // steering tightens less at speed than before
-  gripNormal: 8.5,       // lateral grip (higher = sticks to the line)
-  gripDrift: 2.0,        // lateral grip while handbraking (slides)
-  driftSteerBoost: 1.3,  // extra yaw authority mid-drift
-  driftScrub: 0.28,      // forward speed scrubbed per sec while drifting
+  gripNormal: 9.0,       // lateral grip (higher = sticks to the line)
+  gripDrift: 1.4,        // lateral grip with the handbrake — rear breaks loose into a slide
+  driftYaw: 1.55,        // extra yaw authority while the rear is locked (rotate into the slide)
+  handbrakeBrake: 14,    // the handbrake scrubs forward speed (but you carry the drift)
   cornerSlip: 0.78,      // grip kept when cornering hard at speed (natural slide)
-  offRoadDrag: 34,
-  offRoadMax: 30,
+  offRoadDrag: 36,
+  offRoadMax: 22,        // off the track you crawl — clearly slower than the road
   gravityFeel: 18,
 };
 
@@ -1460,10 +1448,10 @@ function offRoadAmount(x, z) {
   const near = nearestSample(x, z);
   return Math.max(0, near.dist - (ROAD_HALF + CURB_W * 0.6));
 }
-// "Soft wall" at the road edge: ease the kart back in and SLIDE along the wall —
-// cancel only the outward velocity, keep the tangential part (with light
-// friction) so a clip scrubs a little speed instead of dead-stopping you.
-const WALL_LIMIT = ROAD_HALF + CURB_W + 0.9;
+// Far soft boundary (NOT a track edge): you can freely leave the road and crawl
+// around on the grass — off-road just slows you down. This fence sits way out so
+// you can't drive off into the void, but the track itself has no wall.
+const WALL_LIMIT = ROAD_HALF + 60;
 const WALL_PUSH = 0.5;
 function resolveTrackWall() {
   const near = nearestSample(player.pos.x, player.pos.z);
@@ -1628,27 +1616,33 @@ function stepPhysics(dt, now) {
   }
   fwd = THREE.MathUtils.clamp(fwd, PHYS.maxReverse, PHYS.maxSpeed);
 
-  // steering — yaw the heading; handbrake adds authority for big drifts
+  // steering authority — computed now but the heading is rotated AFTER we
+  // recompose the velocity, so the car turns while its momentum keeps its world
+  // direction. That mismatch IS the slip: grip pulls it back fast normally, but
+  // the handbrake collapses grip so the rear slides out into a real drift.
   const steer = preRace ? 0 : (input.left ? 1 : 0) - (input.right ? 1 : 0);
   const speedFrac = Math.min(1, Math.abs(fwd) / PHYS.maxSpeed);
-  const handbrake = !preRace && input.hand && Math.abs(fwd) > 3;
-  const turnScale = 1 - PHYS.turnSpeedFalloff * speedFrac;
+  const handbrake = !preRace && input.hand && Math.abs(fwd) > 2;
+  const turnScale = handbrake ? 1 : (1 - PHYS.turnSpeedFalloff * speedFrac);
   const motionGate = Math.min(1, Math.abs(fwd) / 5);
   const dir = fwd >= 0 ? 1 : -1;
   let yaw = steer * PHYS.turn * turnScale * motionGate * dir;
-  if (handbrake) yaw *= PHYS.driftSteerBoost;
-  player.heading += yaw * dt;
+  if (handbrake) yaw *= PHYS.driftYaw;
 
-  // grip: bleed lateral velocity. Handbrake (or hard cornering at speed) lowers
-  // grip so the kart slides — that's the drift.
+  // grip: bleed lateral velocity. Handbrake locks the rear (grip collapses); hard
+  // cornering at speed lets go a little. Recovers instantly when released.
   let grip = handbrake ? PHYS.gripDrift : PHYS.gripNormal;
-  if (onGrass) grip *= 0.55;
+  if (onGrass) grip *= 0.5;
   else if (!handbrake && steer !== 0 && speedFrac > 0.6) grip *= PHYS.cornerSlip;
   lat *= Math.exp(-grip * dt);
-  if (handbrake) fwd *= Math.max(0, 1 - PHYS.driftScrub * dt);
+  // cap the slide angle (~50°) so a held handbrake SLIDES rather than spinning
+  // out — the tyres scrub the excess; you steer to hold the angle.
+  const maxLat = Math.abs(fwd) * 1.2 + 5;
+  lat = THREE.MathUtils.clamp(lat, -maxLat, maxLat);
+  // the handbrake is also a BRAKE — scrub forward speed hard while it's held
+  if (handbrake) { const hb = PHYS.handbrakeBrake * dt; fwd = fwd > 0 ? Math.max(0, fwd - hb) : Math.min(0, fwd + hb); }
 
-  // slope feel along the (new) heading
-  fx = Math.sin(player.heading); fz = Math.cos(player.heading);
+  // slope feel along the heading
   {
     const STEP = 3;
     const aheadY = surfaceAt(player.pos.x + fx * STEP, player.pos.z + fz * STEP).yCenter;
@@ -1657,10 +1651,11 @@ function stepPhysics(dt, now) {
     fwd += THREE.MathUtils.clamp(grade, -0.6, 0.6) * PHYS.gravityFeel * dt;
   }
 
-  // recompose world velocity from forward + lateral on the new heading
-  const nrx = fz, nrz = -fx;
-  player.vx = fx * fwd + nrx * lat;
-  player.vz = fz * fwd + nrz * lat;
+  // recompose velocity on the CURRENT heading (right = (fz,-fx)), THEN rotate the
+  // car — so the world velocity does NOT rigidly follow the heading.
+  player.vx = fx * fwd + fz * lat;
+  player.vz = fz * fwd - fx * lat;
+  player.heading += yaw * dt;
 
   // integrate, then resolve walls + karts on the velocity vector
   player.pos.x += player.vx * dt;
@@ -1671,7 +1666,7 @@ function stepPhysics(dt, now) {
   // derive forward speed (post-collision) for HUD / network / spin
   player.vel = player.vx * fx + player.vz * fz;
   player.slip = lat;
-  player.drift = handbrake || Math.abs(lat) > 7;
+  player.drift = handbrake || Math.abs(lat) > 5;
 
   // skid marks while sliding on the ground at speed
   if (player.drift && Math.abs(player.vel) > 9 && !onGrass) stampSkid(now);
