@@ -458,11 +458,73 @@ function levelPlan(index) {
   return { plan, hue: ((index * 47) % 360) / 360, seed: 0, name: "Level " + index };
 }
 
+// ── Procedural ENDLESS level, emitted as catalog OBJECTS ─────────────────────
+// Builds the same `{ objects:[…] }` shape the 3D editor produces, so the default
+// endless gauntlet shares buildObjectLevel's unified collision and gets EVERY
+// mechanic (ice / conveyor / trampoline / crumble / wrecking ball / boulder /
+// fan / gaps / slalom / spinner / sweeper / saws). Fully seeded → identical for
+// every client on a given level index.
+const LANE = 13; // procedural lane width
+function genLevel(index) {
+  const r = mulberry32(seedFor(index));
+  const diff = clamp(0.18 + (index - 1) * 0.07, 0.18, 1);
+  const objects = [];
+  const pick = (a) => a[Math.floor(r() * a.length)];
+  const add = (k, x, z, o) => objects.push(Object.assign({ k, x, z, y: 0 }, o));
+  const floor = (k, x, z, w, d, p) => add(k, x, z, p ? { w, d, p } : { w, d });        // top at y≈0.5
+  const on = (k, x, z, o) => add(k, x, z, Object.assign({ y: 0.5 }, o || {}));          // sits on the floor
+
+  let z = 0;
+  add("start", 0, 4, { w: 16, d: 8 });
+  for (const sx of [-1, 1]) on("flag", sx * 8.5, 6, { s: 4 });
+  z = 8;
+
+  const decorate = (z0, z1) => {
+    for (const sx of [-1, 1]) {
+      if (r() < 0.45) continue;
+      on(pick(["tree", "pine", "mushrooms", "rocks", "crate", "sign", "barrel"]), sx * (LANE / 2 + 3 + r() * 3), z0 + r() * (z1 - z0), { s: 1.5 + r() * 2.4, ry: r() * 6.28 });
+    }
+    if (r() < 0.5) for (let i = 0; i < 3; i++) on("coin", (r() - 0.5) * LANE * 0.6, z0 + 3 + i * 2.5, { y: 2.4, s: 1.4 });
+  };
+  const entry = (len = 3) => { floor("platform", 0, z + len / 2, LANE, len); z += len; }; // plain checkpoint strip
+
+  const SEGS = {
+    straight() { const L = 12; floor("platform", 0, z + L / 2, LANE, L); decorate(z, z + L); z += L; },
+    ice() { entry(3); const L = 13; floor("ice", 0, z + L / 2, LANE, L); decorate(z, z + L); z += L; },
+    conveyor() { entry(2); const L = 15; const speed = r() < 0.45 ? -7 - diff * 4 : 7 + diff * 3; floor("conveyor", 0, z + L / 2, LANE, L, { dir: "z", speed }); decorate(z, z + L); z += L; },
+    trampoline() { for (let i = 0; i < 5; i++) { const plain = i % 2 === 0; if (plain) floor("platform", 0, z + 2, LANE, 4); else floor("bounce", 0, z + 2, 6, 4, { boost: 14 + diff * 3 }); z += 4; } },
+    crumble() { entry(3); const rows = 3 + Math.floor(diff * 3); for (let rr = 0; rr < rows; rr++) { for (const xx of [-4.4, 0, 4.4]) floor("crumble", xx, z + 2.5, 5, 5, { delay: 0.55 - diff * 0.2 }); z += 5; } floor("platform", 0, z + 1.5, LANE, 3); z += 3; },
+    gaps() { const n = 2 + Math.floor(diff * 2); for (let i = 0; i < n; i++) { floor("platform", 0, z + 2.5, LANE, 5); z += 5; if (i < n - 1) z += 3 + diff * 3.2; } },
+    spinner() { const L = 14; floor("platform", 0, z + L / 2, LANE, L); on("spinner", 0, z + L / 2, { p: { speed: 1.1 + diff * 1.3 } }); decorate(z, z + L); z += L; },
+    sweeper() { const L = 12; floor("platform", 0, z + L / 2, LANE, L); on("sweeper", 0, z + L / 2, { p: { speed: 1.3 + diff * 1.4, amp: 5 } }); z += L; },
+    slalom() { const L = 16; floor("platform", 0, z + L / 2, LANE, L); const m = 3 + Math.floor(diff * 2); for (let i = 0; i < m; i++) on("pillar", (i % 2 ? 1 : -1) * 3.5, z + 2 + (L - 4) * (i + 0.5) / m); decorate(z, z + L); z += L; },
+    balls() { const L = 18; floor("platform", 0, z + L / 2, LANE, L); const n = diff > 0.5 ? 2 : 1; for (let i = 0; i < n; i++) on("ball", n > 1 ? (i ? 4 : -4) : 0, z + (L * (i + 1)) / (n + 1), { p: { amp: 1.0, speed: 1.0 + diff * 0.7, len: 7 } }); decorate(z, z + L); z += L; },
+    boulder() { const L = 20; floor("platform", 0, z + L / 2, LANE, L); on("boulder", 0, z + L - 1, { p: { speed: 8 + diff * 5, span: L } }); decorate(z, z + L); z += L; },
+    fan() { const L = 14; floor("platform", 0, z + L / 2, LANE, L); on("fan", -(LANE / 2 + 1.5), z + L / 2, { ry: -Math.PI / 2, p: { dir: "x", force: 15 + diff * 9, range: LANE + 3 } }); z += L; },
+    saws() { const L = 14; floor("platform", 0, z + L / 2, LANE, L); const n = 2 + Math.floor(diff * 2); for (let i = 0; i < n; i++) on(r() < 0.5 ? "saw" : "spikes", (r() - 0.5) * LANE * 0.7, z + 2 + (L - 4) * (i + 0.5) / n, { s: 2.2 }); z += L; },
+  };
+
+  const EASY = ["straight", "ice", "trampoline", "conveyor", "slalom", "spinner"];
+  const HARD = ["crumble", "gaps", "balls", "boulder", "fan", "sweeper", "saws"];
+  const nSeg = clamp(4 + Math.floor((index - 1) * 0.7), 4, 12);
+  SEGS[pick(["straight", "ice", "trampoline"])](); // first segment is always gentle
+  for (let i = 1; i < nSeg; i++) SEGS[pick(r() < 0.25 + diff * 0.5 ? HARD : EASY)]();
+
+  add("finish", 0, z + 5, { w: 16, d: 10 });
+  for (const sx of [-1, 1]) on("flag", sx * 9, z + 5, { s: 4.5 });
+  z += 12;
+  for (let i = 0; i < 16; i++) on(pick(["rocks", "barrel"]), (r() < 0.5 ? -1 : 1) * (LANE / 2 + 10 + r() * 30), z * r(), { y: -8 - r() * 20, s: 1.5 + r() * 3, ry: r() * 6.28 });
+
+  return { name: "Level " + index, hue: ((index * 47) % 360) / 360, objects };
+}
+
 function buildLevel(seed, index) {
   disposeLevel();
   // authored object-based level (from the 3D editor) takes precedence
   const authored = LEVELS && LEVELS.length ? LEVELS[(((index - 1) % LEVELS.length) + LEVELS.length) % LEVELS.length] : null;
   if (authored && Array.isArray(authored.objects) && authored.objects.length) { buildObjectLevel(authored, index); return; }
+  // no authored pack → the procedural endless gauntlet, built from catalog objects
+  if (!LEVELS || !LEVELS.length) { buildObjectLevel(genLevel(index), index); return; }
 
   const { plan, hue, seed: planSeed, name } = levelPlan(index);
   const rng = mulberry32((planSeed || seed) >>> 0);
