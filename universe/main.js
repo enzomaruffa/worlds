@@ -18,14 +18,38 @@ const ASSET_BOX = {}; // bounding box per model, so we can height-normalize acro
 async function preload() {
   const loader = new GLTFLoader();
   const names = [
-    "craft_speederA", "craft_cargoA", "meteor", "meteor_detailed", "rock_crystalsLargeA",
-    "satelliteDish_detailed", "tree_default", "tree_oak", "tree_palmTall", "tree_pineRoundA",
+    // ships — player, pilots, ambient traffic, mothership
+    "craft_speederA", "craft_speederB", "craft_speederC", "craft_speederD",
+    "craft_cargoA", "craft_cargoB", "craft_miner", "craft_racer",
+    // belt rocks + drifting debris
+    "meteor", "meteor_detailed", "meteor_half", "rock", "rock_largeA", "rock_largeB",
+    "rocks_smallA", "rocks_smallB", "rock_crystalsLargeA", "rock_crystalsLargeB", "barrel", "barrels",
+    // orbital stations / structures around inhabited systems
+    "satelliteDish_detailed", "satelliteDish_large", "hangar_roundA", "hangar_roundGlass",
+    "hangar_smallA", "structure_detailed", "machine_generatorLarge", "machine_wireless",
+    "platform_large", "turret_single",
+    // warp gates (FTL beacons) + discoverable easter eggs
+    "gate_complex", "gate_simple", "astronautA", "astronautB", "alien", "rover",
+    // planet-surface foliage (Nature Kit) — trees …
+    "tree_default", "tree_oak", "tree_palmTall", "tree_pineRoundA",
     "tree_default_fall", "tree_default_dark", "cactus_tall",
+    "tree_fat", "tree_cone", "tree_detailed", "tree_thin", "tree_tall", "tree_simple",
+    "tree_small", "tree_blocks", "tree_plateau", "tree_palmDetailedTall", "tree_palmShort",
+    "tree_pineRoundB", "tree_pineTallA", "tree_pineSmallA", "cactus_short",
+    // … and undergrowth (bushes, flowers, grass, mushrooms, rocks)
+    "plant_bush", "plant_bushDetailed", "plant_bushLarge", "plant_flatTall",
+    "grass_large", "grass_leafs", "flower_redA", "flower_yellowB", "flower_purpleC",
+    "mushroom_red", "mushroom_tanGroup", "rock_smallA", "rock_smallTopA", "stone_smallA", "rock_tallC",
   ];
+  // resilient: a single bad/missing model must not abort the whole scene
   await Promise.all(names.map(async (n) => {
-    const gltf = await loader.loadAsync(`./assets/${n}.glb`);
-    ASSETS[n] = gltf.scene;
-    ASSET_BOX[n] = new THREE.Box3().setFromObject(gltf.scene);
+    try {
+      const gltf = await loader.loadAsync(`./assets/${n}.glb`);
+      ASSETS[n] = gltf.scene;
+      ASSET_BOX[n] = new THREE.Box3().setFromObject(gltf.scene);
+    } catch (e) {
+      console.warn(`asset failed to load: ${n}`, e?.message ?? e);
+    }
   }));
 }
 function modelHeight(name) {
@@ -51,6 +75,35 @@ function instancedFromGLB(template, matrices, group) {
     }
     group.add(inst);
   });
+}
+
+// Clone a GLB, height-normalised to `h` world units, and parent it. Returns the
+// clone (null if the asset is missing) so callers can position/animate it.
+function placedClone(name, parent, h, pos, rotY, emissive) {
+  if (!ASSETS[name]) return null;
+  const m = ASSETS[name].clone();
+  m.scale.setScalar(h / modelHeight(name));
+  if (pos) m.position.copy(pos);
+  if (rotY != null) m.rotation.y = rotY;
+  m.traverse((c) => {
+    if (!c.isMesh) return;
+    c.castShadow = false; c.receiveShadow = false;
+    // self-illuminate powered structures in their own palette, so they read as
+    // lit even when the camera sees their shadowed side (e.g. backlit by a sun)
+    if (emissive && c.material) {
+      c.material = c.material.clone();
+      if (c.material.color) c.material.emissive = c.material.color.clone();
+      c.material.emissiveIntensity = typeof emissive === "number" ? emissive : 0.35;
+    }
+  });
+  parent.add(m);
+  return m;
+}
+// deterministic int hash of a string → seed for mulberry32 (stable per system/site)
+function hashStr(s) {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return h >>> 0;
 }
 
 // ---------- seeded helpers (planets must look identical on every visit) ----------
@@ -209,7 +262,7 @@ composer.addPass(new OutputPass()); // tone-maps + sRGB at the very end (single 
   warpBlurPass = null;
 }
 
-scene.add(new THREE.HemisphereLight(0x404a66, 0x080810, 1.4));
+scene.add(new THREE.HemisphereLight(0x4a557a, 0x0a0a14, 1.9)); // lifts the shadowed side of ships/stations so Kenney models read against deep space
 
 // Shared bits for orbits: axes + a flat-ring quaternion + ONE material for every orbit
 // path (74 worlds → 1 material instead of 74). Reused by planet build + the tick loop.
@@ -657,11 +710,19 @@ const CLOUD_GEO = new THREE.IcosahedronGeometry(1, 1);
 
 // Biome → Kenney tree models (Nature Kit)
 const BIOME_TREES = {
-  lush: ["tree_default", "tree_oak", "tree_default_fall"],
-  archipelago: ["tree_palmTall", "tree_default"],
-  ice: ["tree_pineRoundA"],
-  desert: ["cactus_tall"],
-  volcanic: ["tree_default_dark"],
+  lush: ["tree_default", "tree_oak", "tree_detailed", "tree_fat", "tree_simple", "tree_tall", "tree_small", "tree_default_fall"],
+  archipelago: ["tree_palmTall", "tree_palmShort", "tree_palmDetailedTall", "tree_default", "tree_fat"],
+  ice: ["tree_pineRoundA", "tree_pineRoundB", "tree_pineTallA", "tree_pineSmallA", "tree_cone"],
+  desert: ["cactus_tall", "cactus_short", "tree_thin", "tree_palmShort"],
+  volcanic: ["tree_default_dark", "tree_blocks", "tree_thin", "tree_plateau"],
+};
+// shorter, denser ground cover scattered between the trees
+const BIOME_FLORA = {
+  lush: ["plant_bush", "plant_bushDetailed", "plant_bushLarge", "flower_redA", "flower_yellowB", "flower_purpleC", "grass_large", "grass_leafs", "mushroom_red", "mushroom_tanGroup", "rock_smallA"],
+  archipelago: ["plant_bush", "plant_bushLarge", "grass_large", "flower_yellowB", "plant_flatTall", "rock_smallA"],
+  ice: ["rock_smallTopA", "stone_smallA", "plant_bush", "rock_smallA"],
+  desert: ["rock_smallA", "stone_smallA", "rock_tallC", "plant_flatTall"],
+  volcanic: ["rock_smallA", "rock_tallC", "stone_smallA", "mushroom_red"],
 };
 
 // shared elevation field — terrain, sea level, tree placement and dishes all agree
@@ -679,20 +740,29 @@ function heightAt(radius, e, sea) {
 
 function plantForest(spinner, samples, biomeName, rng, radius) {
   if (samples.length < 3) return;
-  const species = BIOME_TREES[biomeName] ?? BIOME_TREES.lush;
+  const trees = BIOME_TREES[biomeName] ?? BIOME_TREES.lush;
+  const flora = BIOME_FLORA[biomeName] ?? BIOME_FLORA.lush;
   const up = new THREE.Vector3(0, 1, 0);
-  const buckets = new Map(species.map((n) => [n, []]));
+  const buckets = new Map();
+  const push = (name, mat) => {
+    if (!ASSETS[name]) return;
+    let b = buckets.get(name); if (!b) { b = []; buckets.set(name, b); }
+    b.push(mat.clone());
+  };
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3();
   const twist = new THREE.Quaternion();
   samples.forEach((smp, i) => {
-    const name = species[i % species.length];
+    // a minority are tall trees; the rest is shorter, denser ground cover
+    const isTree = rng() < 0.42;
+    const list = isTree ? trees : flora;
+    const name = list[i % list.length];
     if (!ASSETS[name]) return;
-    const target = radius * (0.085 + rng() * 0.05); // 8.5–13.5% of planet radius tall
+    const target = isTree ? radius * (0.085 + rng() * 0.06) : radius * (0.028 + rng() * 0.035);
     s.setScalar(target / modelHeight(name));
     q.setFromUnitVectors(up, smp.dir);
     q.multiply(twist.setFromAxisAngle(up, rng() * 6.283));
     m.compose(smp.point, q, s);
-    buckets.get(name).push(m.clone());
+    push(name, m);
   });
   for (const [name, mats] of buckets) if (mats.length) instancedFromGLB(ASSETS[name], mats, spinner);
 }
@@ -1076,57 +1146,74 @@ let shieldMesh = null;
 function buildBelt() {
   const rng = mulberry32(777);
   const beltR = 140;
-  for (const name of ["meteor", "meteor_detailed"]) {
+  // rock species available for belts — only those that actually loaded
+  const ROCKS = ["meteor", "meteor_detailed", "meteor_half", "rock", "rock_largeA",
+    "rock_largeB", "rocks_smallA", "rocks_smallB"].filter((n) => ASSETS[n]);
+  // main home belt: spread the field across every rock species → no two rocks alike
+  for (let k = 0; k < ROCKS.length; k++) {
+    const name = ROCKS[k];
     const matrices = [];
     const beltGroup = new THREE.Group();
-    for (let i = 0; i < 70; i++) {
+    for (let i = 0; i < 22; i++) {
       const a = rng() * 6.283;
-      const r = beltR + (rng() - 0.5) * 18;
-      const p = new THREE.Vector3(Math.cos(a) * r, (rng() - 0.5) * 10, Math.sin(a) * r);
+      const r = beltR + (rng() - 0.5) * 22;
+      const p = new THREE.Vector3(Math.cos(a) * r, (rng() - 0.5) * 12, Math.sin(a) * r);
       const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(rng() * 6, rng() * 6, rng() * 6));
       const s = new THREE.Vector3().setScalar(0.8 + rng() * 2.6);
       matrices.push(new THREE.Matrix4().compose(p, q, s));
       beltRocks.push({ group: beltGroup, local: p.clone(), r: s.x * 0.95 }); // collidable
     }
     instancedFromGLB(ASSETS[name], matrices, beltGroup);
-    beltGroup.userData.spin = name === "meteor" ? 0.012 : 0.009;
+    beltGroup.userData.spin = 0.008 + (k % 3) * 0.003;
     belts.push(beltGroup);
     scene.add(beltGroup);
   }
-  // a couple of crystal rocks drifting closer in
-  const matrices = [];
-  const rocks = new THREE.Group();
-  for (let i = 0; i < 6; i++) {
-    const a = rng() * 6.283, r = 96 + rng() * 16;
-    const p = new THREE.Vector3(Math.cos(a) * r, (rng() - 0.5) * 20, Math.sin(a) * r);
-    const s = new THREE.Vector3().setScalar(2.4 + rng() * 2);
-    matrices.push(new THREE.Matrix4().compose(p, new THREE.Quaternion().setFromEuler(new THREE.Euler(rng() * 6, rng() * 6, rng() * 6)), s));
-    beltRocks.push({ group: rocks, local: p.clone(), r: s.x * 1.15 });
+  // crystal clusters drifting closer in
+  for (const cn of ["rock_crystalsLargeA", "rock_crystalsLargeB"].filter((n) => ASSETS[n])) {
+    const matrices = [];
+    const rocks = new THREE.Group();
+    for (let i = 0; i < 4; i++) {
+      const a = rng() * 6.283, r = 92 + rng() * 22;
+      const p = new THREE.Vector3(Math.cos(a) * r, (rng() - 0.5) * 22, Math.sin(a) * r);
+      const s = new THREE.Vector3().setScalar(2.4 + rng() * 2);
+      matrices.push(new THREE.Matrix4().compose(p, new THREE.Quaternion().setFromEuler(new THREE.Euler(rng() * 6, rng() * 6, rng() * 6)), s));
+      beltRocks.push({ group: rocks, local: p.clone(), r: s.x * 1.15 });
+    }
+    instancedFromGLB(ASSETS[cn], matrices, rocks);
+    rocks.userData.spin = -0.006;
+    belts.push(rocks);
+    scene.add(rocks);
   }
-  instancedFromGLB(ASSETS.rock_crystalsLargeA, matrices, rocks);
-  rocks.userData.spin = -0.006;
-  belts.push(rocks);
-  scene.add(rocks);
-
-  // belts ringing a couple of the outer systems too — more fields to weave through
-  for (const key of ["games", "tools", "experiments"]) {
+  // drifting wreckage — barrels & broken structure jettisoned into the home belt
+  const junk = ["barrel", "barrels", "structure_detailed"].filter((n) => ASSETS[n]);
+  for (let i = 0; i < 9 && junk.length; i++) {
+    const a = rng() * 6.283, r = beltR + (rng() - 0.5) * 30;
+    const m = placedClone(junk[i % junk.length], scene, 3 + rng() * 4,
+      new THREE.Vector3(Math.cos(a) * r, (rng() - 0.5) * 14, Math.sin(a) * r), rng() * 6.283);
+    if (m) debris.push({ mesh: m, spin: new THREE.Vector3((rng() - 0.5) * 0.4, (rng() - 0.5) * 0.4, (rng() - 0.5) * 0.4), orbR: r, orbA: a, orbS: 0.01 + rng() * 0.01 });
+  }
+  // belts ringing the outer systems too — each with its own rock mix
+  for (const key of ["games", "tools", "experiments", "work"]) {
     const s = SYSTEMS[key];
     if (!s) continue;
     const r0 = s.starR * 4.2 + 60;
-    const mats = [];
-    const bg = new THREE.Group();
-    bg.position.copy(s.pos);
-    for (let i = 0; i < 48; i++) {
-      const a = rng() * 6.283, r = r0 + (rng() - 0.5) * 32;
-      const p = new THREE.Vector3(Math.cos(a) * r, (rng() - 0.5) * 14, Math.sin(a) * r);
-      const sc = new THREE.Vector3().setScalar(1.0 + rng() * 3.4);
-      mats.push(new THREE.Matrix4().compose(p, new THREE.Quaternion().setFromEuler(new THREE.Euler(rng() * 6, rng() * 6, rng() * 6)), sc));
-      beltRocks.push({ group: bg, local: p.clone(), r: sc.x * 0.95 });
+    const kinds = ROCKS.length ? [ROCKS[hashStr(key) % ROCKS.length], ROCKS[(hashStr(key) + 3) % ROCKS.length]] : [];
+    for (const kind of kinds) {
+      const mats = [];
+      const bg = new THREE.Group();
+      bg.position.copy(s.pos);
+      for (let i = 0; i < 26; i++) {
+        const a = rng() * 6.283, r = r0 + (rng() - 0.5) * 34;
+        const p = new THREE.Vector3(Math.cos(a) * r, (rng() - 0.5) * 16, Math.sin(a) * r);
+        const sc = new THREE.Vector3().setScalar(1.0 + rng() * 3.4);
+        mats.push(new THREE.Matrix4().compose(p, new THREE.Quaternion().setFromEuler(new THREE.Euler(rng() * 6, rng() * 6, rng() * 6)), sc));
+        beltRocks.push({ group: bg, local: p.clone(), r: sc.x * 0.95 });
+      }
+      instancedFromGLB(ASSETS[kind], mats, bg);
+      bg.userData.spin = 0.008 + rng() * 0.006;
+      belts.push(bg);
+      scene.add(bg);
     }
-    instancedFromGLB(ASSETS.meteor, mats, bg);
-    bg.userData.spin = 0.008 + rng() * 0.006;
-    belts.push(bg);
-    scene.add(bg);
   }
 
   // the mothership lazily circles hello.world
@@ -1137,6 +1224,156 @@ function buildBelt() {
 const belts = [];
 const beltRocks = []; // {group, local, r} — the individual rocks the ship can bump into
 let mothership = null;
+
+// ---------- orbital stations, warp gates, transit freighters (Kenney Space Kit) ----------
+const stations = []; // { group, c, r, speed, phase, tilt, spin, bob, dish }
+const gates = [];    // { group, ring, portal, spin }
+const transit = [];  // { mesh, a, b, t, speed, off }
+const debris = [];   // { mesh, spin, orbR, orbA, orbS } — wreckage drifting in the home belt
+const eggs = [];     // { mesh, spin } — discoverable astronauts / alien / rover adrift
+const _tilt = new THREE.Vector3();
+
+// An inhabited outpost circling each star: a hangar with a scanning dish, a
+// generator and a turret, lit by a soft system-coloured glow.
+function buildStations() {
+  for (const [key, sys] of Object.entries(SYSTEMS)) {
+    const rng = mulberry32(hashStr("station:" + key));
+    const g = new THREE.Group();
+    const core = key === "misc" ? "hangar_roundGlass" : (rng() < 0.5 ? "hangar_roundA" : "hangar_smallA");
+    placedClone(core, g, 14, new THREE.Vector3(0, 0, 0), rng() * 6.283, 0.4);
+    const dish = placedClone("satelliteDish_large", g, 7, new THREE.Vector3(10, 2, -2), rng() * 6.283, 0.3);
+    placedClone("machine_generatorLarge", g, 8, new THREE.Vector3(-9, -2, 6), rng() * 6.283, 0.45);
+    placedClone("turret_single", g, 5, new THREE.Vector3(2, 7, 3), rng() * 6.283, 0.3);
+    const glow = new THREE.PointLight(sys.hot, 320, 240, 2);
+    glow.position.set(0, 5, 0);
+    g.add(glow);
+    scene.add(g);
+    stations.push({
+      group: g, c: sys.pos, r: sys.starR * 2.0 + 70, speed: 0.04 + rng() * 0.05,
+      phase: rng() * 6.283, tilt: (rng() - 0.5) * 1.0, spin: 0.1 + rng() * 0.12,
+      bob: rng() * 6.283, dish,
+    });
+  }
+}
+function updateStations(dt, t) {
+  for (const st of stations) {
+    const a = st.phase + t * st.speed;
+    const x = Math.cos(a) * st.r, z = Math.sin(a) * st.r;
+    // tilt the orbital plane around X so stations don't all share one disc
+    const ty = -z * Math.sin(st.tilt), tz = z * Math.cos(st.tilt);
+    st.group.position.set(st.c.x + x, st.c.y + ty + Math.sin(t * 0.5 + st.bob) * 3, st.c.z + tz);
+    st.group.rotation.y += st.spin * dt;
+    if (st.dish) st.dish.rotation.y += 0.5 * dt;
+  }
+}
+
+// Glowing warp gates straddling the route between home and each outer system —
+// a Kenney arch wrapped around an additive portal ring + colour light.
+function buildGates() {
+  for (const [key, sys] of Object.entries(SYSTEMS)) {
+    if (key === "misc") continue;
+    const rng = mulberry32(hashStr("gate:" + key));
+    const g = new THREE.Group();
+    const dir = sys.pos.clone().normalize();          // home is the origin
+    const pos = sys.pos.clone().sub(dir.multiplyScalar(sys.starR + 200));
+    pos.y += 16;
+    g.position.copy(pos);
+    g.lookAt(0, pos.y, 0);                             // arch opening faces home
+    placedClone("gate_complex", g, 56, new THREE.Vector3(0, -20, 0), 0, 0.3);
+    const PY = 8;                                      // arch opening centre after scaling
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(19, 1.4, 16, 90),
+      new THREE.MeshBasicMaterial({ color: sys.hot, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false }),
+    );
+    ring.position.y = PY;
+    g.add(ring);
+    const portal = new THREE.Mesh(
+      new THREE.CircleGeometry(18, 48),
+      new THREE.MeshBasicMaterial({ color: sys.hot, transparent: true, opacity: 0.1, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false }),
+    );
+    portal.position.y = PY;
+    g.add(portal);
+    const glow = new THREE.PointLight(sys.hot, 420, 380, 2);
+    glow.position.y = PY;
+    g.add(glow);
+    scene.add(g);
+    gates.push({ group: g, ring, portal, spin: 0.25 + rng() * 0.15 });
+  }
+}
+function updateGates(dt, t) {
+  for (const ga of gates) {
+    ga.ring.rotation.z += ga.spin * dt;
+    ga.portal.material.opacity = 0.08 + 0.06 * (0.5 + 0.5 * Math.sin(t * 1.3));
+  }
+}
+
+// A few freighters cruising the lanes between systems — readable as ships in
+// transit, each trailing a faint engine light.
+function buildTraffic() {
+  const pts = Object.values(SYSTEMS).map((s) => s.pos);
+  const ships = ["craft_cargoB", "craft_miner", "craft_speederD", "craft_cargoA", "craft_speederB"];
+  for (let i = 0; i < 5; i++) {
+    const rng = mulberry32(hashStr("transit:" + i));
+    const ai = Math.floor(rng() * pts.length);
+    const bi = (ai + 1 + Math.floor(rng() * (pts.length - 1))) % pts.length;
+    const mesh = placedClone(ships[i % ships.length], scene, 12 + rng() * 6);
+    if (!mesh) continue;
+    const eng = new THREE.PointLight(0x9ad8ff, 60, 90, 2);
+    eng.position.set(0, 0, 0);
+    mesh.add(eng);
+    transit.push({
+      mesh, a: pts[ai].clone(), b: pts[bi].clone(), t: rng(),
+      speed: 0.006 + rng() * 0.01, off: new THREE.Vector3((rng() - 0.5) * 90, (rng() - 0.5) * 70, (rng() - 0.5) * 90),
+    });
+  }
+}
+const _tA = new THREE.Vector3(), _tPrev = new THREE.Vector3();
+function updateTraffic(dt) {
+  for (const tr of transit) {
+    tr.t += tr.speed * dt * 10;
+    if (tr.t >= 1) { const tmp = tr.a; tr.a = tr.b; tr.b = tmp; tr.t = 0; } // bounce back along the lane
+    _tPrev.copy(tr.mesh.position);
+    _tA.lerpVectors(tr.a, tr.b, tr.t).add(tr.off);
+    tr.mesh.position.copy(_tA);
+    if (_tA.distanceToSquared(_tPrev) > 1e-4) tr.mesh.lookAt(_tPrev); // nose along travel (-Z faces back)
+  }
+}
+function updateDebris(dt, t) {
+  for (const d of debris) {
+    const a = d.orbA + t * d.orbS;
+    d.mesh.position.set(Math.cos(a) * d.orbR, d.mesh.position.y, Math.sin(a) * d.orbR);
+    d.mesh.rotation.x += d.spin.x * dt;
+    d.mesh.rotation.y += d.spin.y * dt;
+    d.mesh.rotation.z += d.spin.z * dt;
+  }
+}
+
+// scattered, slowly-tumbling props the curious pilot can stumble on, each with a
+// faint halo so it twinkles into view off the lanes
+function buildEasterEggs() {
+  const items = [
+    { n: "astronautA", h: 4, glow: 0x9ad8ff }, { n: "astronautB", h: 4, glow: 0xffd27a },
+    { n: "alien", h: 5, glow: 0x9affe2 }, { n: "rover", h: 5, glow: 0xffd27a },
+    { n: "astronautA", h: 4, glow: 0xff8ad8 }, { n: "barrel", h: 3, glow: 0xdff1ff },
+  ];
+  items.forEach((it, i) => {
+    const rng = mulberry32(hashStr("egg:" + i + it.n));
+    const mesh = placedClone(it.n, scene, it.h, null, rng() * 6.283, 0.25);
+    if (!mesh) return;
+    const dir = randomUnit(rng);
+    mesh.position.copy(dir.multiplyScalar(220 + rng() * 760));
+    mesh.position.y = (rng() - 0.5) * 220;
+    mesh.add(new THREE.PointLight(it.glow, 26, 70, 2));
+    eggs.push({ mesh, spin: new THREE.Vector3((rng() - 0.5) * 0.3, (rng() - 0.5) * 0.5, (rng() - 0.5) * 0.3) });
+  });
+}
+function updateEasterEggs(dt) {
+  for (const e of eggs) {
+    e.mesh.rotation.x += e.spin.x * dt;
+    e.mesh.rotation.y += e.spin.y * dt;
+    e.mesh.rotation.z += e.spin.z * dt;
+  }
+}
 
 const TRAIL_N = 90;
 const trailPos = new Float32Array(TRAIL_N * 3);
@@ -1759,9 +1996,12 @@ const pilots = new Map(); // cid -> {group, label, target:{p,q}, seen}
 // fan-out instead of every pilot blasting every other on a raw channel.
 const shipsNet = worlds.actors("ships", { rate: 8 });
 
+const PILOT_CRAFT = ["craft_speederA", "craft_speederB", "craft_speederC", "craft_speederD", "craft_racer", "craft_miner"];
 function pilotShip(handle, key) {
   const g = new THREE.Group();
-  const speeder = ASSETS.craft_speederA.clone();
+  // each pilot flies a distinct hull, picked deterministically from their key
+  const craftName = PILOT_CRAFT[hashStr(key) % PILOT_CRAFT.length];
+  const speeder = (ASSETS[craftName] ?? ASSETS.craft_speederA).clone();
   speeder.scale.setScalar(1.5);
   let hue = 0;
   for (const ch of key) hue = (hue * 31 + ch.charCodeAt(0)) % 360;
@@ -2114,6 +2354,10 @@ askForm.addEventListener("submit", async (e) => {
 preload().then(() => {
   buildShip();
   buildBelt();
+  buildStations();
+  buildGates();
+  buildTraffic();
+  buildEasterEggs();
   return load();
 });
 
@@ -2182,6 +2426,11 @@ function tick() {
     mothership.rotation.y = -ma - Math.PI / 2;
   }
   if (coreDisk) coreDisk.rotation.z += dt * 0.12;
+  updateStations(dt, t);
+  updateGates(dt, t);
+  updateTraffic(dt);
+  updateDebris(dt, t);
+  updateEasterEggs(dt);
   updateShootingStars(dt);
   updateBeacons(dt);
   updateNovas(dt);
