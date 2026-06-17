@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { clone as skeletonClone } from "three/addons/utils/SkeletonUtils.js";
 import { instantiate, assetNames } from "./level.js";
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -110,7 +111,10 @@ const GEO_BOX = new THREE.BoxGeometry(1, 1, 1);
 const GEO_CYL = new THREE.CylinderGeometry(0.5, 0.5, 1, 14);
 
 // ── Kenney Space Kit props (CC0) — station hardware flanking the gauntlet ──
-const ASSETS = {}, ASSET_BOX = {};
+const ASSETS = {}, ASSET_BOX = {}, ANIM = {}; // ANIM[name] = clip[] for rigged models
+// Kenney rigged mini-characters (CC0) — the runners themselves. Each handle maps
+// to one variant (visual variety); team colour is added as a soft emissive tint.
+const CHARACTERS = ["character-oobi", "character-oodi", "character-ooli", "character-oopi", "character-oozi"];
 // Load authored levels: the editor's live preview (localStorage) when opened
 // with ?preview=1, otherwise an optional levels.json shipped in the site folder.
 let shippedLevels = []; // from levels.json (optional, baked into the site)
@@ -148,12 +152,14 @@ async function preloadAssets() {
     "sign", "flag", "crate", "crate-strong", "fence-straight", "fence-corner", "poles",
     "tree", "tree-pine", "tree-pine-small", "mushrooms", "rocks", "ladder", "grass",
     "saw", "spike-block", "trap-spikes", "coin-gold",
+    ...CHARACTERS,   // rigged runner avatars (carry animation clips)
     ...assetNames(), // every model the level catalog can place
   ];
   await Promise.all(names.map(async (n) => {
     try {
       const g = await loader.loadAsync(`./assets/${n}.glb`);
       ASSETS[n] = g.scene; ASSET_BOX[n] = new THREE.Box3().setFromObject(g.scene);
+      if (g.animations && g.animations.length) ANIM[n] = g.animations; // rigged → keep clips
     } catch (e) { console.warn("asset failed", n, e && e.message); }
   }));
 }
@@ -743,6 +749,79 @@ function makeBean(color) {
   return g;
 }
 
+// All live AnimationMixers (player + ghosts) — advanced once per frame.
+const mixers = new Set();
+const strHash = (s) => { let h = 2166136261; s = String(s); for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; };
+const AVATAR_H = 1.95;                                   // rendered avatar height (matches the old bean's footprint)
+const GEO_RING = new THREE.RingGeometry(0.42, 0.6, 28); // team-colour marker disc under each runner
+
+// Build a runner avatar. If the rigged Kenney characters loaded, returns an
+// animated, skinned character (variant chosen by `seed`); otherwise the bean.
+// Exposes the same surface the rest of the code expects:
+//   .userData.mat.color.setHex()    — recolour (team tint)
+//   .userData.mat.emissive.setHex() — knockback flash (0 = restore tint)
+//   .userData.body                  — present only for the bean (squash & stretch)
+//   .userData.anim.play(clip)       — present only for characters
+function makeAvatar(color, seed) {
+  const hex = typeof color === "number" ? color : 0xfbbf24;
+  const avail = CHARACTERS.filter((n) => ASSETS[n] && ANIM[n] && ANIM[n].length);
+  if (!avail.length) return makeBean(hex); // GLBs not ready / failed → guaranteed fallback
+
+  const name = avail[strHash(seed == null ? hex : seed) % avail.length];
+  const g = new THREE.Group();
+  const ch = skeletonClone(ASSETS[name]); // SkeletonUtils — rebinds the skeleton (plain clone breaks it)
+  const box = new THREE.Box3().setFromObject(ch);
+  const s = AVATAR_H / Math.max(box.max.y - box.min.y, 1e-3);
+  ch.scale.setScalar(s);
+  ch.position.y = -box.min.y * s; // plant feet at the group origin (= ground); Kenney chars already face +Z
+
+  // keep the natural Kenney colours; clone mats so the per-runner hit-flash is isolated
+  const mats = [];
+  ch.traverse((c) => {
+    if (!c.isMesh && !c.isSkinnedMesh) return;
+    c.castShadow = true; c.receiveShadow = false;
+    if (c.material) { c.material = c.material.clone(); mats.push(c.material); }
+  });
+  const flash = (on) => { for (const m of mats) { m.emissive.setHex(on ? 0x661010 : 0x000000); m.emissiveIntensity = on ? 0.95 : 0; } };
+  g.add(ch);
+
+  // team-colour marker ring at the feet — unlit so it reads on any surface (and
+  // is the per-runner identity cue, since tinting the textured body washes out)
+  const ring = new THREE.Mesh(GEO_RING, new THREE.MeshBasicMaterial({ color: hex, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false }));
+  ring.rotation.x = -Math.PI / 2; ring.position.y = 0.03;
+  g.add(ring);
+
+  // animation: one mixer per avatar, cross-fading between clips
+  const mixer = new THREE.AnimationMixer(ch);
+  const clips = ANIM[name];
+  const find = (re) => clips.find((c) => re.test(c.name));
+  const actions = {};
+  const reg = (key, re) => { const c = find(re); if (c) actions[key] = mixer.clipAction(c); };
+  reg("idle", /^idle$/i); reg("walk", /^walk$/i); reg("sprint", /^sprint$/i); reg("jump", /^jump$/i); reg("fall", /^fall$/i);
+  if (!actions.idle) actions.idle = mixer.clipAction(clips[0]);
+  actions.walk = actions.walk || actions.sprint || actions.idle;
+  actions.sprint = actions.sprint || actions.walk;
+  actions.jump = actions.jump || actions.idle;
+  actions.fall = actions.fall || actions.jump;
+  let cur = null;
+  const play = (key) => {
+    const a = actions[key]; if (!a || a === cur) return;
+    a.reset().fadeIn(0.16).play();
+    if (cur) cur.fadeOut(0.16);
+    cur = a;
+  };
+  play("idle");
+  mixers.add(mixer);
+
+  g.userData.mixer = mixer;
+  g.userData.anim = { play };
+  g.userData.mat = {
+    color: { setHex(h) { ring.material.color.setHex(h); } },     // identity / ghost recolour → marker ring
+    emissive: { setHex(h) { flash(h !== 0); } },                 // knockback flash (0 = back to normal)
+  };
+  return g;
+}
+
 const player = {
   pos: new THREE.Vector3(0, 1.2, -2),
   vel: new THREE.Vector3(),
@@ -801,7 +880,7 @@ function makeLabel(text, hex) {
 
 function makeGhost(gid, s) {
   const color = typeof s.color === "number" ? s.color : 0x88ccff;
-  const mesh = makeBean(color);
+  const mesh = makeAvatar(color, gid);
   const label = makeLabel(s.name || gid, color);
   mesh.add(label);
   scene.add(mesh);
@@ -824,6 +903,7 @@ function removeGhost(gid) {
   const g = ghosts.get(gid);
   if (!g) return;
   scene.remove(g.mesh);
+  if (g.mesh.userData.mixer) mixers.delete(g.mesh.userData.mixer); // stop animating a gone runner
   ghosts.delete(gid);
 }
 
@@ -838,6 +918,7 @@ function stepGhosts(dt) {
     let d = g.heading - g.mesh.rotation.y;
     d = Math.atan2(Math.sin(d), Math.cos(d));
     g.mesh.rotation.y += d * a;
+    if (g.mesh.userData.anim) { const sp = Math.hypot(g.vel.x, g.vel.z); g.mesh.userData.anim.play(sp > 6 ? "sprint" : sp > 1.2 ? "walk" : "idle"); }
   }
 }
 
@@ -1108,6 +1189,12 @@ function stepPlayer(dt, t) {
   // dive pose — pitch the body forward into a belly-flop, then stand back up
   const pitch = player.diveUntil > t ? -1.2 : 0;
   player.mesh.rotation.x += (pitch - player.mesh.rotation.x) * (1 - Math.exp(-18 * dt));
+  // rigged characters: pick a clip from the motion state (bean has no .anim)
+  const anim = player.mesh.userData.anim;
+  if (anim) {
+    const sp = Math.hypot(player.vel.x, player.vel.z);
+    anim.play(!player.grounded ? (player.vel.y > 1 ? "jump" : "fall") : diving ? "jump" : sp > 6 ? "sprint" : sp > 1.2 ? "walk" : "idle");
+  }
   // squash & stretch — stretch tall while airborne, squash on the ground
   const body = player.mesh.userData.body;
   if (body) {
@@ -1151,6 +1238,7 @@ function frame(now) {
   updateObjects(dt, t);
   stepPlayer(dt, t);
   stepGhosts(dt);
+  for (const m of mixers) m.update(dt); // advance every skinned-character animation
   stepCamera(dt);
   stepConfetti(dt);
   stepDust(dt);
@@ -1187,12 +1275,17 @@ async function boot() {
     me.handle = who.handle; me.name = who.name || who.handle || "you";
     const c = new THREE.Color(colorFor(me.handle)); // deterministic per-handle color
     me.color = c.getHex();
-    player.mesh.userData.mat.color.setHex(me.color);
     dom.loaderWho.innerHTML = "running as <b>" + esc(me.name) + "</b>";
   } catch (e) {
     dom.loaderErr.textContent = "couldn't load your identity — playing as guest.";
     me.handle = "guest-" + clientId.slice(0, 4); me.name = "guest";
   }
+  // now that assets + identity are known, swap the placeholder for the real
+  // (handle-seeded) animated avatar; the loader still covers the screen.
+  scene.remove(player.mesh);
+  if (player.mesh.userData.mixer) mixers.delete(player.mesh.userData.mixer);
+  player.mesh = makeAvatar(me.color, me.handle);
+  scene.add(player.mesh);
 
   // global level clock
   lvlRoom = worlds.room(ROOM, { initial: () => ({ levelIndex: 1, seed: seedFor(1), endsAt: Date.now() + LEVEL_MS }) });
