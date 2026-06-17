@@ -266,6 +266,48 @@ $("dlBtn").addEventListener("click", () => {
 });
 function flash(btn, txt) { const o = btn.textContent; btn.textContent = txt; setTimeout(() => (btn.textContent = o), 1100); }
 
+// ── 🌐 shared library (worlds.db — live, deploy-free) ──────────────────────────
+let levelsCol = null;
+async function initShared() {
+  try { await worlds.ready; levelsCol = worlds.db.collection("levels"); } catch (_) { return; }
+  refreshShared();
+  try { levelsCol.subscribe(() => refreshShared()); } catch (_) {}
+}
+$("pubBtn").addEventListener("click", async () => {
+  if (!levelsCol) { flash($("pubBtn"), "sign in to publish"); return; }
+  const data = exportObj().levels[cur]; // {name, hue, objects}
+  try {
+    const did = level()._docId;
+    if (did) { await levelsCol.update(did, data); flash($("pubBtn"), "Updated for all ✓"); }
+    else { const doc = await levelsCol.create(data); level()._docId = doc.id; save(); flash($("pubBtn"), "Published to all ✓"); }
+    refreshShared();
+  } catch (_) { flash($("pubBtn"), "publish failed"); }
+});
+function refreshShared() {
+  const host = $("sharedList"); if (!host || !levelsCol) return;
+  levelsCol.list({ limit: 100 }).then((res) => {
+    const items = res.items || [];
+    if (!items.length) { host.innerHTML = '<span class="note">nothing published yet — be the first!</span>'; return; }
+    host.innerHTML = "";
+    for (const it of items) {
+      const row = document.createElement("div"); row.className = "row"; row.style.margin = "0";
+      const nm = (it.data && it.data.name) || "level";
+      const mine = it.id === (level() && level()._docId);
+      row.innerHTML = `<span style="flex:1;min-width:0;font-size:.8rem;color:${mine ? "var(--gold-bright)" : "var(--muted)"};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(nm)}</span>`;
+      const edit = document.createElement("button"); edit.textContent = "Edit"; edit.style.cssText = "flex:0;min-width:0;padding:.25rem .5rem;font-size:.74rem";
+      edit.onclick = () => loadShared(it);
+      const del = document.createElement("button"); del.textContent = "✕"; del.className = "danger"; del.style.cssText = "flex:0;min-width:0;padding:.25rem .5rem;font-size:.74rem";
+      del.onclick = async () => { try { await levelsCol.delete(it.id); refreshShared(); } catch (_) {} };
+      row.append(edit, del); host.appendChild(row);
+    }
+  }).catch(() => {});
+}
+function loadShared(it) {
+  const d = it.data || {};
+  pack.push({ name: d.name || "level", hue: d.hue ?? 0.55, objects: Array.isArray(d.objects) ? JSON.parse(JSON.stringify(d.objects)) : [], _docId: it.id });
+  cur = pack.length - 1; sel = -1; switchLevel(cur); save();
+}
+
 // ── loop + boot ──────────────────────────────────────────────────────────────────
 function tick() { requestAnimationFrame(tick); controls.update(); renderer.render(scene, camera); }
 async function boot() {
@@ -278,6 +320,7 @@ async function boot() {
   buildCatalog();
   rebuildAll();
   syncLevelSelect(); syncLevelMeta(); syncInspector(); syncExport();
+  initShared();
   tick();
 }
 boot();

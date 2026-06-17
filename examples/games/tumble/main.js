@@ -111,19 +111,28 @@ const GEO_CYL = new THREE.CylinderGeometry(0.5, 0.5, 1, 14);
 const ASSETS = {}, ASSET_BOX = {};
 // Load authored levels: the editor's live preview (localStorage) when opened
 // with ?preview=1, otherwise an optional levels.json shipped in the site folder.
+let shippedLevels = []; // from levels.json (optional, baked into the site)
+function applyLevels(dbLevels) {
+  const all = [...shippedLevels, ...(dbLevels || [])];
+  LEVELS = all.length ? all : null; // none anywhere → procedural endless
+}
 async function loadLevels() {
+  // editor preview: play just the previewed level(s), offline
+  if (new URLSearchParams(location.search).has("preview")) {
+    try { const raw = localStorage.getItem("tumblePreviewLevels"); if (raw) { const d = JSON.parse(raw); LEVELS = Array.isArray(d) ? d : d.levels; } } catch (_) {}
+    return;
+  }
+  // 🌐 shared levels from worlds.db — published live by anyone, no re-deploy
   try {
-    if (new URLSearchParams(location.search).has("preview")) {
-      const raw = localStorage.getItem("tumblePreviewLevels");
-      if (raw) { const d = JSON.parse(raw); LEVELS = Array.isArray(d) ? d : d.levels; }
-      return;
-    }
-    const res = await fetch("./levels.json", { cache: "no-store" });
-    if (!res.ok) return; // no pack shipped → procedural endless
-    const d = await res.json();
-    const levels = Array.isArray(d) ? d : d.levels;
-    if (Array.isArray(levels) && levels.length) LEVELS = levels;
-  } catch (_) { /* malformed/missing pack → fall back to procedural */ }
+    await worlds.ready;
+    const col = worlds.db.collection("levels");
+    const r = await col.list({ limit: 100 });
+    applyLevels((r.items || []).map((it) => it.data).filter((l) => l && (l.objects || l.chunks)));
+    // live: a newly published level joins the rotation (appended → indices stay stable)
+    col.subscribe(async () => {
+      try { const rr = await col.list({ limit: 100 }); applyLevels((rr.items || []).map((it) => it.data).filter((l) => l && (l.objects || l.chunks))); } catch (_) {}
+    });
+  } catch (_) { applyLevels([]); }
 }
 
 async function preloadAssets() {

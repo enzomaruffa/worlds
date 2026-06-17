@@ -100,17 +100,27 @@
     </div>
 
     <div class="sec">
-      <h3>Export &amp; preview</h3>
+      <h3>🌐 Shared library — live, no deploy</h3>
+      <div class="btns">
+        <button class="go" id="pubBtn">🌐 Publish this level to all</button>
+      </div>
+      <p class="note">Publishing writes the level to the live game for <b>everyone</b> instantly — no re-deploy. Pick one below to edit or remove it.</p>
+      <div id="sharedList" class="pal" style="flex-direction:column; align-items:stretch; gap:.3rem; max-height:12rem; overflow-y:auto"></div>
+    </div>
+
+    <div class="sec">
+      <h3>Export (offline backup)</h3>
       <div class="btns">
         <button class="go" id="previewBtn">▶ Preview</button>
         <button id="copyBtn">Copy</button>
         <button class="primary" id="dlBtn">⬇ levels.json</button>
       </div>
-      <p class="note">Drop the downloaded <code>levels.json</code> into <code>tumble/</code> and re-deploy — the game auto-loads it. Every level needs a <b>start</b> and a <b>finish</b> pad.</p>
+      <p class="note">Download is an offline backup of your work. The live game loads from the shared library above. Every level needs a <b>start</b> and a <b>finish</b> pad.</p>
       <textarea id="export" readonly spellcheck="false"></textarea>
     </div>
   </div>
 
+  <script src="/worlds.js"></script>
   <script type="module" src="./editor.js"></script>
 </body>
 </html>
