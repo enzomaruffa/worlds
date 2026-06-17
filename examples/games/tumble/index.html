@@ -127,6 +127,10 @@
     #loader .err { color: #fecaca; font-size: .82rem; max-width: 26rem; }
     #hint { grid-column: 2; grid-row: 3; align-self: end; justify-self: center; color: var(--dim); font-size: .76rem; text-align: center; }
     body.touch #hint { display: none; }
+    #muteBtn { grid-column: 3; grid-row: 3; align-self: end; justify-self: end; pointer-events: auto; cursor: pointer;
+      width: 2.6rem; height: 2.6rem; border-radius: .6rem; border: 1px solid var(--border); background: rgba(12,12,15,.7);
+      font-size: 1.1rem; line-height: 1; }
+    #muteBtn:hover { border-color: var(--muted); }
   </style>
 
   <script type="importmap">
@@ -157,7 +161,8 @@
 
       <div class="panel" id="players"><b id="playerN">1</b> <span class="small">in the gauntlet</span></div>
 
-      <div id="hint">WASD / arrows to move · SPACE to jump</div>
+      <div id="hint">WASD / arrows to move · SPACE jump · SHIFT dive · M mute</div>
+      <button id="muteBtn" title="mute (M)">🔊</button>
 
       <div id="touch">
         <div class="tgroup dpad">

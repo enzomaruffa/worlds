@@ -251,6 +251,87 @@ function stepConfetti(dt) {
   }
 }
 
+// ── Dust puffs (landings, dives, bounces) — a short low pop near the ground ──
+const dust = [];
+function burstDust(at, n = 14, spread = 4, col = 0xcfd6e0) {
+  const pos = new Float32Array(n * 3), vel = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) {
+    pos[i * 3] = at.x; pos[i * 3 + 1] = at.y; pos[i * 3 + 2] = at.z;
+    vel[i * 3] = (Math.random() - 0.5) * spread; vel[i * 3 + 1] = 1 + Math.random() * 2.5; vel[i * 3 + 2] = (Math.random() - 0.5) * spread;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+  const pts = new THREE.Points(geo, new THREE.PointsMaterial({ size: 0.4, color: col, transparent: true, opacity: 0.6, depthWrite: false }));
+  scene.add(pts); dust.push({ pts, vel, life: 0 });
+}
+function stepDust(dt) {
+  for (let i = dust.length - 1; i >= 0; i--) {
+    const d = dust[i]; d.life += dt;
+    const p = d.pts.geometry.attributes.position.array;
+    for (let j = 0; j < p.length; j += 3) { d.vel[j + 1] -= 6 * dt; p[j] += d.vel[j] * dt; p[j + 1] += d.vel[j + 1] * dt; p[j + 2] += d.vel[j + 2] * dt; }
+    d.pts.geometry.attributes.position.needsUpdate = true;
+    d.pts.material.opacity = Math.max(0, 0.6 * (1 - d.life / 0.7));
+    if (d.life > 0.7) { scene.remove(d.pts); d.pts.geometry.dispose(); d.pts.material.dispose(); dust.splice(i, 1); }
+  }
+}
+
+// ── Screen shake — additive camera kick that decays each frame ──────────────
+let shake = 0;
+function addShake(a) { shake = Math.min(1.4, shake + a); }
+
+// ───────────────────────────────────────────────────────────────────────────
+// SFX — a tiny procedural WebAudio synth (no asset files; starts on first input
+// per the autoplay policy). Everything is short blips/noise so it never drones.
+// ───────────────────────────────────────────────────────────────────────────
+const AudioCtx = window.AudioContext || window.webkitAudioContext;
+let actx = null, masterGain = null;
+let muted = localStorage.getItem("tumbleMuted") === "1";
+function audioInit() {
+  if (actx || !AudioCtx) return;
+  actx = new AudioCtx();
+  masterGain = actx.createGain(); masterGain.gain.value = muted ? 0 : 0.5; masterGain.connect(actx.destination);
+}
+function audioResume() { audioInit(); if (actx && actx.state === "suspended") actx.resume(); }
+addEventListener("pointerdown", audioResume);
+addEventListener("keydown", audioResume);
+function setMuted(m) {
+  muted = m; localStorage.setItem("tumbleMuted", m ? "1" : "0");
+  if (masterGain) masterGain.gain.value = m ? 0 : 0.5;
+  const b = document.getElementById("muteBtn"); if (b) b.textContent = m ? "🔇" : "🔊";
+}
+function tone({ type = "sine", f0, f1, dur = 0.15, gain = 0.3, attack = 0.005 }) {
+  if (!actx || muted) return;
+  const t = actx.currentTime;
+  const o = actx.createOscillator(); o.type = type; o.frequency.setValueAtTime(f0, t);
+  if (f1 && f1 !== f0) o.frequency.exponentialRampToValueAtTime(Math.max(1, f1), t + dur);
+  const g = actx.createGain();
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(gain, t + attack); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(g); g.connect(masterGain); o.start(t); o.stop(t + dur + 0.02);
+}
+function noise({ dur = 0.12, gain = 0.3, lp = 2000 }) {
+  if (!actx || muted) return;
+  const t = actx.currentTime, n = Math.floor(actx.sampleRate * dur);
+  const buf = actx.createBuffer(1, n, actx.sampleRate), d = buf.getChannelData(0);
+  for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / n);
+  const src = actx.createBufferSource(); src.buffer = buf;
+  const f = actx.createBiquadFilter(); f.type = "lowpass"; f.frequency.value = lp;
+  const g = actx.createGain(); g.gain.setValueAtTime(gain, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  src.connect(f); f.connect(g); g.connect(masterGain); src.start(t);
+}
+const _cd = {};
+function gate(key, ms) { const n = performance.now(); if ((_cd[key] || 0) > n) return false; _cd[key] = n + ms; return true; }
+const SFX = {
+  jump: () => tone({ type: "square", f0: 360, f1: 660, dur: 0.13, gain: 0.16 }),
+  land: () => { if (gate("land", 90)) noise({ dur: 0.1, gain: 0.22, lp: 900 }); },
+  step: () => { if (gate("step", 150)) noise({ dur: 0.045, gain: 0.05, lp: 1100 }); },
+  dive: () => { noise({ dur: 0.22, gain: 0.16, lp: 3800 }); tone({ type: "sawtooth", f0: 260, f1: 120, dur: 0.2, gain: 0.1 }); },
+  bounce: () => tone({ type: "sine", f0: 300, f1: 920, dur: 0.22, gain: 0.26 }),
+  hit: () => { if (!gate("hit", 180)) return; noise({ dur: 0.14, gain: 0.3, lp: 1500 }); tone({ type: "square", f0: 170, f1: 80, dur: 0.16, gain: 0.18 }); },
+  death: () => { if (gate("death", 300)) tone({ type: "sawtooth", f0: 320, f1: 55, dur: 0.4, gain: 0.26 }); },
+  start: () => tone({ type: "triangle", f0: 440, f1: 880, dur: 0.26, gain: 0.16 }),
+  finish: () => [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => tone({ type: "triangle", f0: f, dur: 0.2, gain: 0.22 }), i * 90)),
+};
+
 function box(mat, w, h, d, x, y, z, parent) {
   const m = new THREE.Mesh(GEO_BOX, mat);
   m.scale.set(w, h, d); m.position.set(x, y, z);
@@ -598,7 +679,7 @@ function hazardEffect(p, t) {
         diff = Math.min(diff, Math.PI - diff);
         if (diff < 0.34) { // swept by the bar → knockback
           p.vel.x += (dx / d) * 11; p.vel.z += (dz / d) * 6; p.vel.y = Math.max(p.vel.y, 6);
-          kbFlash();
+          kbFlash(); SFX.hit(); addShake(0.45);
         }
       }
     } else if (h.kind === "sweeper") {
@@ -688,9 +769,10 @@ function resetPlayer() {
 }
 
 function respawn() {
+  burstDust(player.pos, 16, 5, 0xff8a8a); // poof where you died
   player.pos.copy(player.checkpoint);
   player.vel.set(0, 0, 0);
-  kbFlash();
+  kbFlash(); SFX.death(); addShake(0.5);
 }
 
 let flashUntil = 0;
@@ -791,6 +873,7 @@ function applyRoom(s) {
     resetPlayer();
     finishers = new Set();
     flashMessage(LEVELS ? (level.name || "LEVEL " + level.index) : "LEVEL " + (s.levelIndex | 0), false);
+    SFX.start();
     updateHud();
   }
 }
@@ -856,6 +939,7 @@ function onFinish() {
   finishers.add(me.handle);
   flashMessage("FINISHED!  +1", true);
   burstConfetti(player.pos);
+  SFX.finish(); addShake(0.3);
   scorePoint();
   try { roomCh && roomCh.publish({ t: "fin", handle: me.handle, lvl: level ? level.index : 0 }); } catch (_) {}
   updateHud();
@@ -907,8 +991,9 @@ const keyMap = {
   KeyA: "left", ArrowLeft: "left", KeyD: "right", ArrowRight: "right",
   Space: "jump", ShiftLeft: "dive", ShiftRight: "dive",
 };
-addEventListener("keydown", (e) => { const k = keyMap[e.code]; if (k) { input[k] = true; if (e.code === "Space") e.preventDefault(); } });
+addEventListener("keydown", (e) => { if (e.code === "KeyM") { setMuted(!muted); return; } const k = keyMap[e.code]; if (k) { input[k] = true; if (e.code === "Space") e.preventDefault(); } });
 addEventListener("keyup", (e) => { const k = keyMap[e.code]; if (k) input[k] = false; });
+{ const mb = $("muteBtn"); if (mb) { mb.textContent = muted ? "🔇" : "🔊"; mb.addEventListener("click", () => { audioResume(); setMuted(!muted); }); } }
 
 const isTouch = matchMedia("(pointer: coarse)").matches;
 if (isTouch) document.body.classList.add("touch");
@@ -926,6 +1011,7 @@ bindBtn("btnUp", "fwd"); bindBtn("btnDown", "back"); bindBtn("btnLeft", "left");
 // ───────────────────────────────────────────────────────────────────────────
 function stepPlayer(dt, t) {
   const diving = player.diveUntil > t;
+  const wasAir = !player.grounded; // for landing sfx/dust/shake
   const mx = (input.right ? 1 : 0) - (input.left ? 1 : 0);
   const mz = (input.fwd ? 1 : 0) - (input.back ? 1 : 0);
   // accelerate toward desired velocity, but with reduced control on ice (slidey)
@@ -939,13 +1025,14 @@ function stepPlayer(dt, t) {
   player.vel.z += (wantZ - player.vel.z) * k;
   if ((mx || mz) && !diving) player.heading = Math.atan2(player.vel.x, player.vel.z);
 
-  if (input.jump && player.grounded && !diving) { player.vel.y = JUMP_V; player.grounded = false; }
+  if (input.jump && player.grounded && !diving) { player.vel.y = JUMP_V; player.grounded = false; SFX.jump(); }
   // dive — a committed forward lunge (reach ledges, recover, dodge); on a cooldown
   if (input.dive && t > player.diveCd && !diving && (player.grounded || player.vel.y > -3)) {
     player.vel.x += Math.sin(player.heading) * DIVE_BOOST;
     player.vel.z += Math.cos(player.heading) * DIVE_BOOST;
     player.vel.y = Math.max(player.vel.y, 5.5);
-    player.diveUntil = t + 0.5; player.diveCd = t + 1.0; player.grounded = false; kbFlash();
+    player.diveUntil = t + 0.5; player.diveCd = t + 1.0; player.grounded = false;
+    SFX.dive(); addShake(0.25); burstDust(player.pos, 10, 5);
   }
   player.vel.y += GRAVITY * dt;
 
@@ -961,18 +1048,22 @@ function stepPlayer(dt, t) {
 
   // ground collision (groundY records the surface in `groundSurf`)
   const gy = groundY(player.pos.x, player.pos.z);
+  const impact = -player.vel.y;
   if (gy !== null && player.pos.y <= gy + 0.9 && player.vel.y <= 0.01) {
     player.pos.y = gy + 0.9; player.vel.y = 0; player.grounded = true;
+    if (wasAir && impact > 3) { SFX.land(); burstDust(player.pos, impact > 14 ? 18 : 10, 3.5); if (impact > 14) addShake(0.35); } // touchdown
   } else {
     player.grounded = false;
   }
   // surface effects underfoot: trampolines fling you, crumble tiles arm to fall
   if (player.grounded && groundSurf && groundSurf.fx) {
     const fx = groundSurf.fx;
-    if (fx.type === "bounce") { player.vel.y = fx.boost; player.grounded = false; kbFlash(); }
+    if (fx.type === "bounce") { player.vel.y = fx.boost; player.grounded = false; SFX.bounce(); burstDust(player.pos, 12, 4, 0x86efac); }
     else if (fx.type === "crumble" && !fx.armed && !groundSurf.dead) { fx.armed = true; fx.fallAt = t + fx.delay; }
   }
   player.surfFx = player.grounded && groundSurf ? groundSurf.fx : null;
+  // footsteps while running on the ground
+  if (player.grounded && Math.hypot(player.vel.x, player.vel.z) > 3) SFX.step();
 
   if (hazardEffect(player, t)) { respawn(); return; } // touched a kill hazard
   if (player.pos.y < VOID_Y) respawn();
@@ -988,7 +1079,7 @@ function stepPlayer(dt, t) {
     // jump pads fling you skyward
     if (player.grounded) for (const p of level.obj.pads) {
       if (player.pos.x >= p.minX && player.pos.x <= p.maxX && player.pos.z >= p.minZ && player.pos.z <= p.maxZ) {
-        player.vel.y = p.boost; player.grounded = false; kbFlash(); break;
+        player.vel.y = p.boost; player.grounded = false; SFX.bounce(); burstDust(player.pos, 12, 4, 0x9ef6ff); break;
       }
     }
     // forgiving checkpoint: remember the last PLAIN solid spot (not ice/bounce/
@@ -1034,6 +1125,12 @@ let lookInit = false;
 function stepCamera(dt) {
   camGoal.set(player.pos.x * 0.55, player.pos.y + 9.5, player.pos.z - 13);
   camera.position.lerp(camGoal, 1 - Math.exp(-6 * dt));
+  if (shake > 0.001) { // additive kick on hits/landings, decays fast
+    camera.position.x += (Math.random() - 0.5) * shake * 1.6;
+    camera.position.y += (Math.random() - 0.5) * shake * 1.2;
+    camera.position.z += (Math.random() - 0.5) * shake * 1.6;
+    shake *= Math.exp(-9 * dt);
+  }
   lookGoal.set(player.pos.x * 0.35, player.pos.y + 1.5, player.pos.z + 7);
   if (!lookInit) { lookCur.copy(lookGoal); lookInit = true; }
   lookCur.lerp(lookGoal, 1 - Math.exp(-7 * dt));
@@ -1056,6 +1153,7 @@ function frame(now) {
   stepGhosts(dt);
   stepCamera(dt);
   stepConfetti(dt);
+  stepDust(dt);
   for (const c of coins) { c.rotation.y += dt * 3.2; c.position.y += Math.sin(t * 2 + c.position.z) * dt * 0.3; } // shimmer
   starfield.position.set(player.pos.x, 0, player.pos.z); // keep the stars wrapped around the runner
   publishState(now);
