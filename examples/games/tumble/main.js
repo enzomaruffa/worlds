@@ -36,6 +36,8 @@ const GRAVITY = -34;
 const MOVE_SPEED = 12.5;
 const ACCEL = 90; // ground responsiveness
 const JUMP_V = 13.5;
+const DIVE_BOOST = 12; // forward lunge speed added on a dive
+const ICE_GRIP = 0.12; // control multiplier on ice (low = slidey)
 
 const { id, esc, toast, colorFor, uniqByHandle } = worlds;
 const clientId = id();
@@ -406,7 +408,7 @@ function buildObjectLevel(def, index) {
   coins.length = 0; // chunk-dress coins (if any) belonged to the disposed level
   const group = new THREE.Group();
   if (def.hue != null) { matPlatform.color.setHSL(def.hue, 0.4, 0.32); matSafe.color.setHSL(def.hue, 0.45, 0.45); }
-  const obj = { walk: [], movers: [], pads: [], hazards: [], coins: [], saws: [], start: null, finish: null };
+  const obj = { walk: [], movers: [], pads: [], hazards: [], coins: [], saws: [], crumbles: [], start: null, finish: null };
   let maxZ = 8;
   for (const o of def.objects) {
     const built = instantiate(ASSETS, o);
@@ -419,10 +421,24 @@ function buildObjectLevel(def, index) {
       obj.walk.push(a);
       if (built.role === "start") obj.start = { x, y: a.top + 0.9, z };
       if (built.role === "finish") obj.finish = a;
+    } else if (built.role === "ice" || built.role === "conveyor" || built.role === "bounce" || built.role === "crumble") {
+      // walkable surfaces with an effect; `fx` is read when you stand on them
+      const a = aabb(built.w, built.d, y + built.h / 2);
+      if (built.role === "ice") a.fx = { type: "ice" };
+      else if (built.role === "conveyor") a.fx = { type: "conveyor", dir: (o.p && o.p.dir) || "z", speed: (o.p && o.p.speed) || 7 };
+      else if (built.role === "bounce") a.fx = { type: "bounce", boost: (o.p && o.p.boost) || 17 };
+      else if (built.role === "crumble") { a.fx = { type: "crumble", delay: (o.p && o.p.delay) || 0.45, armed: false, falling: false, fallAt: 0, resetAt: 0 }; a.group = built.group; a.baseY = y; obj.crumbles.push(a); }
+      obj.walk.push(a);
     } else if (built.role === "mover") {
       obj.movers.push({ group: built.group, base: new THREE.Vector3(x, y, z), axis: (o.p && o.p.axis) || "x",
         amp: (o.p && o.p.amp) || 7, speed: (o.p && o.p.speed) || 1, w: built.w, d: built.d, h: built.h,
         prev: new THREE.Vector3(x, y, z), delta: new THREE.Vector3(), aabb: aabb(built.w, built.d, y + built.h / 2) });
+    } else if (built.role === "ball") {
+      obj.hazards.push({ kind: "ball", pivot: built.pivot, ball: built.ball, amp: (o.p && o.p.amp) || 1.0, speed: (o.p && o.p.speed) || 1.3, r: 2.2, _v: new THREE.Vector3() });
+    } else if (built.role === "boulder") {
+      obj.hazards.push({ kind: "boulder", group: built.group, ball: built.ball, z0: z, y, speed: (o.p && o.p.speed) || 11, span: (o.p && o.p.span) || 34, r: 2.0 });
+    } else if (built.role === "fan") {
+      obj.hazards.push({ kind: "fan", disc: built.disc, x, z, dir: (o.p && o.p.dir) || "z", force: (o.p && o.p.force) || 22, range: (o.p && o.p.range) || 11 });
     } else if (built.role === "pad") {
       obj.pads.push({ ...aabb(built.w, built.d, y + built.h / 2), boost: (o.p && o.p.boost) || 22 });
     } else if (built.role === "spinner") {
@@ -457,6 +473,19 @@ function updateObjects(dt, t) {
   }
   for (const s of level.obj.saws) s.rotation.z += dt * 5;
   for (const c of level.obj.coins) c.rotation.y += dt * 3.2;
+  // wrecking balls swing, boulders roll down the lane (looping), fans spin
+  for (const h of level.obj.hazards) {
+    if (h.kind === "ball") h.pivot.rotation.z = Math.sin(t * h.speed) * h.amp;
+    else if (h.kind === "boulder") { h.group.position.z = h.z0 - ((t * h.speed) % h.span); if (h.ball) h.ball.rotation.x -= dt * h.speed * 0.6; }
+    else if (h.kind === "fan" && h.disc) h.disc.rotation.z += dt * 9;
+  }
+  // crumble tiles: armed when stepped on → drop after the delay → respawn later
+  for (const a of level.obj.crumbles) {
+    const fx = a.fx;
+    if (fx.armed && !a.dead && t >= fx.fallAt) { a.dead = true; fx.falling = true; }
+    if (fx.falling) { a.group.position.y -= dt * 16; if (a.group.position.y < a.baseY - 12) { fx.falling = false; fx.resetAt = t + 3; } }
+    else if (a.dead && t >= fx.resetAt) { a.group.position.y = a.baseY; a.dead = false; fx.armed = false; } // back for another run
+  }
 }
 
 // Flank the gauntlet with Kenney station hardware + drifting asteroids in the
@@ -519,13 +548,16 @@ function dressLevel(group, rng, nChunks) {
   }
 }
 
+let groundSurf = null; // the AABB the player is standing on (carries .fx), set by groundY
 function groundY(x, z) {
+  groundSurf = null;
   if (!level) return 0;
   if (level.obj) {
-    let best = null;
-    const consider = (a) => { if (x >= a.minX && x <= a.maxX && z >= a.minZ && z <= a.maxZ && a.top <= player.pos.y + 0.7 && (best === null || a.top > best)) best = a.top; };
+    let best = null, bestA = null;
+    const consider = (a) => { if (a.dead) return; if (x >= a.minX && x <= a.maxX && z >= a.minZ && z <= a.maxZ && a.top <= player.pos.y + 0.7 && (best === null || a.top > best)) { best = a.top; bestA = a; } };
     for (const a of level.obj.walk) consider(a);
     for (const m of level.obj.movers) consider(m.aabb);
+    groundSurf = bestA;
     return best; // null = over the void → fall
   }
   if (z < 0) return Math.abs(x) <= TRACK_HALF + 1 ? 0 : null; // start pad
@@ -576,6 +608,30 @@ function hazardEffect(p, t) {
         p.vel.z -= 12; p.vel.y = Math.max(p.vel.y, 7); // knocked back — jump it next time
         kbFlash();
       }
+    } else if (h.kind === "ball") {
+      // swinging wrecking ball: knock the player away from the ball's world position
+      h.ball.getWorldPosition(h._v);
+      const dx = p.pos.x - h._v.x, dy = p.pos.y - h._v.y, dz = p.pos.z - h._v.z;
+      const d = Math.hypot(dx, dy, dz);
+      if (d < h.r + 0.7 && d > 0.001) {
+        const f = 18 / d;
+        p.vel.x += dx * f; p.vel.z += dz * f; p.vel.y = Math.max(p.vel.y, 8);
+        kbFlash();
+      }
+    } else if (h.kind === "boulder") {
+      const dx = p.pos.x - h.group.position.x, dz = p.pos.z - h.group.position.z;
+      const d = Math.hypot(dx, dz);
+      if (d < h.r + 0.7 && p.pos.y < h.y + 3) {
+        const f = 16 / Math.max(d, 0.3);
+        p.vel.x += dx * f; p.vel.z += dz * f; p.vel.y = Math.max(p.vel.y, 7);
+        kbFlash();
+      }
+    } else if (h.kind === "fan") {
+      // wind zone: steadily shove the player along the fan's direction while in range
+      const dx = p.pos.x - h.x, dz = p.pos.z - h.z;
+      if (Math.hypot(dx, dz) < h.range) {
+        if (h.dir === "x") p.vel.x += h.force * 0.05; else p.vel.z += h.force * 0.05;
+      }
     }
   }
   return false;
@@ -614,6 +670,9 @@ const player = {
   finished: false,
   checkpoint: new THREE.Vector3(0, 1.2, -2),
   curChunk: -1,
+  diveUntil: 0,   // diving while t < this
+  diveCd: 0,      // can dive again once t > this
+  surfFx: null,   // effect of the surface under us last frame (ice/conveyor)
   mesh: makeBean(0xfbbf24),
 };
 scene.add(player.mesh);
@@ -842,11 +901,11 @@ function tickTimerBar() {
 // ───────────────────────────────────────────────────────────────────────────
 // Input (keyboard + touch)
 // ───────────────────────────────────────────────────────────────────────────
-const input = { fwd: false, back: false, left: false, right: false, jump: false };
+const input = { fwd: false, back: false, left: false, right: false, jump: false, dive: false };
 const keyMap = {
   KeyW: "fwd", ArrowUp: "fwd", KeyS: "back", ArrowDown: "back",
   KeyA: "left", ArrowLeft: "left", KeyD: "right", ArrowRight: "right",
-  Space: "jump",
+  Space: "jump", ShiftLeft: "dive", ShiftRight: "dive",
 };
 addEventListener("keydown", (e) => { const k = keyMap[e.code]; if (k) { input[k] = true; if (e.code === "Space") e.preventDefault(); } });
 addEventListener("keyup", (e) => { const k = keyMap[e.code]; if (k) input[k] = false; });
@@ -860,35 +919,60 @@ function bindBtn(elId, key) {
   el.addEventListener("pointerdown", on); el.addEventListener("pointerup", off);
   el.addEventListener("pointerleave", off); el.addEventListener("pointercancel", off);
 }
-bindBtn("btnUp", "fwd"); bindBtn("btnDown", "back"); bindBtn("btnLeft", "left"); bindBtn("btnRight", "right"); bindBtn("btnJump", "jump");
+bindBtn("btnUp", "fwd"); bindBtn("btnDown", "back"); bindBtn("btnLeft", "left"); bindBtn("btnRight", "right"); bindBtn("btnJump", "jump"); bindBtn("btnDive", "dive");
 
 // ───────────────────────────────────────────────────────────────────────────
 // Simulation step
 // ───────────────────────────────────────────────────────────────────────────
 function stepPlayer(dt, t) {
+  const diving = player.diveUntil > t;
   const mx = (input.right ? 1 : 0) - (input.left ? 1 : 0);
   const mz = (input.fwd ? 1 : 0) - (input.back ? 1 : 0);
-  // accelerate toward desired horizontal velocity
+  // accelerate toward desired velocity, but with reduced control on ice (slidey)
+  // and while committed to a dive.
+  let ctrl = player.grounded ? 1 : 0.35;
+  if (player.surfFx && player.surfFx.type === "ice") ctrl *= ICE_GRIP;
+  if (diving) ctrl *= 0.25;
   const wantX = mx * MOVE_SPEED, wantZ = mz * MOVE_SPEED;
-  const k = 1 - Math.exp(-(ACCEL / MOVE_SPEED) * dt);
-  player.vel.x += (wantX - player.vel.x) * (player.grounded ? k : k * 0.35);
-  player.vel.z += (wantZ - player.vel.z) * (player.grounded ? k : k * 0.35);
-  if (mx || mz) player.heading = Math.atan2(player.vel.x, player.vel.z);
+  const k = (1 - Math.exp(-(ACCEL / MOVE_SPEED) * dt)) * ctrl;
+  player.vel.x += (wantX - player.vel.x) * k;
+  player.vel.z += (wantZ - player.vel.z) * k;
+  if ((mx || mz) && !diving) player.heading = Math.atan2(player.vel.x, player.vel.z);
 
-  if (input.jump && player.grounded) { player.vel.y = JUMP_V; player.grounded = false; }
+  if (input.jump && player.grounded && !diving) { player.vel.y = JUMP_V; player.grounded = false; }
+  // dive — a committed forward lunge (reach ledges, recover, dodge); on a cooldown
+  if (input.dive && t > player.diveCd && !diving && (player.grounded || player.vel.y > -3)) {
+    player.vel.x += Math.sin(player.heading) * DIVE_BOOST;
+    player.vel.z += Math.cos(player.heading) * DIVE_BOOST;
+    player.vel.y = Math.max(player.vel.y, 5.5);
+    player.diveUntil = t + 0.5; player.diveCd = t + 1.0; player.grounded = false; kbFlash();
+  }
   player.vel.y += GRAVITY * dt;
 
   player.pos.x += player.vel.x * dt;
   player.pos.y += player.vel.y * dt;
   player.pos.z += player.vel.z * dt;
 
-  // ground collision
+  // conveyor: the belt carries you along while you stand on it
+  if (player.grounded && player.surfFx && player.surfFx.type === "conveyor") {
+    if (player.surfFx.dir === "x") player.pos.x += player.surfFx.speed * dt;
+    else player.pos.z += player.surfFx.speed * dt;
+  }
+
+  // ground collision (groundY records the surface in `groundSurf`)
   const gy = groundY(player.pos.x, player.pos.z);
   if (gy !== null && player.pos.y <= gy + 0.9 && player.vel.y <= 0.01) {
     player.pos.y = gy + 0.9; player.vel.y = 0; player.grounded = true;
   } else {
     player.grounded = false;
   }
+  // surface effects underfoot: trampolines fling you, crumble tiles arm to fall
+  if (player.grounded && groundSurf && groundSurf.fx) {
+    const fx = groundSurf.fx;
+    if (fx.type === "bounce") { player.vel.y = fx.boost; player.grounded = false; kbFlash(); }
+    else if (fx.type === "crumble" && !fx.armed && !groundSurf.dead) { fx.armed = true; fx.fallAt = t + fx.delay; }
+  }
+  player.surfFx = player.grounded && groundSurf ? groundSurf.fx : null;
 
   if (hazardEffect(player, t)) { respawn(); return; } // touched a kill hazard
   if (player.pos.y < VOID_Y) respawn();
@@ -907,8 +991,9 @@ function stepPlayer(dt, t) {
         player.vel.y = p.boost; player.grounded = false; kbFlash(); break;
       }
     }
-    // forgiving checkpoint: remember the last solid spot you stood on
-    if (player.grounded) player.checkpoint.set(player.pos.x, player.pos.y, player.pos.z);
+    // forgiving checkpoint: remember the last PLAIN solid spot (not ice/bounce/
+    // conveyor/crumble — you don't want to respawn onto a vanishing tile).
+    if (player.grounded && (!groundSurf || !groundSurf.fx)) player.checkpoint.set(player.pos.x, player.pos.y, player.pos.z);
     // finish zone
     const f = level.obj.finish;
     if (f && !player.finished && player.pos.x >= f.minX && player.pos.x <= f.maxX && player.pos.z >= f.minZ && player.pos.z <= f.maxZ) onFinish();
@@ -929,6 +1014,9 @@ function stepPlayer(dt, t) {
   let d = player.heading - player.mesh.rotation.y;
   d = Math.atan2(Math.sin(d), Math.cos(d));
   player.mesh.rotation.y += d * (1 - Math.exp(-14 * dt));
+  // dive pose — pitch the body forward into a belly-flop, then stand back up
+  const pitch = player.diveUntil > t ? -1.2 : 0;
+  player.mesh.rotation.x += (pitch - player.mesh.rotation.x) * (1 - Math.exp(-18 * dt));
   // squash & stretch — stretch tall while airborne, squash on the ground
   const body = player.mesh.userData.body;
   if (body) {
