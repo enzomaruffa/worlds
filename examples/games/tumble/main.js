@@ -1054,7 +1054,7 @@ async function tryAdvance() {
   const next = (cur.levelIndex | 0) + 1;
   try {
     const ok = await lvlRoom.set({ levelIndex: next, seed: seedFor(next), endsAt: Date.now() + LEVEL_MS });
-    if (ok === false) await lvlRoom.refetch(); // someone else advanced — take theirs
+    if (ok === false) { await lvlRoom.refetch(); applyRoom(lvlRoom.state); } // lost the race — explicitly sync to the winner's level
   } catch (_) { /* transient; the next tick retries */ }
   setTimeout(() => { advancing = false; }, 1500);
 }
@@ -1082,7 +1082,7 @@ function collectCoins() {
         c.userData.got = true; c.visible = false;
         coinCount++;
         SFX.coin(); burstDust(c.position, 8, 3, 0xfde047);
-        if (coinCount % 10 === 0) { flashMessage("10 COINS!  +1", true); SFX.bonus(); scorePoint(); }
+        if (coinCount % 10 === 0) { flashMessage("10 COINS!  +1", true); SFX.bonus(); scorePoints(1); }
         updateHud();
       }
     }
@@ -1109,27 +1109,34 @@ async function refreshBoard() {
     updateHud();
   } catch (_) {}
 }
-async function scorePoint() {
-  myPoints += 1; updateHud();
+async function scorePoints(n) {
+  n = n || 1;
+  myPoints += n; updateHud();
   if (!board) return;
   try {
     if (!myDocId) {
       const res = await board.list({ filter: { handle: me.handle }, limit: 1 });
       if (res.items && res.items[0]) myDocId = res.items[0].id;
     }
-    if (myDocId) await board.increment(myDocId, "points", 1);
-    else { const doc = await board.create({ handle: me.handle, name: me.name, points: 1 }); myDocId = doc.id; }
+    if (myDocId) await board.increment(myDocId, "points", n);
+    else { const doc = await board.create({ handle: me.handle, name: me.name, points: n }); myDocId = doc.id; }
   } catch (_) { /* a missed point is not worth crashing over */ }
 }
 
 function onFinish() {
   if (player.finished) return;
   player.finished = true;
+  // placement: how many rivals already finished THIS level → your podium spot
+  const place = finishers.size + 1;
   finishers.add(me.handle);
-  flashMessage("FINISHED!  +1", true);
+  // base +1 for finishing; a real race (2+ runners) adds a podium bonus 1st +2 / 2nd +1
+  const racing = activeHandles.size >= 2;
+  const bonus = racing ? (place === 1 ? 2 : place === 2 ? 1 : 0) : 0;
+  const medal = racing && place <= 3 ? ["🥇", "🥈", "🥉"][place - 1] + " " : "";
+  flashMessage("FINISHED!  " + medal + "+" + (1 + bonus), true);
   burstConfetti(player.pos);
   SFX.finish(); addShake(0.3);
-  scorePoint();
+  scorePoints(1 + bonus);
   try { roomCh && roomCh.publish({ t: "fin", handle: me.handle, lvl: level ? level.index : 0 }); } catch (_) {}
   updateHud();
   maybeAllFinish();
@@ -1213,7 +1220,7 @@ function stepPlayer(dt, t) {
   // and while committed to a dive.
   let ctrl = player.grounded ? 1 : 0.35;
   if (player.surfFx && player.surfFx.type === "ice") ctrl *= ICE_GRIP;
-  if (diving) ctrl *= 0.25;
+  if (diving) ctrl *= 0.4; // keep a little steering during a dive (was 0.25 — felt like a dead input)
   const wantX = mx * MOVE_SPEED, wantZ = mz * MOVE_SPEED;
   const k = (1 - Math.exp(-(ACCEL / MOVE_SPEED) * dt)) * ctrl;
   player.vel.x += (wantX - player.vel.x) * k;
@@ -1226,7 +1233,7 @@ function stepPlayer(dt, t) {
     player.vel.x += Math.sin(player.heading) * DIVE_BOOST;
     player.vel.z += Math.cos(player.heading) * DIVE_BOOST;
     player.vel.y = Math.max(player.vel.y, 5.5);
-    player.diveUntil = t + 0.5; player.diveCd = t + 1.0; player.grounded = false;
+    player.diveUntil = t + 0.32; player.diveCd = t + 0.6; player.grounded = false; // snappier: shorter commit + cooldown so dive doesn't feel dead
     SFX.dive(); addShake(0.25); burstDust(player.pos, 10, 5);
   }
   player.vel.y += GRAVITY * dt;
