@@ -64,6 +64,8 @@
     #topCenter { grid-column: 2; grid-row: 1; justify-self: center; text-align: center; }
     #brand { font-size: .78rem; font-weight: 600; letter-spacing: .18em; text-transform: uppercase; color: var(--dim); }
     #brand b { color: var(--gold); }
+    #pupStatus { display: flex; gap: .4rem; justify-content: center; margin-top: .35rem; min-height: 1.4rem; }
+    .pup-chip { background: rgba(245,158,11,.16); border: 1px solid var(--gold); color: var(--gold-bright, #fbbf24); border-radius: 999px; padding: .12rem .55rem; font-size: .8rem; font-weight: 700; font-variant-numeric: tabular-nums; }
 
     /* top-right: coverage leaderboard */
     #board { grid-column: 3; grid-row: 1; padding: .55rem .7rem; min-width: 11.5rem; max-width: 15rem; align-self: start; }
@@ -213,6 +215,7 @@
 
       <div id="topCenter">
         <div id="brand"><b>PAINT</b> ARENA · worlds</div>
+        <div id="pupStatus"></div>
       </div>
 
       <div class="panel" id="board">
@@ -302,7 +305,8 @@
     // encircle (loop a region to flood-fill it your colour)
     const LOOP_MIN_PTS = 6;        // trail points before a loop can close
     const LOOP_SNAP = 95;          // dist back to an old trail point that closes a loop
-    const LOOP_MIN_CELLS = 4;      // ignore tiny accidental loops (min enclosed cells)
+    const LOOP_MIN_CELLS = 20;     // only deliberate, sizeable loops capture (was 4 — encircle was OP/spammable)
+    const LOOP_COOLDOWN = 1200;    // ms between captures, so you can't machine-gun loops
 
     // Vivid paint palette — hashed handle picks an index.
     const PALETTE = [
@@ -390,6 +394,21 @@
     function colorFor(handle) { return PALETTE[hashStr(handle) % PALETTE.length]; }
     function initial(name) { return (name || "?").trim().charAt(0).toUpperCase() || "?"; }
 
+    // Deterministic UNIQUE colors per round: every client sorts the same roster
+    // and hands out palette slots in order, so no two players share a color (which
+    // previously merged/stole their scores via the color-keyed coverage map).
+    let colorMap = {};
+    function assignColors() {
+      const handles = new Set();
+      if (lobbySnap && lobbySnap.members) for (const m of lobbySnap.members) if (m.handle) handles.add(m.handle);
+      if (me.handle) handles.add(me.handle);
+      const sorted = [...handles].sort();
+      colorMap = {};
+      sorted.forEach((h, i) => { colorMap[h] = PALETTE[i % PALETTE.length]; });
+      if (me.handle && colorMap[me.handle]) me.color = colorMap[me.handle];
+    }
+    function paletteFor(handle) { return colorMap[handle] || colorFor(handle); }
+
     // ── Host (from the worlds.room snapshot) ─────────────────
     function isHost() { return !!(lobbySnap && lobbySnap.isHost); }
 
@@ -452,7 +471,7 @@
 
         const sw = document.createElement("span");
         sw.className = "sw";
-        sw.style.background = colorFor(p.handle);
+        sw.style.background = paletteFor(p.handle);
         li.appendChild(sw);
 
         const nm = document.createElement("span");
@@ -547,6 +566,8 @@
       roundSeq = seq;
       countdownEndAt = cdEnd;
       roundEndAt = rEnd;
+      assignColors();   // unique per-player colors for this round (fixes score collisions)
+      loopCdUntil = 0;
       clearGrid();
       remotes.clear();
       powerups.clear();
@@ -800,9 +821,21 @@
 
       pruneStale(now2());
       updateTimer();
+      updatePupStatus();
       draw();
       if (phase === "playing" || phase === "countdown") renderBoard();
       requestAnimationFrame(tick);
+    }
+
+    // active-powerup HUD chips with live countdowns (speed / fat brush)
+    function updatePupStatus() {
+      const el = document.getElementById("pupStatus");
+      if (!el) return;
+      const now = now2();
+      let html = "";
+      if (self.speedUntil > now) html += `<span class="pup-chip">⚡ ${Math.ceil((self.speedUntil - now) / 1000)}s</span>`;
+      if (self.fatUntil > now) html += `<span class="pup-chip">🖌 ${Math.ceil((self.fatUntil - now) / 1000)}s</span>`;
+      el.innerHTML = html;
     }
 
     function now2() { return Date.now(); }
@@ -830,7 +863,8 @@
     // Robust to self-intersecting / concave trails: rasterise the loop edge into a
     // local mask, flood from the padded border (= "outside"), then paint every cell
     // the flood never reached (= enclosed). Returns the number of cells filled.
-    function fillPolygon(poly, color) {
+    function fillPolygon(poly, color, commit) {
+      if (commit === undefined) commit = true;
       const idx = PALETTE.indexOf(color);
       if (idx < 0 || !poly || poly.length < 3) return 0;
       let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -868,7 +902,7 @@
         const v = mask[ly * w + lx];
         if (v === 2) continue;
         if (v === 0) interior++;
-        paintCell(gx0 + lx, gy0 + ly, idx);
+        if (commit) paintCell(gx0 + lx, gy0 + ly, idx); // dry-run only counts, doesn't paint
       }
       return interior;
     }
@@ -882,14 +916,17 @@
       if (n < LOOP_MIN_PTS) return false;
       const cur = trail[n - 1];
       const snap2 = LOOP_SNAP * LOOP_SNAP;
+      if (now2() < loopCdUntil) return false;   // brief cooldown so captures can't be spammed
       for (let i = 0; i < n - LOOP_MIN_PTS; i++) {
         const dx = trail[i].x - cur.x, dy = trail[i].y - cur.y;
         if (dx * dx + dy * dy <= snap2) {
           // largest loop found — test this one only (subsets enclose no more)
           const poly = trail.slice(i).map((p) => [p.x, p.y]);
-          if (poly.length >= 3 && fillPolygon(poly, color) >= LOOP_MIN_CELLS) {
+          // dry-run first: only commit a real capture for a deliberate, sizeable loop
+          if (poly.length >= 3 && fillPolygon(poly, color, false) >= LOOP_MIN_CELLS) {
+            fillPolygon(poly, color, true);       // now actually paint the enclosed area
             publish({ t: "loop", color, poly });
-            if (color === me.color) loopFlash(cur.x, cur.y);
+            if (color === me.color) { loopFlash(cur.x, cur.y); loopCdUntil = now2() + LOOP_COOLDOWN; }
             trail.length = 0; // reset so the same loop isn't re-counted
             return true;
           }
@@ -900,6 +937,7 @@
     }
     // brief expanding ring when YOU close a capture — satisfying feedback
     let loopFx = null;
+    let loopCdUntil = 0; // capture cooldown (set after a successful encircle)
     function loopFlash(x, y) { loopFx = { x, y, at: Date.now() }; }
 
     // ── Powerups ─────────────────────────────────────────────
@@ -1125,7 +1163,7 @@
           const y = typeof p.y === "number" ? clamp(p.y, 0, ARENA) : (prev.ty ?? ARENA / 2);
           remotes.set(p.handle, {
             name: typeof p.name === "string" ? p.name : (prev.name || p.handle),
-            color: typeof p.color === "string" && PALETTE.includes(p.color) ? p.color : (prev.color || colorFor(p.handle)),
+            color: typeof p.color === "string" && PALETTE.includes(p.color) ? p.color : (prev.color || paletteFor(p.handle)),
             x: prev.x ?? x, y: prev.y ?? y,     // current (interpolated) pos
             tx: x, ty: y,                       // target pos
             trail: prev.trail || [],
@@ -1144,7 +1182,7 @@
         }
         case "score": {
           if (typeof p.handle !== "string" || typeof p.cells !== "number") return;
-          roundScores.set(p.handle, { name: p.name || p.handle, color: p.color || colorFor(p.handle), cells: p.cells });
+          roundScores.set(p.handle, { name: p.name || p.handle, color: p.color || paletteFor(p.handle), cells: p.cells });
           if (phase === "results") renderResults();
           break;
         }
@@ -1187,6 +1225,7 @@
     function onRoomChange(s) {
       const wasHost = isHost();
       lobbySnap = s;
+      assignColors(); // keep the unique-color map in step with the roster
 
       // drop remote blobs for players who have left the room
       const present = new Set(s.members.map(m => m.handle));
