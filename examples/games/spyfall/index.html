@@ -436,6 +436,28 @@
   let cardRevealed = false;
   let tickHandle = null;
   let starting = false;          // local re-entrancy guard
+  let lastTickSec = -1, wasDanger = false, prevPhase = null;
+
+  // ── Sound — tiny WebAudio synth (no assets; resumes on first input) ──
+  let actx = null, sfxMuted = false;
+  function audioResume() { if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (_) {} } if (actx && actx.state === "suspended") actx.resume(); }
+  addEventListener("pointerdown", audioResume); addEventListener("keydown", audioResume);
+  addEventListener("keydown", (e) => { if (e.key === "m" || e.key === "M") { sfxMuted = !sfxMuted; if (typeof toast === "function") toast(sfxMuted ? "🔇 muted" : "🔊 sound on"); } });
+  function blip({ type = "sine", f0, f1, dur = 0.15, gain = 0.2, delay = 0 }) {
+    if (!actx || sfxMuted) return;
+    const t = actx.currentTime + delay;
+    const o = actx.createOscillator(); o.type = type; o.frequency.setValueAtTime(f0, t);
+    if (f1 && f1 !== f0) o.frequency.exponentialRampToValueAtTime(Math.max(1, f1), t + dur);
+    const g = actx.createGain();
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(gain, t + 0.008); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(actx.destination); o.start(t); o.stop(t + dur + 0.02);
+  }
+  const SFX = {
+    flip:   () => { blip({ type: "triangle", f0: 300, f1: 620, dur: 0.12, gain: 0.16 }); },
+    tick:   () => blip({ type: "sine", f0: 920, dur: 0.05, gain: 0.1 }),
+    danger: () => { blip({ type: "sawtooth", f0: 220, f1: 330, dur: 0.4, gain: 0.12 }); },
+    reveal: () => { [392, 311, 233].forEach((f, i) => blip({ type: "sawtooth", f0: f, dur: 0.45, gain: 0.16, delay: i * 0.18 })); }, // ominous spy sting
+  };
 
   // ── Helpers ──────────────────────────────────────────────
   const { toast, esc, uniqByHandle } = worlds;   // shared SDK building blocks
@@ -610,6 +632,12 @@
     } else {
       renderLobby();
     }
+    // sound on phase transitions (once each)
+    if (game.phase !== prevPhase) {
+      if (game.phase === "over") SFX.reveal();         // dramatic spy reveal
+      if (game.phase === "playing") { wasDanger = false; lastTickSec = -1; } // fresh round
+      prevPhase = game.phase;
+    }
   }
 
   function renderLobby() {
@@ -680,7 +708,11 @@
     $("timerBar").style.width = `${Math.max(0, (remaining / total) * 100)}%`;
     const card = $("timerCard");
     card.classList.toggle("warn", remaining <= 60000 && remaining > 20000);
-    card.classList.toggle("danger", remaining <= 20000);
+    const danger = remaining <= 20000;
+    card.classList.toggle("danger", danger);
+    if (danger && !wasDanger) SFX.danger();   // sting when the clock turns red
+    wasDanger = danger;
+    if (danger && secs <= 10 && secs >= 1 && secs !== lastTickSec) { lastTickSec = secs; SFX.tick(); }
     if (remaining <= 0) {
       stopTick();
       $("clock").textContent = "0:00";
@@ -693,6 +725,7 @@
   $("secretCard").addEventListener("click", () => {
     cardRevealed = !cardRevealed;
     $("secretCard").classList.toggle("revealed", cardRevealed);
+    audioResume(); SFX.flip();
   });
 
   // ── Chat (ephemeral over ws) ─────────────────────────────
