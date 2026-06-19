@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import * as W from "./world.js";
+import * as Grass from "./grass.js";
 
 // ───────────────────────────────────────────────────────────────────────────
 // SWARD — a multiplayer 3D incremental grass-plot game on Worlds.
@@ -58,6 +59,7 @@ function frame(now) {
     else W.setCursor(null);
   } else W.setCursor(null);
 
+  Grass.update(dt);
   W.tickControls();
   W.render();
 }
@@ -89,6 +91,18 @@ async function boot() {
 
   // scatter a little starter debris so the empty plot has something to clean
   scatterStarterDebris();
+
+  // 3D grass field. (C4 drives coverage from the sim; here we seed a patchy
+  // starter lawn so the plot already breathes — denser in the middle, thinning
+  // toward the edges, with soft noisy clumps.)
+  Grass.buildGrass();
+  const rng = mulberry32(G.plotSeed ^ 0x5EED);
+  const ox = rng() * 100, oz = rng() * 100;
+  Grass.fillCoverage((x, z) => {
+    const d = Math.hypot(x, z) / W.HALF;
+    const clump = 0.5 + 0.5 * Math.sin((x + ox) * 0.5) * Math.cos((z + oz) * 0.5);
+    return THREE.MathUtils.clamp((0.95 - d * 0.7) * (0.55 + 0.6 * clump), 0, 1);
+  });
 
   G.booted = true;
   dom.loader.classList.add("hide");
