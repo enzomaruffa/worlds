@@ -245,7 +245,7 @@
       <div class="lobby-card">
         <h2><b>PAINT</b> ARENA</h2>
         <p class="lobby-sub" id="lobbySub">Waiting in the lobby…</p>
-        <p class="how">Drive around the arena — <b>WASD / arrows</b> on desktop, <b>drag the joystick</b> on touch. Your trail paints the floor your color. <b>Most floor covered when the clock hits zero wins.</b></p>
+        <p class="how">Drive around the arena — <b>WASD / arrows</b> on desktop, <b>drag the joystick</b> on touch. Your trail paints the floor your color. <b>Encircle</b> an area to flood it instantly, and grab <b>⚡ speed</b>, <b>🖌 fat brush</b> &amp; <b>💥 paint bombs</b>. <b>Most floor covered when the clock hits zero wins.</b></p>
         <ul id="lobbyRoster"></ul>
         <p class="ready-count" id="readyCount">0 of 1 ready</p>
         <div class="lobby-actions">
@@ -288,8 +288,21 @@
     const COUNTDOWN_MS = 3000;     // 3-2-1 before paint counts
     const STALE_MS = 5000;         // drop remotes silent this long
     const HEARTBEAT_MS = 2500;     // re-broadcast while idle
-    const TRAIL_MAX = 16;          // blob trail length
+    const TRAIL_MAX = 180;         // trail history kept for encircle (long enough that a loop's start survives until you close it)
+    const TAIL_DRAW = 16;          // how many recent trail points render as the visible comet tail
+    const TRAIL_STEP = 13;         // min px between trail points (sparser → a full loop fits in TRAIL_MAX)
     const RESULTS_MS = 7000;       // results screen duration
+    // powerups
+    const PUP_TYPES = ["speed", "fat", "bomb"];
+    const PUP_SPAWN_MS = 8500;     // host spawns one this often
+    const PUP_MAX = 4;             // cap on the field
+    const PUP_R = 42;              // pickup radius
+    const FX_MS = 7000;            // speed/fat effect duration
+    const SPEED_MULT = 1.7, FAT_MULT = 2.3, BOMB_R = 150;
+    // encircle (loop a region to flood-fill it your colour)
+    const LOOP_MIN_PTS = 6;        // trail points before a loop can close
+    const LOOP_SNAP = 95;          // dist back to an old trail point that closes a loop
+    const LOOP_MIN_CELLS = 4;      // ignore tiny accidental loops (min enclosed cells)
 
     // Vivid paint palette — hashed handle picks an index.
     const PALETTE = [
@@ -336,10 +349,17 @@
     let lobbySnap = null;           // latest room snapshot
 
     // self blob
-    const self = { x: ARENA * 0.5, y: ARENA * 0.5, vx: 0, vy: 0, trail: [] };
+    const self = { x: ARENA * 0.5, y: ARENA * 0.5, vx: 0, vy: 0, trail: [], br: PAINT_R, speedUntil: 0, fatUntil: 0 };
 
-    // remotes: handle -> { name, color, x, y, tx, ty, trail, at }
+    // remotes: handle -> { name, color, x, y, tx, ty, trail, at, br }
     const remotes = new Map();
+
+    // powerups on the field: id -> { kind, x, y }
+    const powerups = new Map();
+    let pupSpawnAt = 0;
+    // self-reported final coverage: handle -> { name, color, cells } (accurate per player)
+    const roundScores = new Map();
+    let localReturnTimer = null;
 
     // round identity + timing
     let roundSeq = 0;               // monotone round id
@@ -404,10 +424,10 @@
       coverage.set(nc, (coverage.get(nc) || 0) + 1);
     }
     // stamp a paint disc at world (x,y) in the given palette color
-    function stamp(x, y, color) {
+    function stamp(x, y, color, radius) {
       const idx = PALETTE.indexOf(color);
       if (idx < 0) return;
-      const r = PAINT_R;
+      const r = radius || PAINT_R;
       const minGx = Math.floor((x - r) / CELL), maxGx = Math.floor((x + r) / CELL);
       const minGy = Math.floor((y - r) / CELL), maxGy = Math.floor((y + r) / CELL);
       const r2 = r * r;
@@ -529,9 +549,14 @@
       roundEndAt = rEnd;
       clearGrid();
       remotes.clear();
+      powerups.clear();
+      roundScores.clear();
+      if (localReturnTimer) { clearTimeout(localReturnTimer); localReturnTimer = null; }
       self.x = ARENA * (0.25 + 0.5 * Math.random());
       self.y = ARENA * (0.25 + 0.5 * Math.random());
       self.vx = 0; self.vy = 0; self.trail = [];
+      self.br = PAINT_R; self.speedUntil = 0; self.fatUntil = 0;
+      pupSpawnAt = Date.now() + 4000; // first powerup a few seconds in
       lastSentAt = 0; lastSent = null;
 
       phase = "countdown";
@@ -571,14 +596,12 @@
 
     function hostEndRound() {
       if (!isHost() || (phase !== "playing" && phase !== "countdown")) return;
-      const scores = computeScores();
-      publish({ t: "end", seq: roundSeq, scores });
-      enterResults(scores);
+      publish({ t: "end", seq: roundSeq });
+      endRound();
       clearHostTimers();
       resultsTimer = setTimeout(() => {
-        // Back to staging via the room — its onReturn drives showLobby() everywhere.
+        // also reset the room's started flag so the lobby's start handshake is clean
         if (lobby) lobby.returnToLobby();
-        else showLobby();
       }, RESULTS_MS);
     }
 
@@ -593,30 +616,39 @@
       for (const p of players) {
         const cells = byColor.get(p.color) || 0;
         seen.add(p.color);
-        rows.push({ name: p.name, color: p.color, cells, pct: total ? cells / total * 100 : 0 });
+        rows.push({ handle: p.handle, name: p.name, color: p.color, cells, pct: total ? cells / total * 100 : 0 });
       }
       // any painted color with no known player (left mid-round) still counts
       for (const [color, cells] of byColor) {
         if (seen.has(color)) continue;
-        rows.push({ name: "(left)", color, cells, pct: total ? cells / total * 100 : 0 });
+        rows.push({ handle: "left:" + color, name: "(left)", color, cells, pct: total ? cells / total * 100 : 0 });
       }
       rows.sort((a, b) => b.cells - a.cells);
       return rows;
     }
 
-    function enterResults(scores) {
-      phase = "results";
-      document.body.classList.add("results");
-      document.body.classList.remove("lobby");
-      resultsList.innerHTML = "";
-      const top = scores && scores.length ? scores[0] : null;
+    // End the round on THIS client: seed the table from the local grid, then report
+    // our OWN accurate cell count (each client knows its own paint best) so the
+    // final percentages match what each player actually saw — not the host's lossy view.
+    function endRound() {
+      if (phase === "results") return;
+      for (const r of computeScores()) if (!roundScores.has(r.handle)) roundScores.set(r.handle, { name: r.name, color: r.color, cells: r.cells });
+      const mine = coverage.get(me.color) || 0;
+      roundScores.set(me.handle, { name: me.name, color: me.color, cells: mine });
+      publish({ t: "score", handle: me.handle, name: me.name, color: me.color, cells: mine });
+      enterResults();
+    }
+    function renderResults() {
+      const total = GRID * GRID;
+      const rows = [...roundScores.entries()].map(([h, r]) => ({ handle: h, name: r.name, color: r.color, cells: r.cells, pct: total ? r.cells / total * 100 : 0 }));
+      rows.sort((a, b) => b.cells - a.cells);
+      const top = rows.length ? rows[0] : null;
       const iWon = top && top.color === me.color && top.cells > 0;
       const anyPaint = top && top.cells > 0;
       resultsCrown.textContent = anyPaint ? "🏆" : "🎨";
-      resultsTitle.innerHTML = !anyPaint ? "Nobody painted!"
-        : iWon ? "You <b>win!</b>"
-        : `<b>${esc(top.name)}</b> wins!`;
-      (scores || []).forEach((r, i) => {
+      resultsTitle.innerHTML = !anyPaint ? "Nobody painted!" : iWon ? "You <b>win!</b>" : `<b>${esc(top.name)}</b> wins!`;
+      resultsList.innerHTML = "";
+      rows.forEach((r, i) => {
         const li = document.createElement("li");
         if (i === 0 && r.cells > 0) li.className = "win";
         const rank = document.createElement("span"); rank.className = "rank"; rank.textContent = "#" + (i + 1); li.appendChild(rank);
@@ -625,13 +657,26 @@
         const pct = document.createElement("span"); pct.className = "pct"; pct.textContent = r.pct.toFixed(1) + "%"; li.appendChild(pct);
         resultsList.appendChild(li);
       });
+    }
+
+    function enterResults() {
+      phase = "results";
+      document.body.classList.add("results");
+      document.body.classList.remove("lobby");
+      powerups.clear();
+      renderResults();
       resultsNote.textContent = "Back to the lobby…";
       resultsEl.classList.add("show");
+      // robust return: EVERY client returns locally after the results window, so a
+      // dropped host (or a missed room handshake) can never strand us on this screen.
+      if (localReturnTimer) clearTimeout(localReturnTimer);
+      localReturnTimer = setTimeout(() => { if (phase === "results") showLobby(); }, RESULTS_MS + 600);
     }
 
     function clearHostTimers() {
       if (endTimer) { clearTimeout(endTimer); endTimer = null; }
       if (resultsTimer) { clearTimeout(resultsTimer); resultsTimer = null; }
+      if (localReturnTimer) { clearTimeout(localReturnTimer); localReturnTimer = null; }
     }
 
     // ── Players for rendering / scoring ───────────────────────
@@ -699,7 +744,7 @@
       if ((due && moved) || heartbeat) {
         lastSentAt = now;
         lastSent = payload;
-        publish({ t: "p", handle: me.handle, name: me.name, color: me.color, x: payload.x, y: payload.y });
+        publish({ t: "p", handle: me.handle, name: me.name, color: me.color, x: payload.x, y: payload.y, br: Math.round(self.br) });
       }
     }
 
@@ -712,7 +757,8 @@
       if (phase === "countdown" || phase === "playing") {
         // move self
         const wv = inputVec();
-        const tvx = wv.x * SPEED, tvy = wv.y * SPEED;
+        const sp = self.speedUntil > now2() ? SPEED * SPEED_MULT : SPEED;
+        const tvx = wv.x * sp, tvy = wv.y * sp;
         const k = Math.min(1, ACCEL * dt);
         self.vx += (tvx - self.vx) * k;
         self.vy += (tvy - self.vy) * k;
@@ -722,8 +768,12 @@
 
         // paint only once the round is live (not during countdown)
         if (phase === "playing") {
-          stampSegment(prevX, prevY, self.x, self.y, me.color);
+          self.br = self.fatUntil > now2() ? PAINT_R * FAT_MULT : PAINT_R;
+          stampSegment(prevX, prevY, self.x, self.y, me.color, self.br);
           pushTrail(self.trail, self.x, self.y);
+          checkLoop(self.trail, me.color);             // close a loop → flood-fill it
+          tryCollectPowerups();
+          if (isHost() && now2() >= pupSpawnAt) { hostSpawnPowerup(); pupSpawnAt = now2() + PUP_SPAWN_MS; }
         }
 
         maybeSendPosition(now);
@@ -732,7 +782,7 @@
         // the host hasn't told us yet (covers a host that vanished mid-round).
         if (phase === "playing" && roundEndAt && now2() >= roundEndAt) {
           if (isHost()) hostEndRound();
-          else enterResults(computeScores());
+          else endRound();
         }
       }
 
@@ -743,7 +793,7 @@
         r.x += (r.tx - r.x) * lerp;
         r.y += (r.ty - r.y) * lerp;
         if (phase === "playing") {
-          stampSegment(px, py, r.x, r.y, r.color);
+          stampSegment(px, py, r.x, r.y, r.color, r.br || PAINT_R);
           pushTrail(r.trail, r.x, r.y);
         }
       }
@@ -760,19 +810,130 @@
 
     function pushTrail(trail, x, y) {
       const last = trail[trail.length - 1];
-      if (last && Math.hypot(last.x - x, last.y - y) < 6) return;
+      if (last && Math.hypot(last.x - x, last.y - y) < TRAIL_STEP) return;
       trail.push({ x, y });
       if (trail.length > TRAIL_MAX) trail.shift();
     }
 
     // stamp paint along a motion segment so fast blobs don't leave gaps
-    function stampSegment(x0, y0, x1, y1, color) {
+    function stampSegment(x0, y0, x1, y1, color, radius) {
+      const r = radius || PAINT_R;
       const dist = Math.hypot(x1 - x0, y1 - y0);
-      const steps = Math.max(1, Math.ceil(dist / (PAINT_R * 0.6)));
+      const steps = Math.max(1, Math.ceil(dist / (r * 0.6)));
       for (let i = 1; i <= steps; i++) {
         const t = i / steps;
-        stamp(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t, color);
+        stamp(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t, color, r);
       }
+    }
+
+    // ── Encircle: when a trail closes a loop, flood the enclosed cells your colour ─
+    // Robust to self-intersecting / concave trails: rasterise the loop edge into a
+    // local mask, flood from the padded border (= "outside"), then paint every cell
+    // the flood never reached (= enclosed). Returns the number of cells filled.
+    function fillPolygon(poly, color) {
+      const idx = PALETTE.indexOf(color);
+      if (idx < 0 || !poly || poly.length < 3) return 0;
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const p of poly) { if (p[0] < minX) minX = p[0]; if (p[0] > maxX) maxX = p[0]; if (p[1] < minY) minY = p[1]; if (p[1] > maxY) maxY = p[1]; }
+      // local grid window with 1-cell padding so a flood seed always sits outside the loop
+      const gx0 = Math.max(0, Math.floor(minX / CELL) - 1), gx1 = Math.min(GRID - 1, Math.floor(maxX / CELL) + 1);
+      const gy0 = Math.max(0, Math.floor(minY / CELL) - 1), gy1 = Math.min(GRID - 1, Math.floor(maxY / CELL) + 1);
+      const w = gx1 - gx0 + 1, h = gy1 - gy0 + 1;
+      if (w < 3 || h < 3) return 0;
+      const mask = new Uint8Array(w * h); // 0=unknown 1=edge 2=outside
+      // rasterise each polygon edge into boundary cells (watertight: trail points are <1 cell apart)
+      const markCell = (cx, cy) => { if (cx >= gx0 && cx <= gx1 && cy >= gy0 && cy <= gy1) mask[(cy - gy0) * w + (cx - gx0)] = 1; };
+      for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+        let ax = poly[j][0] / CELL, ay = poly[j][1] / CELL, bx = poly[i][0] / CELL, by = poly[i][1] / CELL;
+        const steps = Math.max(1, Math.ceil(Math.hypot(bx - ax, by - ay) * 2));
+        for (let s = 0; s <= steps; s++) { const t = s / steps; markCell(Math.floor(ax + (bx - ax) * t), Math.floor(ay + (by - ay) * t)); }
+      }
+      // flood "outside" from every border cell of the window that isn't an edge
+      const stack = [];
+      const push = (lx, ly) => { const m = ly * w + lx; if (mask[m] === 0) { mask[m] = 2; stack.push(m); } };
+      for (let lx = 0; lx < w; lx++) { push(lx, 0); push(lx, h - 1); }
+      for (let ly = 0; ly < h; ly++) { push(0, ly); push(w - 1, ly); }
+      while (stack.length) {
+        const m = stack.pop(), lx = m % w, ly = (m / w) | 0;
+        if (lx > 0) push(lx - 1, ly);
+        if (lx < w - 1) push(lx + 1, ly);
+        if (ly > 0) push(lx, ly - 1);
+        if (ly < h - 1) push(lx, ly + 1);
+      }
+      // mask now: 1=edge, 2=outside, 0=enclosed interior. Paint edge+interior; the
+      // RETURN value is the enclosed-interior count only — a straight/near-straight
+      // trail encloses nothing (interior 0), so the caller can reject it cleanly.
+      let interior = 0;
+      for (let ly = 0; ly < h; ly++) for (let lx = 0; lx < w; lx++) {
+        const v = mask[ly * w + lx];
+        if (v === 2) continue;
+        if (v === 0) interior++;
+        paintCell(gx0 + lx, gy0 + ly, idx);
+      }
+      return interior;
+    }
+    // detect a closed trail → capture the enclosed region. trail is [{x,y}].
+    // Find the OLDEST point the head looped back to (= the largest candidate loop),
+    // test it ONCE, and only commit if it actually encloses area. A straight or
+    // gently-curving run loops back to nothing far enough away, or encloses ~0
+    // interior, so the trail keeps growing until a real loop is drawn.
+    function checkLoop(trail, color) {
+      const n = trail.length;
+      if (n < LOOP_MIN_PTS) return false;
+      const cur = trail[n - 1];
+      const snap2 = LOOP_SNAP * LOOP_SNAP;
+      for (let i = 0; i < n - LOOP_MIN_PTS; i++) {
+        const dx = trail[i].x - cur.x, dy = trail[i].y - cur.y;
+        if (dx * dx + dy * dy <= snap2) {
+          // largest loop found — test this one only (subsets enclose no more)
+          const poly = trail.slice(i).map((p) => [p.x, p.y]);
+          if (poly.length >= 3 && fillPolygon(poly, color) >= LOOP_MIN_CELLS) {
+            publish({ t: "loop", color, poly });
+            if (color === me.color) loopFlash(cur.x, cur.y);
+            trail.length = 0; // reset so the same loop isn't re-counted
+            return true;
+          }
+          return false; // looped back but enclosed nothing real → let the trail grow
+        }
+      }
+      return false;
+    }
+    // brief expanding ring when YOU close a capture — satisfying feedback
+    let loopFx = null;
+    function loopFlash(x, y) { loopFx = { x, y, at: Date.now() }; }
+
+    // ── Powerups ─────────────────────────────────────────────
+    let pupSeq = 0;
+    function hostSpawnPowerup() {
+      if (powerups.size >= PUP_MAX) return;
+      const id = (me.handle || "h") + ":" + (++pupSeq);
+      const kind = PUP_TYPES[Math.floor(Math.random() * PUP_TYPES.length)];
+      const x = ARENA * (0.1 + 0.8 * Math.random()), y = ARENA * (0.1 + 0.8 * Math.random());
+      powerups.set(id, { kind, x, y });
+      publish({ t: "pup", id, kind, x, y });
+    }
+    function applyPowerup(kind) {
+      const now = Date.now();
+      if (kind === "speed") self.speedUntil = now + FX_MS;
+      else if (kind === "fat") self.fatUntil = now + FX_MS;
+      else if (kind === "bomb") { stamp(self.x, self.y, me.color, BOMB_R); publish({ t: "bomb", x: Math.round(self.x), y: Math.round(self.y), color: me.color }); }
+      showPup(kind);
+    }
+    function tryCollectPowerups() {
+      for (const [pid, pu] of powerups) {
+        const dx = pu.x - self.x, dy = pu.y - self.y;
+        if (dx * dx + dy * dy <= (PUP_R + BLOB_R) * (PUP_R + BLOB_R)) {
+          powerups.delete(pid);
+          publish({ t: "pupget", id: pid });
+          applyPowerup(pu.kind);
+        }
+      }
+    }
+    const PUP_ICON = { speed: "⚡", fat: "🖌", bomb: "💥" };
+    function showPup(kind) {
+      cdNum.textContent = PUP_ICON[kind] || "✦";
+      cdNum.className = "num go";
+      void cdNum.offsetWidth; cdNum.classList.add("pop");
     }
 
     function updateTimer() {
@@ -853,6 +1014,34 @@
       ctx.lineWidth = 2;
       ctx.strokeRect(view.ox, view.oy, ARENA * s, ARENA * s);
 
+      // powerups (pulsing pickups)
+      if (phase === "playing" || phase === "countdown") {
+        const pulse = 1 + 0.12 * Math.sin(Date.now() / 220);
+        for (const [, pu] of powerups) {
+          const px = wx(pu.x), py = wy(pu.y), rr = PUP_R * s * pulse;
+          ctx.beginPath(); ctx.arc(px, py, rr, 0, Math.PI * 2);
+          ctx.fillStyle = "rgba(255,255,255,0.10)"; ctx.fill();
+          ctx.lineWidth = 2; ctx.strokeStyle = "#fbbf24"; ctx.stroke();
+          ctx.font = Math.round(rr * 1.1) + "px system-ui, sans-serif";
+          ctx.textAlign = "center"; ctx.textBaseline = "middle";
+          ctx.fillText(PUP_ICON[pu.kind] || "✦", px, py + 1);
+          ctx.textBaseline = "alphabetic";
+        }
+      }
+
+      // encircle capture flash — expanding ring where you closed a loop
+      if (loopFx) {
+        const age = (Date.now() - loopFx.at) / 520;
+        if (age >= 1) loopFx = null;
+        else {
+          ctx.beginPath();
+          ctx.arc(wx(loopFx.x), wy(loopFx.y), (24 + age * 170) * s, 0, Math.PI * 2);
+          ctx.lineWidth = 4 * (1 - age);
+          ctx.strokeStyle = "rgba(255,255,255," + (0.7 * (1 - age)).toFixed(3) + ")";
+          ctx.stroke();
+        }
+      }
+
       // blobs (remotes first, self on top)
       const players = playerList();
       players.sort((a, b) => (a.isSelf === b.isSelf ? 0 : a.isSelf ? 1 : -1));
@@ -863,15 +1052,16 @@
       const s = view.scale;
       const x = wx(p.x), y = wy(p.y), r = Math.max(6, BLOB_R * s);
 
-      // trail
+      // comet tail — only the most recent points (the rest of the trail is loop-detection history)
       if (p.trail && p.trail.length > 1) {
+        const start = Math.max(0, p.trail.length - TAIL_DRAW);
         ctx.strokeStyle = p.color;
         ctx.globalAlpha = 0.28;
         ctx.lineWidth = r * 0.9;
         ctx.lineCap = "round"; ctx.lineJoin = "round";
         ctx.beginPath();
-        ctx.moveTo(wx(p.trail[0].x), wy(p.trail[0].y));
-        for (let i = 1; i < p.trail.length; i++) ctx.lineTo(wx(p.trail[i].x), wy(p.trail[i].y));
+        ctx.moveTo(wx(p.trail[start].x), wy(p.trail[start].y));
+        for (let i = start + 1; i < p.trail.length; i++) ctx.lineTo(wx(p.trail[i].x), wy(p.trail[i].y));
         ctx.stroke();
         ctx.globalAlpha = 1;
       }
@@ -939,6 +1129,7 @@
             x: prev.x ?? x, y: prev.y ?? y,     // current (interpolated) pos
             tx: x, ty: y,                       // target pos
             trail: prev.trail || [],
+            br: typeof p.br === "number" ? p.br : (prev.br || PAINT_R),
             at: Date.now(),
           });
           break;
@@ -947,8 +1138,30 @@
           if (phase === "playing" || phase === "countdown") {
             const seq = typeof p.seq === "number" ? p.seq : roundSeq;
             if (seq < roundSeq) return;
-            enterResults(Array.isArray(p.scores) && p.scores.length ? p.scores : computeScores());
+            endRound();
           }
+          break;
+        }
+        case "score": {
+          if (typeof p.handle !== "string" || typeof p.cells !== "number") return;
+          roundScores.set(p.handle, { name: p.name || p.handle, color: p.color || colorFor(p.handle), cells: p.cells });
+          if (phase === "results") renderResults();
+          break;
+        }
+        case "pup": {
+          if (typeof p.id === "string" && PUP_TYPES.includes(p.kind)) powerups.set(p.id, { kind: p.kind, x: p.x, y: p.y });
+          break;
+        }
+        case "pupget": {
+          powerups.delete(p.id);
+          break;
+        }
+        case "bomb": {
+          if (typeof p.x === "number" && PALETTE.includes(p.color)) stamp(p.x, p.y, p.color, BOMB_R);
+          break;
+        }
+        case "loop": {
+          if (Array.isArray(p.poly) && PALETTE.includes(p.color)) fillPolygon(p.poly, p.color);
           break;
         }
       }
