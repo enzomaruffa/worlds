@@ -218,6 +218,7 @@ export function focusCamera(x, z, dist = 46) {
   controls.target.set(x, 0, z);
   camera.position.set(x, dist * 0.74, z + dist * 0.86);
 }
+export function setControlsEnabled(b) { if (controls) controls.enabled = b; }
 export function tickControls() { if (controls) controls.update(); }
 export function render() { if (renderer) renderer.render(scene, camera); }
 export const getRenderer = () => renderer;

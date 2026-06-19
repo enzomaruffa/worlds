@@ -3,6 +3,8 @@ import * as W from "./world.js";
 import * as Grass from "./grass.js";
 import * as Sky from "./sky.js";
 import * as Sim from "./sim.js";
+import * as El from "./elements.js";
+import * as Life from "./life.js";
 
 // ───────────────────────────────────────────────────────────────────────────
 // SWARD — a multiplayer 3D incremental grass-plot game on Worlds.
@@ -18,7 +20,7 @@ const dom = {
   canvas: $("scene"),
   ownerName: $("ownerName"), ownerDot: $("ownerDot"),
   dewN: $("dewN"), sporeN: $("sporeN"), ecoN: $("ecoN"), ecoBar: $("ecoBar").firstElementChild,
-  hint: $("hint"), msgTxt: $("msgTxt"), paletteRow: $("paletteRow"),
+  hint: $("hint"), msgTxt: $("msgTxt"), paletteRow: $("paletteRow"), inspect: $("inspect"),
   seasonN: $("seasonN"), todN: $("todN"), yearN: $("yearN"), sunIcon: $("sunIcon"),
   muteBtn: $("muteBtn"), questBtn: $("questBtn"), marketBtn: $("marketBtn"),
   loader: $("loader"), loaderWho: $("loaderWho"), loaderErr: $("loaderErr"),
@@ -69,15 +71,17 @@ function updateClockHud() {
 // ── palette (tools now; features added in C5) ────────────────────────────────
 function buildPalette() {
   dom.paletteRow.innerHTML = "";
-  for (const t of TOOLS) {
+  const add = (key, ic, nm, cost) => {
     const el = document.createElement("div");
-    el.className = "tool" + (G.tool === t.key ? " sel" : "");
-    el.dataset.tool = t.key;
-    el.innerHTML = `<span class="ic">${t.ic}</span><span class="nm">${t.nm}</span>` +
-      (t.cost ? `<span class="cost">${t.cost} 💧</span>` : `<span class="cost">free</span>`);
-    el.addEventListener("click", () => selectTool(t.key));
+    el.className = "tool" + (G.tool === key ? " sel" : "");
+    el.dataset.tool = key; el.dataset.cost = cost;
+    el.innerHTML = `<span class="ic">${ic}</span><span class="nm">${nm}</span><span class="cost">${cost ? cost + " 💧" : "free"}</span>`;
+    el.addEventListener("click", () => selectTool(key));
     dom.paletteRow.appendChild(el);
-  }
+  };
+  for (const t of TOOLS) add(t.key, t.ic, t.nm, t.cost);
+  const div = document.createElement("div"); div.style = "width:1px;background:var(--border-soft);margin:.1rem .15rem;flex:none"; dom.paletteRow.appendChild(div);
+  for (const k of El.FEATURE_KEYS) { const f = El.FEATURES[k]; add("feat:" + k, f.icon, f.name, f.cost); }
   refreshPaletteAfford();
 }
 function selectTool(key) {
@@ -85,12 +89,14 @@ function selectTool(key) {
   for (const el of dom.paletteRow.children) el.classList.toggle("sel", el.dataset.tool === key);
   const t = TOOLS.find((x) => x.key === key);
   if (t) dom.hint.textContent = t.hint;
+  else if (key.startsWith("feat:")) { const f = El.FEATURES[key.slice(5)]; dom.hint.textContent = `click to place a ${f.name.toLowerCase()} · grab & drag to reposition · tap it to inspect`; }
 }
+function toolCost(key) { if (key && key.startsWith("feat:")) return El.FEATURES[key.slice(5)].cost; const t = TOOLS.find((x) => x.key === key); return t ? t.cost : 0; }
 function refreshPaletteAfford() {
   for (const el of dom.paletteRow.children) {
-    const t = TOOLS.find((x) => x.key === el.dataset.tool);
-    const c = el.querySelector(".cost");
-    if (t && t.cost) c.classList.toggle("cant", G.dew < t.cost);
+    const c = el.querySelector(".cost"); if (!c) continue;
+    const cost = +el.dataset.cost || 0;
+    if (cost) c.classList.toggle("cant", G.dew < cost);
   }
 }
 
@@ -128,12 +134,28 @@ function renderShop() {
   }
 }
 
-// ── input: tap = act, drag = orbit ───────────────────────────────────────────
-let pointer = { x: 0, y: 0, on: false }, down = null;
-dom.canvas.addEventListener("pointermove", (e) => { pointer.x = e.clientX; pointer.y = e.clientY; pointer.on = true; });
+// ── input: grab features to move, tap to act/inspect, drag empty to orbit ─────
+let pointer = { x: 0, y: 0, on: false }, down = null, grab = null;
+dom.canvas.addEventListener("pointermove", (e) => {
+  pointer.x = e.clientX; pointer.y = e.clientY; pointer.on = true;
+  if (grab) {
+    const g = W.pickGround(e.clientX, e.clientY);
+    if (g && W.insidePlot(g.x, g.z)) { Sim.moveFeature(grab.id, g.x, g.z); grab.moved = grab.moved || Math.hypot(e.clientX - grab.sx, e.clientY - grab.sy) > 6; }
+  }
+});
 dom.canvas.addEventListener("pointerleave", () => { pointer.on = false; });
-dom.canvas.addEventListener("pointerdown", (e) => { down = { x: e.clientX, y: e.clientY, t: performance.now() }; });
+dom.canvas.addEventListener("pointerdown", (e) => {
+  down = { x: e.clientX, y: e.clientY, t: performance.now() };
+  if (G.visiting) return;
+  const hit = W.pickObjects(e.clientX, e.clientY, Sim.featureRoots);
+  if (hit && hit.kind === "feature") { grab = { id: hit.pickId, sx: e.clientX, sy: e.clientY, moved: false }; W.setControlsEnabled(false); }
+});
 dom.canvas.addEventListener("pointerup", (e) => {
+  if (grab) {
+    W.setControlsEnabled(true);
+    if (!grab.moved) showInspect(grab.id); else { saveSoon(); hideInspect(); }
+    grab = null; down = null; return;
+  }
   if (!down) return;
   const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y), held = performance.now() - down.t;
   down = null;
@@ -146,18 +168,53 @@ function applyAt(cx, cy) {
   if (tool === "rake") {
     const hit = W.pickObjects(cx, cy, Sim.roots);
     if (hit && hit.kind === "debris") { const r = Sim.clearDebris(hit.pickId); if (r) { flash("+" + r + " 💧"); updateWallet(); } }
+    else hideInspect();
     return;
   }
   const g = W.pickGround(cx, cy);
-  if (!g || !W.insidePlot(g.x, g.z)) return;
+  if (!g || !W.insidePlot(g.x, g.z)) { hideInspect(); return; }
   if (tool === "seed") {
     if (G.dew < SEED_COST) return toast("need " + SEED_COST + " 💧");
     if (Sim.seedPatch(g.x, g.z, 2.2, 0.34)) { G.dew -= SEED_COST; Grass.rebuild(); updateWallet(); }
   } else if (tool === "water") {
     if (G.dew < WATER_COST) return toast("need " + WATER_COST + " 💧");
     Sim.waterPatch(g.x, g.z, 2.4); G.dew -= WATER_COST; updateWallet();
+  } else if (tool.startsWith("feat:")) {
+    const kind = tool.slice(5), cost = El.FEATURES[kind].cost;
+    if (G.dew < cost) return toast("need " + cost + " 💧");
+    const f = Sim.placeFeature(kind, g.x, g.z);
+    if (f) { Life.sync(); updateWallet(); flash(El.FEATURES[kind].icon); showInspect(f.id); }
   }
 }
+
+// ── inspect panel: stage + what it needs to evolve ───────────────────────────
+function gateHint(kind, stage, x, z, season) {
+  const f = El.FEATURES[kind]; const st = f.stages[stage];
+  if (!st || stage >= f.stages.length - 1) return "fully grown 🎉";
+  const g = st.gate, fx = Sim.fieldsAt(x, z), needs = [];
+  if (g) {
+    if (g.shade) needs.push(fx.shade >= 0.25 ? "✓ in shade" : "✗ needs tree shade");
+    if (g.moist) needs.push(fx.moist >= 0.25 ? "✓ moist" : "✗ needs water nearby");
+    if (g.pollen) needs.push(fx.pollen >= 0.25 ? "✓ pollinated" : "✗ needs a hive in range");
+    if (g.nectar) needs.push(fx.nectar >= 0.25 ? "✓ flowers in range" : "✗ needs blooming flowers nearby");
+    if (g.season) needs.push(g.season.includes(season) ? "✓ in season" : "✗ waits for " + g.season.map((i) => ["spring", "summer", "autumn", "winter"][i]).join("/"));
+    if (g.notSeason) needs.push(g.notSeason.includes(season) ? "✗ dormant this season" : "✓ growing");
+  }
+  return "growing… " + (needs.length ? needs.join(" · ") : "just needs time");
+}
+function showInspect(id) {
+  const f = Sim.featureById(id); if (!f) return hideInspect();
+  const def = El.FEATURES[f.kind];
+  dom.inspect.innerHTML =
+    `<h4>${def.icon} ${def.name} <span class="stage">${El.stageName(f.kind, f.stage)}</span></h4>` +
+    `<div class="desc">stage ${f.stage + 1}/${def.stages.length} · ${esc(gateHint(f.kind, f.stage, f.x, f.z, Sky.seasonIndex()))}</div>` +
+    `<div class="acts"><button id="insClose">close</button><button id="insRemove" class="danger">remove (+${Math.round(def.cost * 0.4)} 💧)</button></div>`;
+  dom.inspect.classList.add("show");
+  dom.inspect.dataset.id = id;
+  $("insClose").addEventListener("click", hideInspect);
+  $("insRemove").addEventListener("click", () => { Sim.removeFeature(id); Life.sync(); updateWallet(); hideInspect(); });
+}
+function hideInspect() { dom.inspect.classList.remove("show"); dom.inspect.dataset.id = ""; }
 
 // ── persistence (C6 swaps localStorage for worlds.db) ────────────────────────
 const saveKey = () => "sward:" + G.me.handle;
@@ -191,18 +248,27 @@ function frame(now) {
   }
   if (dirtyGrass) { Grass.rebuild(); dirtyGrass = false; }
   Grass.update(dt);
+  Life.update(dt, now / 1000);
 
   hudT += dt;
   if (hudT > 0.25) {
     hudT = 0;
     updateClockHud(); updateWallet(); refreshPaletteAfford();
     if (shopEl && shopEl.style.display !== "none") renderShop();
+    if (dom.inspect.dataset.id) showInspect(dom.inspect.dataset.id);
+    // re-sync critters only when the ecosystem composition actually changes
+    const sig = Sim.S.features.map((f) => f.kind + f.stage).sort().join(",") + "|" + Sky.seasonIndex();
+    if (sig !== lifeSig) { lifeSig = sig; Life.sync(); }
+    // climax celebration (once per achievement)
+    if (Sim.S.climax && !climaxShown) { climaxShown = true; flash("Climax ecosystem! ✨"); toast("Every feature at its peak — Spore bonus banked on rewild 🍄", 4500); }
+    if (!Sim.S.climax) climaxShown = false;
     saveSoon();
   }
 
   W.tickControls();
   W.render();
 }
+let lifeSig = "", climaxShown = false;
 
 // ── boot ──────────────────────────────────────────────────────────────────────
 async function boot() {
@@ -222,7 +288,7 @@ async function boot() {
   const stage = (s) => { dom.loaderWho.textContent = s; };
   stage("shaping the land…"); W.initWorld(dom.canvas, G.plotSeed);
   W.focusCamera(0, 0, 50);
-  stage("unpacking props…"); await W.loadModels(["rocks", "rocks_smallA", "rocks_smallB", "stump_round", "log", "grass"]);
+  stage("unpacking props…"); await W.loadModels(["rocks", "rocks_smallA", "rocks_smallB", "stump_round", "log", "grass", ...El.MODEL_NAMES]);
 
   stage("sprouting grass…"); Grass.buildGrass();
   const saved = loadSaved();
@@ -246,7 +312,7 @@ async function boot() {
 
   G.booted = true;
   dom.loader.classList.add("hide");
-  window.SWARD = { G, Sim, Sky, Grass, W };   // debug/inspection handle
+  window.SWARD = { G, Sim, Sky, Grass, W, El, Life };   // debug/inspection handle
   requestAnimationFrame(frame);
 }
 
