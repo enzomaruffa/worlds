@@ -4,7 +4,7 @@ import { WorldsError, asWorldsError, json, jsonError } from "./errors";
 import { identityFrom, requireCsrf } from "./identity";
 import { store } from "./blobstore";
 import { initDb, sql, requireDb } from "./db";
-import { handleDeploy } from "./deploy";
+import { handleDeploy, handleDeployFolder } from "./deploy";
 import { serveSite, siteNotFound } from "./staticsite";
 import { getSiteOr404, listSites, publicSite, siteUrl, bumpVisit, getSite } from "./sites";
 import * as dbapi from "./dbapi";
@@ -116,6 +116,7 @@ async function api(req: Request, url: URL, site: string): Promise<Response> {
     return json({ name: site, url: siteUrl(site), status: s?.status ?? "live" });
   }
   if (p[0] === "deploy" && method === "POST") return handleDeploy(req);
+  if (p[0] === "deploy-folder" && method === "POST") return handleDeployFolder(req);
 
   if (p[0] === "sites") {
     requireDb();

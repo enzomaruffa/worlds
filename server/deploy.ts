@@ -167,3 +167,48 @@ export async function deployFileMap(site: string, files: Record<string, string>,
     await rm(staged, { recursive: true, force: true }).catch(() => {});
   }
 }
+
+// Browser drag-and-drop path: multipart/form-data where each file field's NAME is
+// its relative path and its value is the (binary-safe) file Blob — so the web
+// deploy page can ship games with GLB/PNG assets, no CLI or tarball needed.
+export async function handleDeployFolder(req: Request): Promise<Response> {
+  requireCsrf(req);
+  const who = identityFrom(req);
+  const form = await req.formData().catch(() => {
+    throw new WorldsError("invalid_request", "expected multipart form data");
+  });
+  const site = String(form.get("site") ?? "");
+  validateSiteName(site);
+  await requireOwner(site, who);
+  allowDeploy(site);
+
+  const staged = store.stagingDir();
+  await mkdir(staged, { recursive: true });
+  try {
+    let count = 0, total = 0;
+    for (const [path, raw] of form.entries()) {
+      if (path === "site") continue;
+      const blob = raw as unknown as Blob;
+      if (!blob || typeof blob.arrayBuffer !== "function") continue; // text field → skip; the rest are file Blobs
+      if (path.startsWith("/") || path.split("/").includes("..")) throw new WorldsError("invalid_request", `unsafe path: ${path}`);
+      const dest = join(staged, path);
+      if (!dest.startsWith(staged)) throw new WorldsError("invalid_request", `unsafe path: ${path}`);
+      if (++count > LIMITS.deployFiles) throw new WorldsError("payload_too_large", `more than ${LIMITS.deployFiles} files`);
+      total += blob.size;
+      if (total > LIMITS.deployBytes) throw new WorldsError("payload_too_large", `bundle exceeds ${LIMITS.deployBytes / 1024 / 1024}MB`);
+      await mkdir(dirname(dest), { recursive: true });
+      await Bun.write(dest, blob); // binary-safe write
+    }
+    if (!count) throw new WorldsError("invalid_request", "no files to deploy");
+    // tolerate a single wrapping directory (a folder upload carries its own name)
+    let root = staged;
+    const top = await readdir(staged);
+    if (top.length === 1) {
+      const only = join(staged, top[0]!);
+      if ((await stat(only)).isDirectory()) root = only;
+    }
+    return json(await finalizeDeploy(site, root, who));
+  } finally {
+    await rm(staged, { recursive: true, force: true }).catch(() => {});
+  }
+}
