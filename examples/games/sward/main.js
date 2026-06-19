@@ -168,7 +168,14 @@ dom.canvas.addEventListener("pointerup", (e) => {
 function applyAt(cx, cy) {
   if (G.visiting) {
     const g = W.pickGround(cx, cy);
-    if (g) { Net.water(G.visiting, G.me.name); G.dew += 2; flash("💦"); toast(`you watered ${esc(dom.visitName.textContent)}'s plot  +2 💧`); updateWallet(); }
+    if (g) { Net.water(G.visiting, G.me.name); G.dew += 2; G.stats.neighborsWatered = (G.stats.neighborsWatered || 0) + 1; flash("💦"); toast(`you watered ${esc(dom.visitName.textContent)}'s plot  +2 💧`); updateWallet(); }
+    return;
+  }
+  // catch a drifting critter ("a bug flies by")
+  const cc = W.pickObjects(cx, cy, Life.catchRoots);
+  if (cc && cc.kind === "catch") {
+    const r = Life.tryCatch(cc.pickId);
+    if (r) { G.dew += r.dew; if (r.specimen) { G.goods.specimens = (G.goods.specimens || 0) + 1; G.stats.specimensCaught = (G.stats.specimensCaught || 0) + 1; Social.discover("s:" + r.type); } flash(r.icon); toast(`caught a ${r.name}! +${r.dew} 💧 +1 🦋`); updateWallet(); }
     return;
   }
   const tool = G.tool || "rake";
@@ -228,6 +235,7 @@ function saveSoon() { Net.save(Sim.serialize()); }
 function saveNow() { Net.saveImmediate(Sim.serialize()); }
 
 function renderNeighbors(list) {
+  Social.setTown(list);
   const el = dom.neighbors;
   if (!list || !list.length) { el.innerHTML = '<div class="empty">just you, for now 🌱</div>'; return; }
   el.innerHTML = "";
@@ -249,6 +257,18 @@ function visit(handle, name) {
 function goHome() { G.visiting = null; W.focusCamera(0, 0, 50); dom.visitBar.classList.remove("show"); dom.hint.textContent = "drag to orbit · tap a tool, then the plot"; }
 function onWatered(p) { Sim.waterPatch(0, 0, W.HALF + 4); G.dew += 5; toast(`${esc(p.fromName || "a neighbor")} watered your plot 💦  +5`); updateWallet(); }
 
+function discoverHook() {
+  for (const f of Sim.S.features) Social.discover("f:" + f.kind);
+  for (const t of Life.activeTypes()) Social.discover("c:" + t);
+  const ev = Life.currentEvent(); if (ev) Social.discover("e:" + ev.key);
+}
+let curEvent = null;
+function eventBannerTick() {
+  const ev = Life.currentEvent(), b = $("eventBanner"), t = $("eventText");
+  if (ev && curEvent !== ev.key) { curEvent = ev.key; t.textContent = `${ev.icon} ${ev.name}`; b.classList.add("show"); }
+  else if (!ev && curEvent) { curEvent = null; b.classList.remove("show"); }
+}
+
 // ── main loop ────────────────────────────────────────────────────────────────
 let last = performance.now(), hudT = 0, simAccum = 0, dirtyGrass = false;
 function frame(now) {
@@ -268,8 +288,9 @@ function frame(now) {
 
   // fixed-step sim @5Hz (offline catch-up handles long gaps)
   simAccum += dt;
+  const raining = Life.isRaining();
   while (simAccum >= 0.2) {
-    Sim.step(0.2, { season: Sky.seasonIndex(), sunlight: Sky.daylight(), rain: false });
+    Sim.step(0.2, { season: Sky.seasonIndex(), sunlight: Sky.daylight(), rain: raining });
     simAccum -= 0.2; dirtyGrass = true;
   }
   if (dirtyGrass) { Grass.rebuild(); dirtyGrass = false; }
@@ -292,6 +313,11 @@ function frame(now) {
     // climax celebration (once per achievement)
     if (Sim.S.climax && !climaxShown) { climaxShown = true; flash("Climax ecosystem! ✨"); toast("Every feature at its peak — Spore bonus banked on rewild 🍄", 4500); }
     if (!Sim.S.climax) climaxShown = false;
+    // quests, almanac discovery, live-event banner
+    Social.checkQuests({ Sim, G });
+    discoverHook();
+    eventBannerTick();
+    if (Social.questsPanelOpen()) Social.renderQuests();
   }
 
   W.tickControls();
@@ -345,7 +371,7 @@ async function boot() {
   });
   dom.visitBar.insertBefore(giftBtn, dom.visitBack);
   dom.muteBtn.addEventListener("click", () => toast("audio arrives soon 🔇"));
-  dom.questBtn.addEventListener("click", () => toast("quests & almanac — coming soon 📖"));
+  dom.questBtn.addEventListener("click", () => Social.toggleQuests());
   dom.marketBtn.addEventListener("click", () => Social.toggle());
   document.addEventListener("visibilitychange", () => { if (document.hidden) saveNow(); });
   window.addEventListener("beforeunload", saveNow);

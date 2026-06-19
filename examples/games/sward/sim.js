@@ -108,6 +108,7 @@ export function clearDebris(pickId) {
   unblockAround(d.x, d.z, 1.8);
   S.debris.splice(i, 1);
   G.dew += d.reward;
+  if (G.stats) G.stats.debrisCleared = (G.stats.debrisCleared || 0) + 1;
   // tilled soil sprouts a little starter grass right away
   seedPatch(d.x, d.z, 1.4, 0.18);
   return d.reward;
@@ -343,6 +344,7 @@ export function serialize() {
   return {
     dew: Math.round(G.dew), spores: G.spores | 0, ecoLevel: G.ecoLevel | 0, ecoPeak: G.ecoPeak | 0,
     goods: Object.fromEntries(Object.entries(G.goods || {}).map(([k, v]) => [k, Math.round((v || 0) * 10) / 10])),
+    almanac: [...(G.almanac || [])], questsDone: [...(G.questsDone || [])], stats: G.stats || {},
     upgrades: { ...S.upgrades },
     debris: S.debris.map((d) => ({ x: +d.x.toFixed(2), z: +d.z.toFixed(2), kind: d.kind, id: d.id, reward: d.reward })),
     features: S.features.map((f) => ({ kind: f.kind, x: +f.x.toFixed(2), z: +f.z.toFixed(2), stage: f.stage, stageT: +(f.stageT || 0).toFixed(3) })),
@@ -367,6 +369,9 @@ export function init(g, saved) {
   Grass.coverage.fill(0); Grass.health.fill(1);
   G.ecoPeak = 0; fieldsDirty = true;
   G.goods = saved && saved.goods ? { ...emptyGoods(), ...saved.goods } : emptyGoods();
+  G.almanac = new Set((saved && saved.almanac) || []);
+  G.questsDone = new Set((saved && saved.questsDone) || []);
+  G.stats = (saved && saved.stats) || { debrisCleared: 0, specimensCaught: 0, neighborsWatered: 0 };
 
   if (saved && saved.debris) {
     G.dew = saved.dew || 0; G.spores = saved.spores || 0; G.ecoLevel = saved.ecoLevel || 0; G.ecoPeak = saved.ecoPeak || 0;

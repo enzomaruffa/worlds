@@ -129,6 +129,88 @@ async function render() {
   for (const b of panel.querySelectorAll("button[data-cancel]")) b.addEventListener("click", () => cancel(b.dataset.cancel));
 }
 
+// ── quests + almanac + town goal ──────────────────────────────────────────────
+export const QUESTS = [
+  { id: "place1", name: "Break ground", desc: "Place your first feature", reward: { dew: 40 }, check: (c) => c.Sim.S.features.length >= 1 },
+  { id: "clear5", name: "Tidy plot", desc: "Clear 5 bits of debris", reward: { dew: 60 }, check: (c) => (c.G.stats.debrisCleared || 0) >= 5 },
+  { id: "green40", name: "Green thumb", desc: "Cover 40% of the plot in grass", reward: { dew: 120 }, check: (c) => c.Sim.greenPct() >= 0.4 },
+  { id: "oak", name: "Old oak", desc: "Raise a tree to Ancient", reward: { dew: 220 }, check: (c) => c.Sim.S.features.some((f) => f.kind === "tree" && f.stage >= 4) },
+  { id: "meadow", name: "Pollinator", desc: "Grow a spreading flower meadow (needs a hive)", reward: { dew: 180 }, check: (c) => c.Sim.S.features.some((f) => f.kind === "flowers" && f.stage >= 3) },
+  { id: "frogs", name: "Wetland", desc: "Bring frogs to a pond", reward: { dew: 180 }, check: (c) => c.Sim.S.features.some((f) => f.kind === "pond" && f.stage >= 3) },
+  { id: "eco8", name: "Biodiverse", desc: "Reach ecosystem level 8", reward: { spores: 1, dew: 100 }, check: (c) => c.G.ecoLevel >= 8 },
+  { id: "catch5", name: "Collector", desc: "Catch 5 drifting critters", reward: { dew: 160 }, check: (c) => (c.G.stats.specimensCaught || 0) >= 5 },
+  { id: "neigh", name: "Good neighbour", desc: "Water 3 neighbours' plots", reward: { dew: 100 }, check: (c) => (c.G.stats.neighborsWatered || 0) >= 3 },
+  { id: "climax", name: "Climax ecosystem", desc: "Bring every feature to its peak", reward: { spores: 2, dew: 300 }, check: (c) => c.Sim.S.climax },
+];
+const ALM = {
+  Features: [["f:tree", "🌳"], ["f:pond", "💧"], ["f:flowers", "🌸"], ["f:hive", "🐝"], ["f:clover", "🍀"], ["f:shrub", "🫐"], ["f:mushrooms", "🍄"]],
+  Critters: [["c:bee", "🐝"], ["c:frog", "🐸"], ["c:butterfly", "🦋"], ["c:rabbit", "🐰"]],
+  Specimens: [["s:monarch", "🦋"], ["s:firefly", "✨"], ["s:ladybug", "🐞"], ["s:dragonfly", "🪰"]],
+  Events: [["e:shower", "🌧️"], ["e:migration", "🦋"], ["e:fireflies", "✨"], ["e:windstorm", "🍂"], ["e:frost", "❄️"], ["e:festival", "🎏"]],
+};
+
+export function discover(key) {
+  if (!G.almanac) G.almanac = new Set();
+  if (G.almanac.has(key)) return false;
+  G.almanac.add(key); toast("📖 Almanac: new discovery!", 2200); return true;
+}
+export function checkQuests(ctx) {
+  if (!G.questsDone) G.questsDone = new Set();
+  for (const q of QUESTS) {
+    if (G.questsDone.has(q.id)) continue;
+    let ok = false; try { ok = q.check(ctx); } catch {}
+    if (ok) {
+      G.questsDone.add(q.id);
+      if (q.reward.dew) G.dew += q.reward.dew;
+      if (q.reward.spores) G.spores = (G.spores || 0) + q.reward.spores;
+      toast(`✅ ${q.name} — +${q.reward.dew || 0} 💧${q.reward.spores ? " +" + q.reward.spores + " 🍄" : ""}`, 4000);
+    }
+  }
+}
+
+let townList = [];
+export function setTown(list) { townList = list || []; }
+
+let qpanel = null;
+function buildQuestPanel() {
+  qpanel = document.createElement("div");
+  qpanel.className = "panel"; qpanel.id = "quests";
+  qpanel.style = "position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:9;width:min(94vw,30rem);max-height:82vh;overflow:auto;padding:1rem 1.1rem;display:none";
+  document.getElementById("app").appendChild(qpanel);
+}
+export function toggleQuests() { if (!qpanel) buildQuestPanel(); qpanel.style.display = qpanel.style.display === "none" ? "block" : "none"; if (qpanel.style.display === "block") renderQuests(); }
+export function renderQuests() {
+  if (!qpanel || qpanel.style.display === "none") return;
+  const done = G.questsDone || new Set();
+  let html = `<h3 style="margin:0 0 .5rem;font-size:.95rem">📖 Quests & Almanac</h3>`;
+  // town goal
+  const townEco = townList.reduce((a, n) => a + (n.eco || 0), 0) + (G.ecoLevel || 0);
+  const GOAL = 40;
+  html += `<div style="background:rgba(108,194,74,.1);border:1px solid var(--border-soft);border-radius:.6rem;padding:.5rem .6rem;margin-bottom:.7rem;font-size:.8rem">
+    🏡 <b>Neighbourhood goal</b> — combined eco ${Math.min(townEco, GOAL)}/${GOAL}
+    <div style="height:.35rem;border-radius:999px;background:rgba(255,255,255,.08);margin-top:.3rem;overflow:hidden"><i style="display:block;height:100%;width:${Math.min(100, townEco / GOAL * 100)}%;background:linear-gradient(90deg,var(--leaf),var(--leaf-bright))"></i></div></div>`;
+  // quests
+  html += `<div style="font-size:.72rem;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:.3rem">quests</div>`;
+  for (const q of QUESTS) {
+    const d = done.has(q.id);
+    html += `<div style="display:flex;gap:.5rem;align-items:center;font-size:.82rem;padding:.22rem 0;opacity:${d ? 0.55 : 1}">
+      <span>${d ? "✅" : "▢"}</span><div style="flex:1"><b>${q.name}</b> <span style="color:var(--muted)">— ${q.desc}</span></div>
+      <span style="color:var(--leaf-bright);font-size:.74rem">${q.reward.dew ? q.reward.dew + "💧" : ""}${q.reward.spores ? " " + q.reward.spores + "🍄" : ""}</span></div>`;
+  }
+  // almanac
+  const alm = G.almanac || new Set();
+  html += `<div style="font-size:.72rem;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin:.7rem 0 .3rem">almanac</div>`;
+  for (const [sec, items] of Object.entries(ALM)) {
+    html += `<div style="font-size:.78rem;margin:.25rem 0"><span style="color:var(--muted)">${sec}</span> `;
+    html += items.map(([k, ic]) => `<span title="${k}" style="font-size:1.2rem;opacity:${alm.has(k) ? 1 : 0.22};filter:${alm.has(k) ? "none" : "grayscale(1)"}">${ic}</span>`).join(" ");
+    html += `</div>`;
+  }
+  html += `<div style="text-align:right;margin-top:.7rem"><button id="qClose">close</button></div>`;
+  qpanel.innerHTML = html;
+  const cl = qpanel.querySelector("#qClose"); if (cl) cl.addEventListener("click", toggleQuests);
+}
+export const questsPanelOpen = () => qpanel && qpanel.style.display === "block";
+
 // goods production rates per second by feature kind + min stage (sim.js reads this)
 export const PRODUCERS = [
   { kind: "hive", stage: 3, good: "honey", rate: 0.05 },
