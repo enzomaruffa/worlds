@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Kart Loop Track Editor</title>
+  <style>
+    html, body { height: 100%; margin: 0; background: radial-gradient(ellipse at center, #14141f, #0a0a12); color: #e8e8f0; font-family: ui-sans-serif, system-ui, sans-serif; display: grid; place-items: center; text-align: center; }
+    .card { padding: 2rem; }
+    .t { font-size: 1.5rem; font-weight: 700; }
+    .t b { color: #fbbf24; }
+    p { color: #a1a1b5; }
+    a { color: #fbbf24; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="t">🏁 <b>Kart Loop</b> Track Editor</div>
+    <p>opening the editor…</p>
+    <p><a id="go" href="#">tap here if it doesn't open automatically</a></p>
+  </div>
+  <script>
+    // This tools-world just opens the editor, which lives in the racing game site
+    // (so its "publish" writes land in the same worlds.db collection the game reads).
+    var host = location.host.replace(/^racing-editor\./, "racing.");
+    var url = location.protocol + "//" + host + "/editor.html";
+    document.getElementById("go").href = url;
+    location.replace(url);
+  </script>
+</body>
+</html>
