@@ -7,6 +7,7 @@ import * as El from "./elements.js";
 import * as Life from "./life.js";
 import * as Net from "./net.js";
 import * as Social from "./social.js";
+import * as Audio from "./audio.js";
 
 // ───────────────────────────────────────────────────────────────────────────
 // SWARD — a multiplayer 3D incremental grass-plot game on Worlds.
@@ -151,7 +152,7 @@ function renderShop() {
   if (rb) rb.addEventListener("click", () => {
     if (!rewildArm) { rewildArm = true; renderShop(); setTimeout(() => { rewildArm = false; }, 4000); return; }
     rewildArm = false;
-    const g = Sim.rewild(); Grass.rebuild(); Life.sync();
+    const g = Sim.rewild(); Grass.rebuild(); Life.sync(); Audio.sfx.rewild();
     flash("rewilded 🍄 +" + g); toast(`Your plot returned to seed — banked ${g} 🍄 spores. A fresh plot begins 🌱`, 4500);
     updateWallet(); renderShop(); saveNow();
   });
@@ -169,6 +170,7 @@ dom.canvas.addEventListener("pointermove", (e) => {
 });
 dom.canvas.addEventListener("pointerleave", () => { pointer.on = false; });
 dom.canvas.addEventListener("pointerdown", (e) => {
+  Audio.resume();
   down = { x: e.clientX, y: e.clientY, t: performance.now() };
   if (G.visiting) return;
   const hit = W.pickObjects(e.clientX, e.clientY, Sim.featureRoots);
@@ -196,13 +198,13 @@ function applyAt(cx, cy) {
   const cc = W.pickObjects(cx, cy, Life.catchRoots);
   if (cc && cc.kind === "catch") {
     const r = Life.tryCatch(cc.pickId);
-    if (r) { G.dew += r.dew; if (r.specimen) { G.goods.specimens = (G.goods.specimens || 0) + 1; G.stats.specimensCaught = (G.stats.specimensCaught || 0) + 1; Social.discover("s:" + r.type); } flash(r.icon); toast(`caught a ${r.name}! +${r.dew} 💧 +1 🦋`); updateWallet(); }
+    if (r) { G.dew += r.dew; if (r.specimen) { G.goods.specimens = (G.goods.specimens || 0) + 1; G.stats.specimensCaught = (G.stats.specimensCaught || 0) + 1; Social.discover("s:" + r.type); } flash(r.icon); Audio.sfx.catch(); toast(`caught a ${r.name}! +${r.dew} 💧 +1 🦋`); updateWallet(); }
     return;
   }
   const tool = G.tool || "rake";
   if (tool === "rake") {
     const hit = W.pickObjects(cx, cy, Sim.roots);
-    if (hit && hit.kind === "debris") { const r = Sim.clearDebris(hit.pickId); if (r) { flash("+" + r + " 💧"); updateWallet(); } }
+    if (hit && hit.kind === "debris") { const r = Sim.clearDebris(hit.pickId); if (r) { flash("+" + r + " 💧"); Audio.sfx.clean(); updateWallet(); } }
     else hideInspect();
     return;
   }
@@ -210,15 +212,15 @@ function applyAt(cx, cy) {
   if (!g || !W.insidePlot(g.x, g.z)) { hideInspect(); return; }
   if (tool === "seed") {
     if (G.dew < SEED_COST) return toast("need " + SEED_COST + " 💧");
-    if (Sim.seedPatch(g.x, g.z, 2.2, 0.34)) { G.dew -= SEED_COST; Grass.rebuild(); updateWallet(); }
+    if (Sim.seedPatch(g.x, g.z, 2.2, 0.34)) { G.dew -= SEED_COST; Grass.rebuild(); Audio.sfx.seed(); updateWallet(); }
   } else if (tool === "water") {
     if (G.dew < WATER_COST) return toast("need " + WATER_COST + " 💧");
-    Sim.waterPatch(g.x, g.z, 2.4); G.dew -= WATER_COST; updateWallet();
+    Sim.waterPatch(g.x, g.z, 2.4); G.dew -= WATER_COST; Audio.sfx.water(); updateWallet();
   } else if (tool.startsWith("feat:")) {
     const kind = tool.slice(5), cost = El.FEATURES[kind].cost;
     if (G.dew < cost) return toast("need " + cost + " 💧");
     const f = Sim.placeFeature(kind, g.x, g.z);
-    if (f) { Life.sync(); updateWallet(); flash(El.FEATURES[kind].icon); showInspect(f.id); }
+    if (f) { Life.sync(); updateWallet(); flash(El.FEATURES[kind].icon); Audio.sfx.place(); showInspect(f.id); }
   }
 }
 
@@ -255,16 +257,22 @@ function hideInspect() { dom.inspect.classList.remove("show"); dom.inspect.datas
 function saveSoon() { Net.save(Sim.serialize()); }
 function saveNow() { Net.saveImmediate(Sim.serialize()); }
 
-function renderNeighbors(list) {
-  Social.setTown(list);
+let neighborList = [];
+function renderNeighbors(list) { Social.setTown(list); neighborList = list || []; renderBoard(); }
+function renderBoard() {
   const el = dom.neighbors;
-  if (!list || !list.length) { el.innerHTML = '<div class="empty">just you, for now 🌱</div>'; return; }
+  const all = [{ handle: G.me.handle, name: "you", color: G.me.color, eco: G.ecoLevel, me: true }, ...neighborList.map((n) => ({ ...n, me: false }))];
+  all.sort((a, b) => b.eco - a.eco);
   el.innerHTML = "";
-  for (const n of list) {
+  let rank = 0;
+  for (const n of all) {
+    rank++;
     const row = document.createElement("div");
-    row.className = "nb" + (n.handle === G.visiting ? " me" : "");
-    row.innerHTML = `<span class="sw" style="background:${esc(n.color)}"></span><span class="who">${esc(n.name)}</span><span class="eco">🌿${n.eco}</span>`;
-    row.addEventListener("click", () => visit(n.handle, n.name));
+    row.className = "nb" + (n.me ? " me" : "");
+    const medal = rank === 1 ? "🥇 " : rank === 2 ? "🥈 " : rank === 3 ? "🥉 " : rank + ". ";
+    row.innerHTML = `<span class="sw" style="background:${esc(n.color)}"></span><span class="who">${medal}${esc(n.name)}</span><span class="eco">🌿${n.eco}</span>`;
+    if (n.me) row.addEventListener("click", () => { if (G.visiting) goHome(); });
+    else row.addEventListener("click", () => { Audio.sfx.click(); visit(n.handle, n.name); });
     el.appendChild(row);
   }
 }
@@ -336,15 +344,17 @@ function frame(now) {
     if (!Sim.S.climax) climaxShown = false;
     // quests, almanac discovery, live-event banner
     Social.checkQuests({ Sim, G });
+    if (G.questsDone && G.questsDone.size > lastQuests) { lastQuests = G.questsDone.size; Audio.sfx.quest(); }
     discoverHook();
     eventBannerTick();
+    renderBoard();
     if (Social.questsPanelOpen()) Social.renderQuests();
   }
 
   W.tickControls();
   W.render();
 }
-let lifeSig = "", climaxShown = false, saveAccum = 0;
+let lifeSig = "", climaxShown = false, saveAccum = 0, lastQuests = 0;
 
 // ── boot ──────────────────────────────────────────────────────────────────────
 async function boot() {
@@ -379,6 +389,7 @@ async function boot() {
   buildPalette(); buildShop(); selectTool(G.tool);
   updateClockHud(); updateWallet();
   await Social.init(G);
+  lastQuests = G.questsDone ? G.questsDone.size : 0;
   Net.startNeighbors(renderNeighbors);
   Net.startPresence();
   Net.startChannel(onWatered);
@@ -391,8 +402,10 @@ async function boot() {
     if (best && q >= 1) Social.gift(G.visiting, best, 1); else toast("no goods to gift yet — grow some producers 🌼");
   });
   dom.visitBar.insertBefore(giftBtn, dom.visitBack);
-  dom.muteBtn.addEventListener("click", () => toast("audio arrives soon 🔇"));
-  dom.questBtn.addEventListener("click", () => Social.toggleQuests());
+  Audio.setMuted(localStorage.getItem("sward:mute") === "1");
+  dom.muteBtn.textContent = Audio.isMuted() ? "🔇" : "🔊";
+  dom.muteBtn.addEventListener("click", () => { Audio.resume(); Audio.setMuted(!Audio.isMuted()); dom.muteBtn.textContent = Audio.isMuted() ? "🔇" : "🔊"; try { localStorage.setItem("sward:mute", Audio.isMuted() ? "1" : "0"); } catch (_) {} if (!Audio.isMuted()) Audio.sfx.chime(); });
+  dom.questBtn.addEventListener("click", () => { Audio.sfx.click(); Social.toggleQuests(); });
   dom.marketBtn.addEventListener("click", () => Social.toggle());
   document.addEventListener("visibilitychange", () => { if (document.hidden) saveNow(); });
   window.addEventListener("beforeunload", saveNow);
