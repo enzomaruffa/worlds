@@ -154,6 +154,13 @@
 
     .scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
     .scrollbar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 6px; }
+
+    /* current-objective chip (onboarding nudge) under the clock */
+    #objective { margin-top: .3rem; max-width: 18rem; padding: .3rem .7rem; border-radius: 999px;
+      background: rgba(108,194,74,.14); border: 1px solid var(--border-soft); color: var(--leaf-bright);
+      font-size: .74rem; font-weight: 600; text-align: center; display: none; }
+    #objective.show { display: block; }
+    #objective .d { color: var(--muted); font-weight: 400; }
   </style>
 
   <script type="importmap">
@@ -185,6 +192,7 @@
           </div>
           <div class="yr" id="yearN">Year 1</div>
         </div>
+        <div id="objective"></div>
       </div>
 
       <div class="panel" id="side">
@@ -202,6 +210,7 @@
       <div id="hint">drag to orbit · scroll to zoom · click debris to clear · pick a tool below</div>
 
       <div id="toolbar">
+        <button class="iconbtn" id="helpBtn" title="how to play">❓</button>
         <button class="iconbtn" id="questBtn" title="quests & almanac">📖</button>
         <button class="iconbtn" id="marketBtn" title="market">🤝</button>
         <button class="iconbtn" id="muteBtn" title="mute">🔊</button>
