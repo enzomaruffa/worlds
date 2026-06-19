@@ -823,6 +823,19 @@ main.hidden { display: none; }
     return pool[Math.floor(Math.random() * pool.length)];
   }
 
+  // ── Anti-cheat: the secret word never lives in shared room state during a round.
+  // The drawer keeps it locally (myWord), publishes only an irreversible hash +
+  // the blanks mask; the plaintext is written to the doc only at reveal. ──
+  let myWord = null;            // the word I'm drawing (drawer only), this round
+  let myWordHash = 0;
+  function hashWord(s) { let h = 5381; const t = norm(s); for (let i = 0; i < t.length; i++) h = ((h << 5) + h + t.charCodeAt(i)) >>> 0; return h; }
+  async function pickAndPublishWord() {
+    // called on the drawer's client when it owns a round with no word yet
+    myWord = pickWord(null);
+    myWordHash = hashWord(myWord);
+    try { await patchGame({ wordHash: myWordHash, wordMask: maskWord(myWord), wordLen: norm(myWord).length }); } catch (_) {}
+  }
+
   function maskWord(word) {
     if (!word) return "";
     return word
@@ -999,10 +1012,11 @@ main.hidden { display: none; }
     // the *authoritative scoring* only happens on the controller's client.
     const guess = norm(text);
     const isGuessPhase = game && game.phase === "draw";
-    const word = game && game.word ? norm(game.word) : "";
     const guesserIsDrawer = game && game.drawer && handle === game.drawer.handle;
+    // correctness via the published hash — the plaintext word is never in shared state
+    const correct = isGuessPhase && game.wordHash && hashWord(guess) === game.wordHash;
 
-    if (isGuessPhase && word && guess === word && !guesserIsDrawer) {
+    if (correct && !guesserIsDrawer) {
       // Correct guess: mask the word in the public log so latecomers can't read it.
       if (!guessedThisRound.has(handle)) {
         guessedThisRound.add(handle);
@@ -1017,11 +1031,10 @@ main.hidden { display: none; }
       return;
     }
 
-    // "close" hint (one char off) — purely cosmetic, only for non-drawers in draw phase
+    // "close" hint: only the drawer (who holds the word locally) can tell, so it
+    // styles its OWN view when a guesser is one letter off — no word in shared state.
     let cls = "";
-    if (isGuessPhase && word && !guesserIsDrawer && handle === myHandle) {
-      if (levenshtein1(guess, word)) cls = "close";
-    }
+    if (isGuessPhase && !guesserIsDrawer && isDrawer() && myWord && levenshtein1(guess, norm(myWord))) cls = "close";
     appendChat({ who: name, text, cls });
   }
 
@@ -1122,6 +1135,7 @@ main.hidden { display: none; }
       }
       await patchGame({
         phase: "reveal",
+        word: myWord || game.word || null,   // publish the plaintext only now, at reveal
         scores,
         lastWinner: { handle: winnerHandle, name: winnerName },
         _scored: true,
@@ -1135,7 +1149,7 @@ main.hidden { display: none; }
     if (advancing) return;
     advancing = true;
     try {
-      await patchGame({ phase: "reveal", lastWinner: null, _scored: true });
+      await patchGame({ phase: "reveal", word: myWord || game.word || null, lastWinner: null, _scored: true });
     } finally {
       advancing = false;
     }
@@ -1166,11 +1180,12 @@ main.hidden { display: none; }
         return;
       }
       const nd = nextDrawer(players, game.drawer ? game.drawer.handle : null) || players[0];
-      const word = pickWord(game.word);
+      // don't pick the word here — the NEW drawer's client picks + publishes its
+      // hash (so the word only ever exists on the drawer's machine during play).
       await patchGame({
         phase: "draw",
         drawer: { handle: nd.handle, name: nd.name },
-        word,
+        word: null, wordHash: 0, wordMask: "", wordLen: 0,
         players,
         roundEndsAt: now() + ROUND_MS,
         roundNum: (game.roundNum || 0) + 1,
@@ -1188,11 +1203,13 @@ main.hidden { display: none; }
     starting = true;
     const present = presence.length ? presence.slice() : [{ handle: myHandle, name: myName }];
     const players = present.map((p) => ({ handle: p.handle, name: p.name }));
-    const word = pickWord(null);
+    // I'm the first drawer → keep the word local, publish only the hash + mask
+    myWord = pickWord(null);
+    myWordHash = hashWord(myWord);
     const data = {
       phase: "draw",
       drawer: { handle: myHandle, name: myName },
-      word,
+      word: null, wordHash: myWordHash, wordMask: maskWord(myWord), wordLen: norm(myWord).length,
       roundEndsAt: now() + ROUND_MS,
       roundNum: 1,
       scores: {},
@@ -1235,13 +1252,22 @@ main.hidden { display: none; }
       strokeQueue = [];
       lastTickSec = -1;
       SFX.round();
+      const iAmDrawer = data.drawer && data.drawer.handle === myHandle;
+      if (!iAmDrawer) { myWord = null; myWordHash = 0; } // not my word this round
       if (data.drawer) {
-        if (data.drawer.handle === myHandle) {
-          systemMsg("Your turn to draw! The word is \"" + data.word + "\".");
+        if (iAmDrawer) {
+          // if the round arrived without my word published yet, pick + publish it now
+          if (!data.wordHash) pickAndPublishWord().then(() => systemMsg('Your turn to draw! Your word is "' + myWord + '".'));
+          else if (myWord) systemMsg('Your turn to draw! Your word is "' + myWord + '".');
         } else {
           systemMsg("Round " + data.roundNum + " — " + data.drawer.name + " is drawing.");
         }
       }
+    }
+    // safety net: I'm the drawer but somehow no word is published (e.g. became
+    // drawer mid-round / reconnect) → publish one.
+    if (data && data.phase === "draw" && data.drawer && data.drawer.handle === myHandle && !data.wordHash && myWordHash === 0) {
+      pickAndPublishWord();
     }
 
     // Reveal transition: announce + schedule next round (controller).
@@ -1312,11 +1338,11 @@ main.hidden { display: none; }
     } else if (phase === "draw") {
       if (isDrawer()) {
         els.wordLabel.textContent = "You draw";
-        els.wordDisplay.textContent = game.word || "";
+        els.wordDisplay.textContent = myWord || "…";  // local only — never from shared state
         els.wordDisplay.className = "word";
       } else {
-        els.wordLabel.textContent = "Guess (" + (game.word ? game.word.replace(/\s/g, "").length : 0) + " letters)";
-        els.wordDisplay.textContent = maskWord(game.word);
+        els.wordLabel.textContent = "Guess (" + (game.wordLen || 0) + " letters)";
+        els.wordDisplay.textContent = game.wordMask || "";
         els.wordDisplay.className = "word guess";
       }
     } else if (phase === "reveal") {
