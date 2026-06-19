@@ -212,11 +212,18 @@
       z-index: 10;
       display: none;
       flex-direction: column;
-      background: radial-gradient(ellipse at top, rgba(245,158,11,.08), var(--bg) 60%);
+      /* opaque base + gold glow on top → the track canvas never bleeds through */
+      background: radial-gradient(ellipse at top, rgba(245,158,11,.10), transparent 62%), var(--bg);
       overflow-y: auto;
       padding: 1.1rem;
     }
     #lobby.show { display: flex; }
+
+    /* ── Phase-driven chrome: the waiting room owns the whole screen ───────── */
+    /* No live light banner and no MOVE bar while in the lobby — they only made
+       the waiting room look busy and pushed the Start button off-screen. */
+    #app.phase-lobby > #banner,
+    #app.phase-lobby > #controls { display: none; }
     #lobby .lobby-inner {
       width: 100%;
       max-width: 30rem;
@@ -384,7 +391,7 @@
   </style>
 </head>
 <body>
-  <div id="app">
+  <div id="app" class="phase-lobby">
     <header id="header">
       <span class="title">RED&nbsp;LIGHT<span class="dot"></span>GREEN&nbsp;LIGHT</span>
       <span class="spacer"></span>
@@ -475,6 +482,7 @@
     const clientId = worlds.id();
 
     // ── DOM ──────────────────────────────────────────────────
+    const appEl      = document.getElementById("app");
     const headerEl   = document.getElementById("header");
     const bannerEl   = document.getElementById("banner");
     const canvas     = document.getElementById("canvas");
@@ -607,6 +615,7 @@
     function showLobby() {
       phase = "lobby";
       spectating = false;
+      appEl.className = "phase-lobby";
       clearHostLoop();
       if (resetTimer) { clearTimeout(resetTimer); resetTimer = null; }
       winnerName = null;
@@ -636,6 +645,7 @@
       if (phase === "playing" && !spectating) return;
       phase = "playing";
       spectating = false;
+      appEl.className = "phase-playing";
       lobbyEl.classList.remove("show");
       spectateNote.classList.remove("show");
       // fresh round for everyone who starts together
@@ -647,6 +657,7 @@
       // a round is already live when we arrive — watch, then join the next lobby
       phase = "playing";
       spectating = true;
+      appEl.className = "phase-playing spectating";
       self.out = true;          // not a participant this round
       lobbyEl.classList.remove("show");
       spectateNote.classList.add("show");
@@ -655,12 +666,15 @@
 
     // ── Light banner render ──────────────────────────────────
     function renderLight() {
-      const s = winnerName ? "wait" : light.state;
+      // in the waiting room there is no live light — keep the chrome neutral
+      const s = phase === "lobby" ? "wait" : (winnerName ? "wait" : light.state);
       bannerEl.classList.toggle("green", s === "green");
       bannerEl.classList.toggle("red", s === "red");
       headerEl.classList.toggle("green", s === "green");
       headerEl.classList.toggle("red", s === "red");
-      if (winnerName) {
+      if (phase === "lobby") {
+        bannerEl.textContent = "WAITING ROOM";
+      } else if (winnerName) {
         bannerEl.textContent = "ROUND OVER";
       } else {
         bannerEl.textContent = s === "green" ? "GREEN — GO!" : "RED — FREEZE!";
@@ -897,7 +911,7 @@
 
       if (phase === "playing" && !spectating) maybeSendPosition(now);
       pruneStale(now);
-      draw();
+      if (phase !== "lobby") draw(); // lobby overlay covers the canvas — don't waste a frame
       requestAnimationFrame(tick);
     }
 
@@ -924,6 +938,52 @@
     // ── Rendering ────────────────────────────────────────────
     let DPR = Math.min(window.devicePixelRatio || 1, 2);
     let W = 0, H = 0;
+    // the track (gradient, lane lines, finish ribbon, start line, labels) is static —
+    // render it ONCE to an offscreen canvas on resize and blit it each frame instead of
+    // recomputing a gradient + ~240 checkered rects + text every single frame.
+    const bg = document.createElement("canvas");
+    const bgCtx = bg.getContext("2d");
+    function buildBackground() {
+      bg.width = Math.floor(W * DPR);
+      bg.height = Math.floor(H * DPR);
+      const c = bgCtx;
+      c.setTransform(DPR, 0, 0, DPR, 0, 0);
+      c.clearRect(0, 0, W, H);
+
+      const grad = c.createLinearGradient(0, 0, 0, H);
+      grad.addColorStop(0, "#0e0e12");
+      grad.addColorStop(1, "#0a0a0d");
+      c.fillStyle = grad;
+      c.fillRect(0, 0, W, H);
+
+      c.strokeStyle = "rgba(255,255,255,0.03)";
+      c.lineWidth = 1;
+      for (let i = 1; i < 6; i++) {
+        const x = (W * i) / 6;
+        c.beginPath(); c.moveTo(x, PAD_TOP); c.lineTo(x, H - PAD_BOT); c.stroke();
+      }
+
+      const fy = yToPx(1);
+      const sq = 10;
+      for (let x = 0; x < W; x += sq) {
+        const even = (Math.floor(x / sq)) % 2 === 0;
+        c.fillStyle = even ? "#e4e4e7" : "#27272a"; c.fillRect(x, fy - 10, sq, 10);
+        c.fillStyle = even ? "#27272a" : "#e4e4e7"; c.fillRect(x, fy, sq, 10);
+      }
+      c.fillStyle = "#fbbf24";
+      c.font = "700 12px 'Space Grotesk', system-ui, sans-serif";
+      c.textAlign = "center";
+      c.fillText("FINISH", W / 2, fy - 16);
+
+      const sy = yToPx(0);
+      c.strokeStyle = "rgba(245,158,11,0.55)";
+      c.setLineDash([8, 6]); c.lineWidth = 2;
+      c.beginPath(); c.moveTo(20, sy); c.lineTo(W - 20, sy); c.stroke();
+      c.setLineDash([]);
+      c.fillStyle = "rgba(245,158,11,0.7)";
+      c.font = "600 11px 'Space Grotesk', system-ui, sans-serif";
+      c.fillText("START", W / 2, sy + 18);
+    }
     function resize() {
       const stage = document.getElementById("stage");
       const rect = stage.getBoundingClientRect();
@@ -935,6 +995,7 @@
       canvas.style.width = W + "px";
       canvas.style.height = H + "px";
       ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+      buildBackground();
     }
     window.addEventListener("resize", resize);
 
@@ -955,41 +1016,10 @@
     }
 
     function draw() {
+      // blit the pre-rendered static track (one drawImage instead of a per-frame
+      // gradient + ~240 checkered rects + lane lines + labels)
       ctx.clearRect(0, 0, W, H);
-
-      // track background gradient
-      const grad = ctx.createLinearGradient(0, 0, 0, H);
-      grad.addColorStop(0, "#0e0e12");
-      grad.addColorStop(1, "#0a0a0d");
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, 0, W, H);
-
-      // faint lane lines
-      ctx.strokeStyle = "rgba(255,255,255,0.03)";
-      ctx.lineWidth = 1;
-      for (let i = 1; i < 6; i++) {
-        const x = (W * i) / 6;
-        ctx.beginPath(); ctx.moveTo(x, PAD_TOP); ctx.lineTo(x, H - PAD_BOT); ctx.stroke();
-      }
-
-      // FINISH ribbon (top) — checkered
-      const fy = yToPx(1);
-      drawCheckered(fy - 10, 20);
-      ctx.fillStyle = "#fbbf24";
-      ctx.font = "700 12px 'Space Grotesk', system-ui, sans-serif";
-      ctx.textAlign = "center";
-      ctx.fillText("FINISH", W / 2, fy - 16);
-
-      // START line (bottom)
-      const sy = yToPx(0);
-      ctx.strokeStyle = "rgba(245,158,11,0.55)";
-      ctx.setLineDash([8, 6]);
-      ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(20, sy); ctx.lineTo(W - 20, sy); ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.fillStyle = "rgba(245,158,11,0.7)";
-      ctx.font = "600 11px 'Space Grotesk', system-ui, sans-serif";
-      ctx.fillText("START", W / 2, sy + 18);
+      ctx.drawImage(bg, 0, 0, W, H);
 
       // assemble all players (self + remotes), sorted by handle for stable lanes
       const all = [];
@@ -1011,29 +1041,23 @@
       });
     }
 
-    function drawCheckered(top, h) {
-      const sq = 10;
-      for (let x = 0; x < W; x += sq) {
-        const even = (Math.floor(x / sq)) % 2 === 0;
-        ctx.fillStyle = even ? "#e4e4e7" : "#27272a";
-        ctx.fillRect(x, top, sq, h / 2);
-        ctx.fillStyle = even ? "#27272a" : "#e4e4e7";
-        ctx.fillRect(x, top + h / 2, sq, h / 2);
-      }
-    }
-
     function drawPlayer(x, y, r, p) {
       const out = p.out;
       const fill = out ? "#3f3f46" : (p.isSelf ? "#fbbf24" : "#60a5fa");
       const ring = out ? "#52525b" : (p.isSelf ? "#fde68a" : "#93c5fd");
 
-      // shadow / glow
+      // body (no shadowBlur — that's the single most expensive canvas op; a cheap
+      // translucent halo ring gives the same "glow" read at a fraction of the cost)
+      if (!out) {
+        ctx.beginPath();
+        ctx.arc(x, y, r + 4, 0, Math.PI * 2);
+        ctx.fillStyle = p.isSelf ? "rgba(245,158,11,0.18)" : "rgba(96,165,250,0.16)";
+        ctx.fill();
+      }
       ctx.beginPath();
       ctx.arc(x, y, r, 0, Math.PI * 2);
       ctx.fillStyle = fill;
-      if (!out) { ctx.shadowColor = p.isSelf ? "rgba(245,158,11,0.6)" : "rgba(96,165,250,0.45)"; ctx.shadowBlur = 14; }
       ctx.fill();
-      ctx.shadowBlur = 0;
 
       // ring (self gets a thicker highlight)
       ctx.lineWidth = p.isSelf ? 3 : 2;
