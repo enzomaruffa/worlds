@@ -36,24 +36,25 @@ export const ambient = new THREE.AmbientLight(0xffffff, 0.12);
 let renderer = null, controls = null, groundMesh = null, cursor = null, composer = null, bloomPass = null;
 let plotSeed = 1;
 
-// ── deterministic 2D value noise (terrain shape; stable per plotSeed) ─────────
-function hash2(ix, iz) {
-  let h = (Math.imul(ix | 0, 374761393) ^ Math.imul(iz | 0, 668265263) ^ Math.imul(plotSeed, 2246822519)) >>> 0;
+// ── deterministic 2D value noise (terrain shape; stable per seed) ─────────────
+function hash2(ix, iz, seed) {
+  let h = (Math.imul(ix | 0, 374761393) ^ Math.imul(iz | 0, 668265263) ^ Math.imul(seed, 2246822519)) >>> 0;
   h = Math.imul(h ^ (h >>> 13), 1274126177) >>> 0;
   return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
 }
-function vnoise(x, z) {
+function vnoise(x, z, seed) {
   const x0 = Math.floor(x), z0 = Math.floor(z);
   const fx = x - x0, fz = z - z0;
   const sx = fx * fx * (3 - 2 * fx), sz = fz * fz * (3 - 2 * fz);
-  const n00 = hash2(x0, z0), n10 = hash2(x0 + 1, z0), n01 = hash2(x0, z0 + 1), n11 = hash2(x0 + 1, z0 + 1);
+  const n00 = hash2(x0, z0, seed), n10 = hash2(x0 + 1, z0, seed), n01 = hash2(x0, z0 + 1, seed), n11 = hash2(x0 + 1, z0 + 1, seed);
   const a = n00 + (n10 - n00) * sx, b = n01 + (n11 - n01) * sx;
   return a + (b - a) * sz;
 }
 // Height at world (x,z). Edges ease down so the plot reads as a raised patch.
-export function heightAt(x, z) {
+// Optional `seed` lets neighbour plots have their own terrain shape.
+export function heightAt(x, z, seed = plotSeed) {
   const f = 0.085;
-  let h = vnoise(x * f, z * f) * 1.0 + vnoise(x * f * 2.7 + 11, z * f * 2.7 - 5) * 0.34;
+  let h = vnoise(x * f, z * f, seed) * 1.0 + vnoise(x * f * 2.7 + 11, z * f * 2.7 - 5, seed) * 0.34;
   h = h / 1.34;                       // → ~0..1
   const edge = Math.max(Math.abs(x), Math.abs(z)) / HALF;
   const falloff = THREE.MathUtils.clamp(1 - Math.pow(Math.max(0, edge - 0.78) / 0.22, 1.6), 0, 1);
