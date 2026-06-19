@@ -8,6 +8,7 @@ import * as Life from "./life.js";
 import * as Net from "./net.js";
 import * as Social from "./social.js";
 import * as Audio from "./audio.js";
+import * as Guide from "./guide.js";
 
 // ───────────────────────────────────────────────────────────────────────────
 // SWARD — a multiplayer 3D incremental grass-plot game on Worlds.
@@ -24,8 +25,8 @@ const dom = {
   ownerName: $("ownerName"), ownerDot: $("ownerDot"),
   dewN: $("dewN"), sporeN: $("sporeN"), ecoN: $("ecoN"), ecoBar: $("ecoBar").firstElementChild,
   hint: $("hint"), msgTxt: $("msgTxt"), paletteRow: $("paletteRow"), inspect: $("inspect"),
-  seasonN: $("seasonN"), todN: $("todN"), yearN: $("yearN"), sunIcon: $("sunIcon"),
-  muteBtn: $("muteBtn"), questBtn: $("questBtn"), marketBtn: $("marketBtn"),
+  seasonN: $("seasonN"), todN: $("todN"), yearN: $("yearN"), sunIcon: $("sunIcon"), objective: $("objective"),
+  muteBtn: $("muteBtn"), questBtn: $("questBtn"), marketBtn: $("marketBtn"), helpBtn: $("helpBtn"),
   neighbors: $("neighbors"), visitBar: $("visitBar"), visitName: $("visitName"), visitBack: $("visitBack"),
   loader: $("loader"), loaderWho: $("loaderWho"), loaderErr: $("loaderErr"),
 };
@@ -70,6 +71,13 @@ function updateClockHud() {
   dom.todN.textContent = Sky.todName();
   dom.yearN.textContent = "Year " + Sky.yearNum();
   dom.sunIcon.textContent = Sky.sunIcon();
+}
+// current objective nudge — the next unfinished onboarding quest
+function updateObjective() {
+  const done = G.questsDone || new Set();
+  const next = Social.QUESTS.find((q) => !done.has(q.id));
+  if (next) { dom.objective.innerHTML = `🎯 ${esc(next.name)} <span class="d">— ${esc(next.desc)}</span>`; dom.objective.classList.add("show"); }
+  else dom.objective.classList.remove("show");
 }
 
 // ── palette (tools + features; features unlock progressively) ─────────────────
@@ -374,7 +382,7 @@ function frame(now) {
   hudT += dt;
   if (hudT > 0.25) {
     hudT = 0;
-    updateClockHud(); updateWallet(); refreshPaletteAfford();
+    updateClockHud(); updateWallet(); refreshPaletteAfford(); updateObjective();
     if (shopEl && shopEl.style.display !== "none") renderShop();
     if (dom.inspect.dataset.id) showInspect(dom.inspect.dataset.id);
     // re-sync critters only when the ecosystem composition actually changes
@@ -450,6 +458,7 @@ async function boot() {
   dom.muteBtn.addEventListener("click", () => { Audio.resume(); Audio.setMuted(!Audio.isMuted()); dom.muteBtn.textContent = Audio.isMuted() ? "🔇" : "🔊"; try { localStorage.setItem("sward:mute", Audio.isMuted() ? "1" : "0"); } catch (_) {} if (!Audio.isMuted()) Audio.sfx.chime(); });
   dom.questBtn.addEventListener("click", () => { Audio.sfx.click(); Social.toggleQuests(); });
   dom.marketBtn.addEventListener("click", () => Social.toggle());
+  dom.helpBtn.addEventListener("click", () => { Audio.sfx.click(); Guide.open(0); });
   document.addEventListener("visibilitychange", () => { if (document.hidden) saveNow(); });
   window.addEventListener("beforeunload", saveNow);
 
@@ -463,7 +472,9 @@ async function boot() {
 
   G.booted = true;
   dom.loader.classList.add("hide");
-  window.SWARD = { G, Sim, Sky, Grass, W, El, Life, Net, Social };   // debug/inspection handle
+  window.SWARD = { G, Sim, Sky, Grass, W, El, Life, Net, Social, Guide };   // debug/inspection handle
+  updateObjective();
+  Guide.maybeAutoOpen(!saved);   // first-run tutorial for new players (❓ reopens it)
   requestAnimationFrame(frame);
 }
 
