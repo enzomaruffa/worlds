@@ -11,10 +11,10 @@ import { PLOT, HALF, heightAt, insidePlot, scene } from "./world.js";
 //     never per-frame — so 9k blades cost almost nothing once placed.
 // ───────────────────────────────────────────────────────────────────────────
 
-export const FIELD_N = 48;                  // field grid resolution across the plot
+export const FIELD_N = 60;                  // field grid resolution across the plot
 export const CELL = PLOT / FIELD_N;
-const BLADES_PER_CELL = 4;
-const BLADE_H = 1.05;                        // world height of a full-grown blade
+const BLADES_PER_CELL = 5;
+const BLADE_H = 1.85;                        // world height of a full-grown blade (tall, lush)
 
 // per-cell state (sim.js writes these; grass.js reads them)
 export const coverage = new Float32Array(FIELD_N * FIELD_N); // 0..1 grass density
@@ -31,21 +31,22 @@ export const cellCenter = (ix, iz) => ({ x: (ix + 0.5) * CELL - HALF, z: (iz + 0
 let lush = new THREE.Color(0x4f9e3a);   // healthy
 let dry = new THREE.Color(0xb8a24a);    // stressed / dry
 let tip = new THREE.Color(0x9fe06a);    // sunlit tip tint
-let windStr = 0.14;
+let windStr = 0.2;
 
 let mesh = null, shader = null, blades = [];
 const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _p = new THREE.Vector3(), _s = new THREE.Vector3(), _up = new THREE.Vector3(0, 1, 0), _c = new THREE.Color();
 
 // curved, tapered blade standing on +Y (base at y=0, tip at y=1)
 function bladeGeometry() {
-  const segs = 4, w0 = 0.085;
+  const segs = 6, w0 = 0.11;
   const pos = [], idx = [], nor = [];
   for (let i = 0; i <= segs; i++) {
     const t = i / segs;
-    const w = w0 * (1 - t * 0.85);
-    const curve = t * t * 0.16;            // gentle forward lean
+    const w = w0 * (1 - t * 0.92) + 0.006;   // taper to a fine tip
+    const curve = t * t * 0.34;              // pronounced forward arc
     pos.push(-w, t, curve, w, t, curve);
-    nor.push(0, 1, 0, 0, 1, 0);            // up-facing normals → evenly lit, bright grass
+    // normals tilted slightly up+forward → soft, evenly-lit, lush blades
+    nor.push(0, 0.85, 0.5, 0, 0.85, 0.5);
   }
   for (let i = 0; i < segs; i++) {
     const a = i * 2;
@@ -92,11 +93,15 @@ export function buildGrass() {
       {
         vec3 iPos = instanceMatrix[3].xyz;
         float h = position.y;
-        float sway = sin(uTime * 1.5 + (iPos.x + iPos.z) * 0.35)
-                   + 0.4 * sin(uTime * 2.6 + iPos.x * 0.8 - iPos.z * 0.3);
-        float bend = sway * uWindStr * h * h;
+        // layered wind: a slow rolling gust sweeping across the field + fast flutter
+        float gust = 0.5 + 0.5 * sin(uTime * 0.5 - (iPos.x * 0.06 + iPos.z * 0.05));
+        float sway = sin(uTime * 1.6 + (iPos.x + iPos.z) * 0.35)
+                   + 0.45 * sin(uTime * 2.9 + iPos.x * 0.8 - iPos.z * 0.3)
+                   + 0.2  * sin(uTime * 5.1 + iPos.z * 1.4);
+        float bend = sway * uWindStr * (0.55 + 0.9 * gust) * h * h;
         transformed.x += bend * uWindDir.x;
         transformed.z += bend * uWindDir.y;
+        transformed.y -= bend * bend * 0.35;   // tip dips as it bends → no stretching
       }`,
     );
     shader = sh;
@@ -134,14 +139,19 @@ export function rebuild() {
     _s.set(wx, hy, wx);
     _m.compose(_p, _q, _s);
     mesh.setMatrixAt(i, _m);
-    // colour: dry→lush by health, lifted toward sunlit tip, slight per-blade jitter
-    _c.copy(dry).lerp(lush, THREE.MathUtils.clamp(hp, 0, 1));
-    _c.lerp(tip, 0.12 + 0.12 * bl.cj * cov);
-    _c.offsetHSL(0, 0, (bl.cj - 0.5) * 0.06);
-    mesh.setColorAt(i, _c);
+    mesh.setColorAt(i, bladeColor(bl, cov, hp));
   }
   mesh.instanceMatrix.needsUpdate = true;
   if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+}
+
+// richer, more varied blade colour: dry→lush by health, brighter sunlit tips,
+// per-blade hue + saturation + lightness jitter so the field reads alive
+function bladeColor(bl, cov, hp) {
+  _c.copy(dry).lerp(lush, THREE.MathUtils.clamp(hp, 0, 1));
+  _c.lerp(tip, 0.14 + 0.22 * bl.cj * cov);
+  _c.offsetHSL((bl.cj - 0.5) * 0.05, 0.06, (bl.cj - 0.5) * 0.12);
+  return _c;
 }
 
 // Cheap colour-only refresh (no matrix rebuild) — for frequent season/time tints.
@@ -150,10 +160,7 @@ export function retint() {
   for (let i = 0; i < blades.length; i++) {
     const bl = blades[i], cov = coverage[bl.ci];
     if (cov < 0.04) continue;
-    _c.copy(dry).lerp(lush, THREE.MathUtils.clamp(health[bl.ci], 0, 1));
-    _c.lerp(tip, 0.12 + 0.12 * bl.cj * cov);
-    _c.offsetHSL(0, 0, (bl.cj - 0.5) * 0.06);
-    mesh.setColorAt(i, _c);
+    mesh.setColorAt(i, bladeColor(bl, cov, health[bl.ci]));
   }
   if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
 }

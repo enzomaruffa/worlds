@@ -35,7 +35,7 @@ const BERRY = new THREE.SphereGeometry(0.1, 6, 5);
 
 function pond(stage) {
   const g = new THREE.Group();
-  const R = [1.2, 2.1, 2.4, 2.7][stage] || 1.2;
+  const R = [1.9, 3.1, 3.8, 4.4][stage] || 1.9;
   const water = new THREE.Mesh(new THREE.CircleGeometry(R, 26), mat(0x3b86c9, { r: 0.12, m: 0.2, t: true, o: 0.86 }));
   water.rotation.x = -Math.PI / 2; water.position.y = 0.04; water.receiveShadow = true; g.add(water);
   const ring = new THREE.Mesh(new THREE.RingGeometry(R, R + 0.45, 26), mat(0x5a4632, { r: 1 }));
@@ -54,36 +54,37 @@ function hive(stage) {
 }
 function clover(stage) {
   const g = new THREE.Group();
-  const n = [10, 22, 40][stage] || 10, R = [0.9, 1.6, 2.2][stage] || 0.9;
-  for (let i = 0; i < n; i++) { const a = Math.random() * 6.28, r = Math.random() * R, leaf = new THREE.Mesh(new THREE.SphereGeometry(0.13, 6, 4), mat(0x5fae3e, { r: 0.85 })); leaf.scale.y = 0.5; leaf.position.set(Math.cos(a) * r, 0.1, Math.sin(a) * r); g.add(leaf); }
+  const n = [16, 34, 60][stage] || 16, R = [1.3, 2.2, 3.0][stage] || 1.3;
+  for (let i = 0; i < n; i++) { const a = Math.random() * 6.28, r = Math.random() * R, leaf = new THREE.Mesh(new THREE.SphereGeometry(0.2, 6, 4), mat(0x5fae3e, { r: 0.85 })); leaf.scale.y = 0.5; leaf.position.set(Math.cos(a) * r, 0.14, Math.sin(a) * r); g.add(leaf); }
   return g;
 }
 function flowers(stage) {
   const g = new THREE.Group();
   const cols = [0xff7eb0, 0xffd24a, 0xb98cff, 0xff6f5e, 0xfff0a0];
-  const n = [6, 10, 16, 26][stage] || 6, R = [0.7, 1.0, 1.4, 2.2][stage] || 0.7;
+  const n = [8, 16, 26, 42][stage] || 8, R = [1.0, 1.5, 2.1, 3.2][stage] || 1.0;
   for (let i = 0; i < n; i++) {
     const a = Math.random() * 6.28, r = Math.random() * R, x = Math.cos(a) * r, z = Math.sin(a) * r;
-    const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.5, 4), mat(0x4e8f3a)); stem.position.set(x, 0.25, z); g.add(stem);
-    if (stage >= 1) { const head = new THREE.Mesh(PETAL, mat(stage >= 2 ? cols[i % cols.length] : 0x7faf56, { r: 0.7, e: stage >= 2 ? cols[i % cols.length] : 0, ei: stage >= 2 ? 0.12 : 0 })); head.scale.setScalar(stage >= 2 ? 1 : 0.6); head.position.set(x, 0.52, z); g.add(head); }
+    const hh = 0.7 + Math.random() * 0.5;
+    const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, hh, 4), mat(0x4e8f3a)); stem.position.set(x, hh / 2, z); g.add(stem);
+    if (stage >= 1) { const head = new THREE.Mesh(PETAL, mat(stage >= 2 ? cols[i % cols.length] : 0x7faf56, { r: 0.7, e: stage >= 2 ? cols[i % cols.length] : 0, ei: stage >= 2 ? 0.2 : 0 })); head.scale.setScalar(stage >= 2 ? 1.5 : 0.9); head.position.set(x, hh + 0.05, z); g.add(head); }
   }
   return g;
 }
 function mushrooms(stage) {
   const g = new THREE.Group();
   const n = [3, 6, 11][stage] || 3;
-  scatter(g, () => cloneModel("mushrooms", 0.5 + Math.random() * 0.4, { receive: true }), n, [0.5, 0.9, 1.4][stage] || 0.6, 0);
+  scatter(g, () => cloneModel("mushrooms", 0.8 + Math.random() * 0.6, { receive: true }), n, [0.8, 1.4, 2.1][stage] || 0.9, 0);
   return g;
 }
 function shrub(stage) {
   const g = new THREE.Group();
-  addModel(g, "plant_bushLarge", 1.6 + stage * 0.3, { receive: true });
+  addModel(g, "plant_bushLarge", 2.4 + stage * 0.6, { receive: true });
   if (stage >= 1) for (let i = 0; i < (stage >= 2 ? 12 : 6); i++) { const a = Math.random() * 6.28, r = 0.4 + Math.random() * 0.5, b = new THREE.Mesh(BERRY, mat(stage >= 2 ? 0xd23b4e : 0xe7d27a, { r: 0.6, e: stage >= 2 ? 0x6e1822 : 0, ei: 0.15 })); b.position.set(Math.cos(a) * r, 0.7 + Math.random() * 0.7, Math.sin(a) * r); g.add(b); }
   return g;
 }
 function tree(stage) {
   const g = new THREE.Group();
-  const spec = [["treeSmall", 1.0], ["treeSmall", 2.2], ["tree", 3.6], ["tree", 5.4], ["treeLarge", 7.2]][stage] || ["treeSmall", 1.0];
+  const spec = [["treeSmall", 1.6], ["treeSmall", 3.4], ["tree", 5.6], ["tree", 8.4], ["treeLarge", 11.5]][stage] || ["treeSmall", 1.6];
   if (!addModel(g, spec[0], spec[1], { receive: true })) {
     // fallback procedural tree if GLB missing
     const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.18, spec[1] * 0.5, 6), mat(0x6b4a2c)); trunk.position.y = spec[1] * 0.25; trunk.castShadow = true; g.add(trunk);
