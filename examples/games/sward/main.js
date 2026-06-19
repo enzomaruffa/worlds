@@ -297,6 +297,17 @@ function eventBannerTick() {
   if (ev && curEvent !== ev.key) { curEvent = ev.key; t.textContent = `${ev.icon} ${ev.name}`; b.classList.add("show"); }
   else if (!ev && curEvent) { curEvent = null; b.classList.remove("show"); }
 }
+// themed body for the worlds.idle "while you were away" modal
+function gardenReport(r) {
+  const h = Math.floor(r.secs / 3600), m = Math.round((r.secs % 3600) / 60);
+  const away = h ? `${h}h ${m}m` : `${m} min`;
+  let rows = `<div class="worlds-idle-row"><span>away for</span><b>${away}</b></div>`;
+  rows += `<div class="worlds-idle-row"><span>💧 Dew</span><b>+${fmt(r.dew)}</b></div>`;
+  if (r.grass > 0) rows += `<div class="worlds-idle-row"><span>🌱 grass spread</span><b>+${r.grass}%</b></div>`;
+  if (r.grown > 0) rows += `<div class="worlds-idle-row"><span>🌿 growth</span><b>+${r.grown} stages</b></div>`;
+  for (const k in (r.goods || {})) rows += `<div class="worlds-idle-row"><span>${Social.GOODS[k] ? Social.GOODS[k].icon : ""} ${esc(k)}</span><b>+${r.goods[k]}</b></div>`;
+  return `<div style="color:#a7c0ac;margin-bottom:.5rem">Your plot kept growing while you were gone 🌻</div>${rows}`;
+}
 
 // ── main loop ────────────────────────────────────────────────────────────────
 let last = performance.now(), hudT = 0, simAccum = 0, dirtyGrass = false;
@@ -378,7 +389,7 @@ async function boot() {
 
   stage("sprouting grass…"); Grass.buildGrass();
   stage("joining the neighborhood…"); const saved = await Net.init(G);   // load my plot doc (or create), set plotIndex
-  stage("tilling the soil…"); const idle = Sim.init(G, saved);   // builds debris, restores field, offline catch-up
+  stage("tilling the soil…"); Sim.init(G, saved);   // builds debris, restores field
   // a fresh plot gets a couple of starter tufts so the wind + grass read instantly
   if (!saved) { Sim.seedPatch(2, 1, 1.8, 0.4); Sim.seedPatch(-3, -2, 1.6, 0.35); Grass.rebuild(); }
 
@@ -410,7 +421,13 @@ async function boot() {
   document.addEventListener("visibilitychange", () => { if (document.hidden) saveNow(); });
   window.addEventListener("beforeunload", saveNow);
 
-  if (idle && idle.dew > 0) toast(`while you were away (${Math.round(idle.secs / 60)} min): +${fmt(idle.dew)} 💧`, 4200);
+  // AFK / offline progression via the worlds.idle SDK primitive (sward owns its
+  // own lastSeen in the plot doc, so store:"none"; Greenhouse perk widens the cap)
+  try {
+    const idle = worlds.idle("sward", { lastSeen: saved && saved.lastSeen, store: "none", cap: Sim.idleCap() });
+    const secs = await idle.elapsed();
+    if (secs) { const report = Sim.runOffline(secs); updateWallet(); renderBoard(); idle.summary(report, { title: "🌙 While you were away", render: gardenReport }); }
+  } catch (e) { console.warn("[sward] idle skipped", e && e.message); }
 
   G.booted = true;
   dom.loader.classList.add("hide");
