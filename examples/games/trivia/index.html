@@ -545,6 +545,32 @@
   let answersByQ = {};           // qIndex -> { handle -> {choice, at} } (host accumulates; everyone mirrors for live pips)
   let prevScores = {};           // for leaderboard deltas at reveal
   let tickHandle = null;
+  let myStreak = 0;              // consecutive correct answers (local flourish)
+  let reactedReveal = -1;        // qi we've already played reveal sound for
+  let lastTickSec = -1;          // last countdown second we ticked
+
+  // ── Sound — tiny WebAudio synth (no assets; resumes on first input) ──
+  let actx = null, sfxMuted = false;
+  function audioResume() { if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (_) {} } if (actx && actx.state === "suspended") actx.resume(); }
+  addEventListener("pointerdown", audioResume); addEventListener("keydown", audioResume);
+  addEventListener("keydown", (e) => { if (e.key === "m" || e.key === "M") { sfxMuted = !sfxMuted; if (typeof toast === "function") toast(sfxMuted ? "🔇 muted" : "🔊 sound on"); } });
+  function blip({ type = "sine", f0, f1, dur = 0.15, gain = 0.2, delay = 0 }) {
+    if (!actx || sfxMuted) return;
+    const t = actx.currentTime + delay;
+    const o = actx.createOscillator(); o.type = type; o.frequency.setValueAtTime(f0, t);
+    if (f1 && f1 !== f0) o.frequency.exponentialRampToValueAtTime(Math.max(1, f1), t + dur);
+    const g = actx.createGain();
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(gain, t + 0.008); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(actx.destination); o.start(t); o.stop(t + dur + 0.02);
+  }
+  const SFX = {
+    select: () => blip({ type: "square", f0: 480, f1: 640, dur: 0.08, gain: 0.14 }),
+    tick:   () => blip({ type: "sine", f0: 880, dur: 0.05, gain: 0.1 }),
+    correct: (streak) => { const base = 523 * Math.pow(1.06, Math.min(streak || 0, 8)); [0, 1, 2].forEach((k) => blip({ type: "triangle", f0: base * (1 + k * 0.26), dur: 0.16, gain: 0.18, delay: k * 0.09 })); },
+    wrong:  () => { blip({ type: "sawtooth", f0: 300, f1: 120, dur: 0.3, gain: 0.16 }); },
+    reveal: () => blip({ type: "sine", f0: 360, f1: 540, dur: 0.18, gain: 0.12 }),
+    win:    () => [523, 659, 784, 1047, 1319].forEach((f, i) => blip({ type: "triangle", f0: f, dur: 0.24, gain: 0.2, delay: i * 0.12 })),
+  };
   let starting = false;
   let generating = false;
   let advanceTimer = null;       // host-only scheduled advance
@@ -754,6 +780,7 @@ Respond with ONLY a JSON array, no prose, no markdown fences. Schema:
     if (myChoice !== null) return;       // locked: first answer counts
     if (Date.now() > game.questionEndsAt) return;
     myChoice = choice;
+    audioResume(); SFX.select();
     const at = Date.now();
     // local mirror for instant pip
     answersByQ[game.current] = answersByQ[game.current] || {};
@@ -768,6 +795,10 @@ Respond with ONLY a JSON array, no prose, no markdown fences. Schema:
     if (!game) return;
     // returning to the lobby → un-ready everyone for the next round
     if (game.phase === "lobby" && prevPhase && prevPhase !== "lobby" && ROOM) ROOM.setReady(false);
+    // a fresh game starting → reset the local streak/reveal trackers
+    if ((game.phase === "loading" || game.phase === "lobby") && prevPhase !== game.phase) { myStreak = 0; reactedReveal = -1; }
+    // entering the podium → victory fanfare (once)
+    if (game.phase === "over" && prevPhase && prevPhase !== "over") SFX.win();
     // entering a new question → reset local pick + capture prev scores for deltas
     if (game.phase === "question" && (prevPhase !== "question" || prevCurrent !== game.current)) {
       myChoice = null;
@@ -923,6 +954,9 @@ Respond with ONLY a JSON array, no prose, no markdown fences. Schema:
     $("qNum").textContent = secs;
     $("qBar").style.width = `${Math.max(0, (remaining / QUESTION_MS) * 100)}%`;
     $("qTimer").classList.toggle("warn", remaining <= 5000);
+    // countdown tick in the final 3 seconds (once per second)
+    if (secs <= 3 && secs >= 1 && secs !== lastTickSec) { lastTickSec = secs; SFX.tick(); }
+    if (secs > 3) lastTickSec = -1;
     if (remaining <= 0) {
       $("qNum").textContent = "0";
       // host advances via its scheduled timer; non-hosts just wait for the doc flip.
@@ -945,11 +979,19 @@ Respond with ONLY a JSON array, no prose, no markdown fences. Schema:
     const subs = data.subs || {};
     const gained = data.gained || {};
     const myA = subs[me.handle];
+    const iWasRight = myA && myA.choice === q.answer;
+    // react ONCE per question reveal: update streak + play the right sound
+    const firstReact = reactedReveal !== qi;
+    if (firstReact) {
+      reactedReveal = qi;
+      if (iWasRight) { myStreak++; SFX.correct(myStreak); } else { myStreak = 0; if (myA) SFX.wrong(); else SFX.reveal(); }
+    }
+    const streakBadge = (iWasRight && myStreak >= 2) ? ` <span class="gain">🔥 ${myStreak} streak</span>` : "";
     const youEl = $("rYou");
     if (!myA) { youEl.className = "reveal-you no"; youEl.textContent = "You didn't answer in time."; }
-    else if (myA.choice === q.answer) {
+    else if (iWasRight) {
       youEl.className = "reveal-you ok";
-      youEl.innerHTML = `Correct! <span class="gain">+${gained[me.handle] || 0}</span> points`;
+      youEl.innerHTML = `Correct! <span class="gain">+${gained[me.handle] || 0}</span> points${streakBadge}`;
     } else {
       youEl.className = "reveal-you no";
       youEl.textContent = `You picked “${q.choices[myA.choice] != null ? q.choices[myA.choice] : "?"}” — not quite.`;
