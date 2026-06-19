@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { scene, sun, hemi, ambient, HALF, PLOT, heightAt } from "./world.js";
+import { scene, sun, hemi, ambient, HALF, PLOT, heightAt, setSkyColors } from "./world.js";
 import * as Grass from "./grass.js";
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -46,7 +46,7 @@ const SEASONS = [
 const NIGHT_SKY = new THREE.Color(0x0a1230);
 const DAWN = new THREE.Color(0xffb784), DUSK = new THREE.Color(0xff7e52);
 
-const _a = new THREE.Color(), _b = new THREE.Color(), _sky = new THREE.Color(), _sun = new THREE.Color();
+const _a = new THREE.Color(), _b = new THREE.Color(), _sky = new THREE.Color(), _sun = new THREE.Color(), _zen = new THREE.Color();
 function blendSeason(field) {
   const s = seasonIndex(), n = (s + 1) % 4, f = smooth(clamp((seasonFrac() - 0.7) / 0.3, 0, 1)); // ease into next near season end
   _a.set(SEASONS[s][field]); _b.set(SEASONS[n][field]);
@@ -163,6 +163,8 @@ export function update(dt) {
   _sky.lerp(isRising() ? DAWN : DUSK, horizon * 0.55);
   scene.background.copy(_sky);
   if (scene.fog) scene.fog.color.copy(_sky);
+  // gradient dome: deeper toward the zenith, the warm/blended tone at the horizon
+  setSkyColors(_zen.copy(_sky).multiplyScalar(0.62), _sky);
   scene.fog.near = PLOT * 1.5; scene.fog.far = PLOT * (3.0 + dl * 1.6);
 
   // sun arc (east → zenith → west) + warm-to-white colour by altitude
