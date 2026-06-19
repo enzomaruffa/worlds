@@ -78,8 +78,15 @@ const dom = {
   loader: $("loader"),
   loaderWho: $("loaderWho"),
   loaderErr: $("loaderErr"),
+  speedlines: $("speedlines"),
   touch: { left: $("btnLeft"), right: $("btnRight"), gas: $("btnGas"), brake: $("btnBrake"), drift: $("btnDrift") },
 };
+let _slShown = 0;
+function updateSpeedLines() {
+  if (!dom.speedlines) return;
+  const o = Math.min(0.55, player.boostPow * 0.6);
+  if (Math.abs(o - _slShown) > 0.01) { dom.speedlines.style.opacity = o.toFixed(3); _slShown = o; }
+}
 
 // ───────────────────────────────────────────────────────────────────────────
 // TRACKS — each a closed loop of Catmull-Rom control points with a height
@@ -357,7 +364,8 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 const scene = new THREE.Scene();
 scene.fog = new THREE.Fog(0x9ad0e8, 200, 470);
 
-const camera = new THREE.PerspectiveCamera(62, 1, 0.1, 1000);
+const BASE_FOV = 62;
+const camera = new THREE.PerspectiveCamera(BASE_FOV, 1, 0.1, 1000);
 camera.position.set(0, 12, 80);
 
 // chase-camera zoom — mouse wheel (desktop) / pinch (touch). 1 = default.
@@ -403,6 +411,46 @@ const skyMat = new THREE.ShaderMaterial({
 });
 scene.add(new THREE.Mesh(new THREE.SphereGeometry(500, 24, 16), skyMat));
 
+// Camera-following sky group → sun/moon disc + stars feel infinitely far (no
+// parallax). Refilled per theme by applySkyFeatures(); repositioned each frame.
+const skyFollow = new THREE.Group();
+scene.add(skyFollow);
+function clearSkyFollow() {
+  for (let i = skyFollow.children.length - 1; i >= 0; i--) {
+    const c = skyFollow.children[i];
+    c.traverse?.((o) => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); });
+    skyFollow.remove(c);
+  }
+}
+function applySkyFeatures(theme) {
+  clearSkyFollow();
+  const sd = theme.sun; // [color, intensity, x, y, z]
+  const dir = new THREE.Vector3(sd[2], Math.max(20, sd[3]), sd[4]).normalize();
+  const at = dir.clone().multiplyScalar(360);
+  const discCol = theme.neon ? 0xcdd9ff : new THREE.Color(theme.sky[2]).lerp(new THREE.Color(0xffffff), 0.4).getHex();
+  // soft halo + bright disc
+  const halo = new THREE.Mesh(new THREE.CircleGeometry(theme.neon ? 26 : 60, 32),
+    new THREE.MeshBasicMaterial({ color: discCol, fog: false, transparent: true, opacity: 0.22, blending: THREE.AdditiveBlending, depthWrite: false }));
+  const disc = new THREE.Mesh(new THREE.CircleGeometry(theme.neon ? 13 : 30, 32),
+    new THREE.MeshBasicMaterial({ color: discCol, fog: false, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false }));
+  halo.position.copy(at); disc.position.copy(at);
+  halo.lookAt(0, 0, 0); disc.lookAt(0, 0, 0);
+  skyFollow.add(halo, disc);
+  // stars on dark skies
+  if (theme.neon || theme.sky[0] < 0x202020) {
+    const n = 320, pos = new Float32Array(n * 3);
+    let seed = 7;
+    const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+    for (let i = 0; i < n; i++) {
+      const u = rnd() * 2 - 1, a = rnd() * Math.PI * 2, r = Math.sqrt(1 - u * u);
+      pos[i * 3] = Math.cos(a) * r * 400; pos[i * 3 + 1] = Math.abs(u) * 380 + 30; pos[i * 3 + 2] = Math.sin(a) * r * 400;
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    skyFollow.add(new THREE.Points(geo, new THREE.PointsMaterial({ color: 0xffffff, size: 2.2, sizeAttenuation: false, fog: false, transparent: true, opacity: 0.9 })));
+  }
+}
+
 // Lighting: hemisphere fill + sun directional with soft shadow.
 const hemi = new THREE.HemisphereLight(0xbfe3ff, 0x4a5d3a, 0.9);
 scene.add(hemi);
@@ -445,6 +493,7 @@ function applyTheme(t) {
   sun.intensity = t.sun[1];
   sunOffset.set(t.sun[2], t.sun[3], t.sun[4]);
   groundMat.color.setHex(new THREE.Color(t.ground).multiplyScalar(0.65).getHex());
+  applySkyFeatures(t);
 }
 
 // ── Followed terrain ────────────────────────────────────────────────────────
@@ -1061,10 +1110,119 @@ function buildTrackWorld(index) {
   trackEdges = buildRoad(group, curTrack.theme);
   buildFinishLine(group, curTrack.theme);
   buildCheckpointGates(group);
+  addBoostPads(group, curTrack.theme);
   addScenery(group, curTrack.theme);
   buildProps(group, curTrack);
+  addSkyDome(group, curTrack.theme);
   scene.add(group);
   T.group = group; T.built = true;
+}
+
+// ── Boost pads — glowing forward chevrons on the racing line. Drive over one
+// for a free turbo. Placed at fixed fractions on EVERY track (off the finish). ──
+const BOOST_PAD_US = [0.17, 0.5, 0.83];
+let boostPads = [];
+function addBoostPads(group, theme) {
+  boostPads = [];
+  const col = theme.neon ? 0x22d3ee : 0x38e0ff;
+  for (const u of BOOST_PAD_US) {
+    const idx = Math.floor(u * SAMPLES) % SAMPLES;
+    const c = centerPts[idx], up = ups[idx], t = tangents[idx];
+    const fwd = t.clone().setY(0).normalize();
+    const right = new THREE.Vector3().crossVectors(up, t).normalize();
+    const pad = new THREE.Group();
+    // three nested chevrons pointing forward
+    for (let k = 0; k < 3; k++) {
+      const w = 6.2, depth = 1.5;
+      const shape = new THREE.Shape();
+      shape.moveTo(-w / 2, 0); shape.lineTo(0, depth); shape.lineTo(w / 2, 0);
+      shape.lineTo(w / 2 - 1.2, 0); shape.lineTo(0, depth - 1.0); shape.lineTo(-w / 2 + 1.2, 0);
+      shape.closePath();
+      const geo = new THREE.ShapeGeometry(shape);
+      const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+      mesh.rotation.x = -Math.PI / 2;
+      mesh.position.z = (k - 1) * 2.0;
+      pad.add(mesh);
+    }
+    // orient the pad: forward along tangent, lying on the banked road surface
+    pad.position.copy(c).addScaledVector(up, 0.08);
+    pad.quaternion.setFromRotationMatrix(orientMatrix(fwd, up));
+    pad.userData.chevrons = pad.children;
+    group.add(pad);
+    boostPads.push({ x: c.x, z: c.z, fwd, group: pad, until: 0, phase: Math.random() * 6.28 });
+  }
+}
+function stepBoostPads(dt, now) {
+  for (const p of boostPads) {
+    // animated pulse on the chevrons
+    p.phase += dt * 5;
+    const ch = p.group.userData.chevrons;
+    for (let k = 0; k < ch.length; k++) ch[k].material.opacity = 0.45 + 0.45 * (0.5 + 0.5 * Math.sin(p.phase - k * 0.9));
+    const dx = player.pos.x - p.x, dz = player.pos.z - p.z;
+    if (dx * dx + dz * dz < 30 && now > p.until) {
+      const movingFwd = (player.vx * p.fwd.x + player.vz * p.fwd.z) > 4;
+      if (movingFwd) { triggerBoost(0.9); SFX.boost(); p.until = now + 700; }
+    }
+  }
+}
+
+// ── Atmosphere: drifting clouds (bright skies) + bobbing hot-air balloons over
+// the scenery. World-fixed (live in the track group), so they parallax nicely. ──
+let skyBobbers = [];
+function addSkyDome(group, theme) {
+  skyBobbers = [];
+  let seed = 91;
+  const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+  // extent of the track for scattering things around it
+  let xmn = Infinity, xmx = -Infinity, zmn = Infinity, zmx = -Infinity;
+  for (let i = 0; i < SAMPLES; i += 4) { const p = centerPts[i]; if (p.x < xmn) xmn = p.x; if (p.x > xmx) xmx = p.x; if (p.z < zmn) zmn = p.z; if (p.z > zmx) zmx = p.z; }
+  const cx = (xmn + xmx) / 2, cz = (zmn + zmx) / 2, spread = Math.max(xmx - xmn, zmx - zmn) / 2 + 120;
+
+  // clouds — soft white puff clusters (skip dense fog / neon night)
+  if (!theme.neon) {
+    const cloudMat = new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false, transparent: true, opacity: 0.85, depthWrite: false });
+    for (let c = 0; c < 9; c++) {
+      const puff = new THREE.Group();
+      const lobes = 3 + Math.floor(rnd() * 3);
+      for (let l = 0; l < lobes; l++) {
+        const s = 8 + rnd() * 10;
+        const m = new THREE.Mesh(new THREE.SphereGeometry(s, 8, 6), cloudMat);
+        m.position.set((rnd() - 0.5) * 26, (rnd() - 0.5) * 5, (rnd() - 0.5) * 16);
+        m.scale.y = 0.6; puff.add(m);
+      }
+      const a = rnd() * Math.PI * 2, r = spread * (0.6 + rnd() * 0.8);
+      puff.position.set(cx + Math.cos(a) * r, 90 + rnd() * 70, cz + Math.sin(a) * r);
+      group.add(puff);
+      skyBobbers.push({ obj: puff, baseY: puff.position.y, amp: 0, drift: 0.6 + rnd() * 0.8, phase: rnd() * 6.28 });
+    }
+  }
+
+  // hot-air balloons — bright canopy + basket, gently bobbing above the scenery
+  const balloonCols = [0xef4444, 0x3b82f6, 0xf59e0b, 0x22c55e, 0xa855f7, 0xec4899];
+  const nB = 4;
+  for (let b = 0; b < nB; b++) {
+    const balloon = new THREE.Group();
+    const col = balloonCols[Math.floor(rnd() * balloonCols.length)];
+    const canopy = new THREE.Mesh(new THREE.SphereGeometry(7, 16, 12), new THREE.MeshLambertMaterial({ color: col }));
+    canopy.scale.set(1, 1.25, 1); canopy.position.y = 0; balloon.add(canopy);
+    // alternating stripe
+    const stripe = new THREE.Mesh(new THREE.SphereGeometry(7.05, 16, 12, 0, Math.PI / 4), new THREE.MeshLambertMaterial({ color: 0xffffff }));
+    stripe.scale.set(1, 1.25, 1); balloon.add(stripe);
+    const basket = new THREE.Mesh(new THREE.BoxGeometry(2.2, 2, 2.2), new THREE.MeshLambertMaterial({ color: 0x6b4423 }));
+    basket.position.y = -10; balloon.add(basket);
+    balloon.traverse((o) => { if (o.isMesh) o.castShadow = false; });
+    const a = rnd() * Math.PI * 2, r = spread * (0.7 + rnd() * 0.5);
+    balloon.position.set(cx + Math.cos(a) * r, 55 + rnd() * 45, cz + Math.sin(a) * r);
+    group.add(balloon);
+    skyBobbers.push({ obj: balloon, baseY: balloon.position.y, amp: 3 + rnd() * 3, drift: 0, phase: rnd() * 6.28, spin: (rnd() - 0.5) * 0.2 });
+  }
+}
+function stepSky(dt, t) {
+  for (const s of skyBobbers) {
+    if (s.amp) s.obj.position.y = s.baseY + Math.sin(t * 0.5 + s.phase) * s.amp; // balloons bob
+    if (s.spin) s.obj.rotation.y += s.spin * dt;
+    if (s.drift) s.obj.position.x += s.drift * dt; // clouds drift slowly
+  }
 }
 
 // Hand-placed scenery props (from the editor's catalog). Each prop is
@@ -1093,6 +1251,9 @@ function spawnPlayerAtStart() {
   player.vel = 0; player.vx = 0; player.vz = 0; player.slip = 0;
   player.drift = false;
   player.lateral = 0;
+  player.driftCharge = 0; player.driftTier = 0; player.boost = 0; player.boostPow = 0;
+  wasDrifting = false;
+  if (player.flame) player.flame.scale.setScalar(0.001);
   const sf = surfaceAt(player.pos.x, player.pos.z);
   player.surfaceY = sf.y;
   player.surfaceUp.copy(sf.up);
@@ -1290,7 +1451,23 @@ const player = {
   surfaceUp: new THREE.Vector3(0, 1, 0),
   mesh: null,
   label: null,
+  // ── drift-charge mini-turbo (Mario-Kart style) ──
+  driftCharge: 0,    // seconds of sustained drift accumulated this slide
+  driftTier: 0,      // 0 none · 1 blue · 2 orange · 3 purple
+  boost: 0,          // remaining boost time (s)
+  boostPow: 0,       // 0..1 boost strength (drives FOV / speed lines / flame)
+  lastPad: -1,       // last boost-pad index hit (debounce)
+  flame: null,       // exhaust flame group
 };
+
+// drift-charge thresholds (seconds held) → boost duration (seconds) per tier
+const DRIFT_TIERS = [
+  { at: 0.55, boost: 0.55, color: 0x49b6ff }, // blue
+  { at: 1.30, boost: 1.05, color: 0xffae3b }, // orange
+  { at: 2.20, boost: 1.70, color: 0xc06bff }, // purple
+];
+const BOOST_SPEED = 20;   // extra top speed while boosting (added over PHYS.maxSpeed)
+const BOOST_ACCEL = 70;   // forward shove while boost is active
 
 // Arcade drift model: a velocity VECTOR with grip. Lateral velocity is bled off
 // fast when gripping and slowly while drifting, so the kart slides through
@@ -1318,6 +1495,18 @@ function makeSelfKart() {
   player.mesh = makeKart(me.color);
   player.label = makeLabel(me.name + " (you)");
   player.mesh.add(player.label);
+  // twin exhaust flames — scaled up only while boosting (see stepPhysics)
+  const flame = new THREE.Group();
+  const flameGeo = new THREE.ConeGeometry(0.22, 1.5, 10);
+  for (const fx of [0.24, -0.24]) {
+    const cone = new THREE.Mesh(flameGeo, new THREE.MeshBasicMaterial({ color: 0x66e0ff, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false }));
+    cone.rotation.x = -Math.PI / 2; // point backward (-Z)
+    cone.position.set(fx, 0.5, -1.7);
+    flame.add(cone);
+  }
+  flame.scale.setScalar(0.001);
+  player.mesh.add(flame);
+  player.flame = flame;
   scene.add(player.mesh);
 }
 
@@ -1402,6 +1591,57 @@ function stepSmoke(dt) {
 function clearSmoke() {
   for (const s of smoke) { scene.remove(s.pts); s.pts.geometry.dispose(); s.pts.material.dispose(); }
   smoke.length = 0;
+}
+
+// ── Drift sparks — bright colored flecks off the rear wheels while charging the
+// mini-turbo. Colour escalates with the charge tier (blue → orange → purple). ──
+const sparks = [];
+let lastSparkAt = 0;
+function emitSparks(now, color) {
+  if (now - lastSparkAt < 26) return;
+  lastSparkAt = now;
+  const fx = Math.sin(player.heading), fz = Math.cos(player.heading);
+  const sf = surfaceAt(player.pos.x, player.pos.z);
+  for (const side of [-1, 1]) {
+    const ox = fz * side * 0.82, oz = -fx * side * 0.82;
+    const n = 5;
+    const pos = new Float32Array(n * 3), vel = new Float32Array(n * 3);
+    const bx = player.pos.x - fx * 1.0 + ox, bz = player.pos.z - fz * 1.0 + oz;
+    for (let i = 0; i < n; i++) {
+      pos[i * 3] = bx; pos[i * 3 + 1] = sf.y + 0.2; pos[i * 3 + 2] = bz;
+      vel[i * 3] = -fx * 4 + (Math.random() - 0.5) * 6 + side * fz * 2;
+      vel[i * 3 + 1] = 2 + Math.random() * 4;
+      vel[i * 3 + 2] = -fz * 4 + (Math.random() - 0.5) * 6 - side * fx * 2;
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    const pts = new THREE.Points(geo, new THREE.PointsMaterial({ size: 0.5, color, transparent: true, opacity: 0.95, depthWrite: false, blending: THREE.AdditiveBlending }));
+    scene.add(pts); sparks.push({ pts, vel, life: 0 });
+  }
+}
+function stepSparks(dt) {
+  for (let i = sparks.length - 1; i >= 0; i--) {
+    const s = sparks[i]; s.life += dt;
+    const p = s.pts.geometry.attributes.position.array;
+    for (let j = 0; j < p.length; j += 3) {
+      p[j] += s.vel[j] * dt; p[j + 1] += s.vel[j + 1] * dt; p[j + 2] += s.vel[j + 2] * dt;
+      s.vel[j + 1] -= 22 * dt; s.vel[j] *= 0.9; s.vel[j + 2] *= 0.9; // gravity + drag
+    }
+    s.pts.geometry.attributes.position.needsUpdate = true;
+    s.pts.material.opacity = Math.max(0, 0.95 * (1 - s.life / 0.4));
+    if (s.life > 0.4) { scene.remove(s.pts); s.pts.geometry.dispose(); s.pts.material.dispose(); sparks.splice(i, 1); }
+  }
+}
+function clearSparks() {
+  for (const s of sparks) { scene.remove(s.pts); s.pts.geometry.dispose(); s.pts.material.dispose(); }
+  sparks.length = 0;
+}
+
+// Fire a boost: take the longer of the current/new boost, kick the camera, and
+// flag a burst of exhaust flame. Used by the mini-turbo AND by track boost pads.
+function triggerBoost(dur) {
+  player.boost = Math.max(player.boost, dur);
+  addShake(0.22);
 }
 
 // ── Remote karts (keyed by HANDLE → one kart per player) ────────────────────
@@ -1606,6 +1846,7 @@ const SFX = {
   horn: () => { tone({ type: "sawtooth", f0: 330, dur: 0.45, gain: 0.16 }); tone({ type: "sawtooth", f0: 247, dur: 0.45, gain: 0.14 }); },
   screech: () => { if (!gate("screech", 85)) return; noise({ dur: 0.14, gain: 0.11, lp: 5500, hp: 1600 }); },
   curb: () => { if (!gate("curb", 130)) return; noise({ dur: 0.09, gain: 0.13, lp: 2400 }); },
+  boost: () => { if (!gate("boost", 120)) return; tone({ type: "sawtooth", f0: 320, f1: 1300, dur: 0.34, gain: 0.18 }); noise({ dur: 0.3, gain: 0.12, lp: 3800, hp: 600 }); },
 };
 
 // ── screen shake — additive camera kick on impacts, decays each frame ──
@@ -1694,6 +1935,10 @@ function frame(now) {
     stepPhysics(dt, now);
     stepRemotes(dt);
     stepSmoke(dt);
+    stepSparks(dt);
+    stepBoostPads(dt, now);
+    stepSky(dt, now / 1000);
+    updateSpeedLines();
     updateCamera(dt);
     maybeSendPose(now);
     pruneRemotes(now);
@@ -1706,9 +1951,16 @@ function frame(now) {
   requestAnimationFrame(frame);
 }
 
+let wasDrifting = false; // tracks drift end → cash in the mini-turbo charge
+
 function stepPhysics(dt, now) {
   const throttling = !preRace && input.up;
   const braking = !preRace && input.down;
+
+  // boost timer + smoothed power (drives top speed, FOV kick, speed lines, flame)
+  if (player.boost > 0) player.boost = Math.max(0, player.boost - dt);
+  const boosting = player.boost > 0;
+  player.boostPow += ((boosting ? 1 : 0) - player.boostPow) * Math.min(1, (boosting ? 20 : 3.4) * dt);
 
   // forward (heading) + right axes
   let fx = Math.sin(player.heading), fz = Math.cos(player.heading);
@@ -1732,15 +1984,20 @@ function stepPhysics(dt, now) {
     else if (fwd < 0) fwd = Math.min(0, fwd + f);
   }
 
-  // off-road: heavy slow + low cap
+  // mini-turbo / pad boost shoves you forward and lifts the speed ceiling
+  if (boosting && fwd > -1) fwd += BOOST_ACCEL * dt;
+
+  // off-road: heavy slow + low cap (boost punches through grass)
   const off = offRoadAmount(player.pos.x, player.pos.z);
-  const onGrass = off > 0;
+  const onGrass = off > 0 && !boosting;
   if (onGrass) {
     if (fwd > PHYS.offRoadMax) fwd -= PHYS.offRoadDrag * dt;
     if (fwd < -PHYS.offRoadMax) fwd += PHYS.offRoadDrag * dt;
     fwd = THREE.MathUtils.clamp(fwd, -PHYS.offRoadMax, PHYS.offRoadMax);
   }
-  fwd = THREE.MathUtils.clamp(fwd, PHYS.maxReverse, PHYS.maxSpeed);
+  // boostPow eases the ceiling back down after a boost so speed bleeds off smoothly
+  const maxV = PHYS.maxSpeed + BOOST_SPEED * player.boostPow;
+  fwd = THREE.MathUtils.clamp(fwd, PHYS.maxReverse, maxV);
 
   // steering authority — computed now but the heading is rotated AFTER we
   // recompose the velocity, so the car turns while its momentum keeps its world
@@ -1794,6 +2051,20 @@ function stepPhysics(dt, now) {
   player.slip = lat;
   player.drift = handbrake || Math.abs(lat) > 5;
 
+  // ── mini-turbo: charge while genuinely sliding on the handbrake; cash a boost
+  // on release, scaled by how long you held the slide (blue → orange → purple) ──
+  const sliding = handbrake && Math.abs(lat) > 4 && Math.abs(player.vel) > 12 && !onGrass;
+  if (sliding) player.driftCharge += dt;
+  let tier = 0;
+  for (let i = DRIFT_TIERS.length - 1; i >= 0; i--) { if (player.driftCharge >= DRIFT_TIERS[i].at) { tier = i + 1; break; } }
+  player.driftTier = tier;
+  if (sliding && tier >= 1) emitSparks(now, DRIFT_TIERS[tier - 1].color);
+  if (wasDrifting && !sliding) {              // slide ended → release the turbo
+    if (player.driftTier >= 1) { triggerBoost(DRIFT_TIERS[player.driftTier - 1].boost); SFX.boost(); }
+    player.driftCharge = 0; player.driftTier = 0;
+  }
+  wasDrifting = sliding;
+
   // skid marks + tyre screech + smoke while sliding on the ground at speed
   if (player.drift && Math.abs(player.vel) > 9 && !onGrass) { stampSkid(now); SFX.screech(); emitDriftSmoke(now); }
   // engine note tracks speed; grass gives a gravel rumble
@@ -1828,6 +2099,13 @@ function stepPhysics(dt, now) {
     // front wheels point into the steer, with a touch of counter-steer on drifts
     const counter = THREE.MathUtils.clamp(-player.slip / 22, -0.5, 0.5);
     for (const fw of player.mesh.userData.frontWheels) fw.rotation.y = steer * 0.4 + (player.drift ? counter : 0);
+    // exhaust flames flare with boost power (with a little flicker)
+    if (player.flame) {
+      const fl = player.boostPow;
+      const flick = 0.85 + Math.random() * 0.3;
+      player.flame.visible = fl > 0.02;
+      player.flame.scale.set(fl * flick, fl * flick, fl * (1.1 + Math.random() * 0.5));
+    }
   }
 
   // lap line crossing
@@ -1913,6 +2191,14 @@ function updateCamera(dt) {
     camera.position.z += (Math.random() - 0.5) * camShake * 1.4;
     camShake *= Math.exp(-9 * dt);
   }
+  // FOV kick — punches out with boost (and a touch with raw speed) for a strong
+  // sense of speed; eases back smoothly via the same boostPow ramp.
+  const targetFov = BASE_FOV + player.boostPow * 12 + Math.min(1, Math.abs(player.vel) / PHYS.maxSpeed) * 4;
+  if (Math.abs(camera.fov - targetFov) > 0.05) {
+    camera.fov += (targetFov - camera.fov) * Math.min(1, 8 * dt);
+    camera.updateProjectionMatrix();
+  }
+  skyFollow.position.copy(camera.position); // keep sun/stars at infinite distance
   sun.position.set(player.pos.x + sunOffset.x, baseY + sunOffset.y, player.pos.z + sunOffset.z);
   sun.target.position.set(player.pos.x, baseY, player.pos.z);
 }
@@ -2165,6 +2451,7 @@ function startRound(idx) {
   spawnPlayerAtStart();
   clearSkid();
   clearSmoke();
+  clearSparks();
   raceStarted = false;
   preRace = true;
   lap.count = 0;
