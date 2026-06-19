@@ -371,6 +371,63 @@
     let presenceLoaded = false;    // has the presence roster reported at least once?
     let busy = false;              // re-entrancy guard for writes
     let lastRenderSig = "";        // dedupe identical renders (for drop animation control)
+    let prevDiscs = 0, prevPhase = null; // for drop/win sound + confetti transitions
+
+    // ── Sound — a tiny WebAudio synth (no asset files; resumes on first input) ──
+    let actx = null, muted = false;
+    function audioResume() { if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (_) {} } if (actx && actx.state === "suspended") actx.resume(); }
+    addEventListener("pointerdown", audioResume); addEventListener("keydown", audioResume);
+    addEventListener("keydown", (e) => { if (e.key === "m" || e.key === "M") { muted = !muted; toast(muted ? "🔇 muted" : "🔊 sound on"); } });
+    function tone({ type = "sine", f0, f1, dur = 0.15, gain = 0.2, delay = 0 }) {
+      if (!actx || muted) return;
+      const t = actx.currentTime + delay;
+      const o = actx.createOscillator(); o.type = type; o.frequency.setValueAtTime(f0, t);
+      if (f1 && f1 !== f0) o.frequency.exponentialRampToValueAtTime(Math.max(1, f1), t + dur);
+      const g = actx.createGain();
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(gain, t + 0.008); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      o.connect(g); g.connect(actx.destination); o.start(t); o.stop(t + dur + 0.02);
+    }
+    const SFX = {
+      drop: () => { tone({ type: "sine", f0: 520, f1: 180, dur: 0.16, gain: 0.18 }); tone({ type: "triangle", f0: 150, f1: 90, dur: 0.12, gain: 0.12, delay: 0.1 }); },
+      win:  () => [523, 659, 784, 1047].forEach((f, i) => tone({ type: "triangle", f0: f, dur: 0.22, gain: 0.2, delay: i * 0.11 })),
+      lose: () => [440, 349, 262].forEach((f, i) => tone({ type: "sawtooth", f0: f, dur: 0.26, gain: 0.14, delay: i * 0.13 })),
+      draw: () => [392, 392].forEach((f, i) => tone({ type: "triangle", f0: f, dur: 0.2, gain: 0.15, delay: i * 0.18 })),
+    };
+
+    // ── Confetti — a short canvas burst on a win (no libs) ──
+    function confettiBurst() {
+      const cv = document.createElement("canvas");
+      cv.style.cssText = "position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:60";
+      document.body.appendChild(cv);
+      const ctx = cv.getContext("2d");
+      const DPR = Math.min(devicePixelRatio || 1, 2);
+      cv.width = innerWidth * DPR; cv.height = innerHeight * DPR; ctx.scale(DPR, DPR);
+      const cols = ["#e7b53c", "#ff7a7e", "#ffe27a", "#6ee7a5", "#7aa2ff", "#ffffff"];
+      const N = 150, parts = [];
+      for (let i = 0; i < N; i++) parts.push({
+        x: innerWidth / 2 + (Math.random() - 0.5) * 160, y: innerHeight * 0.4,
+        vx: (Math.random() - 0.5) * 520, vy: -260 - Math.random() * 540, // px/s
+        s: 5 + Math.random() * 6, rot: Math.random() * 6.28, vr: (Math.random() - 0.5) * 8,
+        col: cols[(Math.random() * cols.length) | 0], life: 0,
+      });
+      let raf, last = performance.now();
+      (function frame(now) {
+        const dt = Math.min(0.05, (now - last) / 1000); last = now;
+        ctx.clearRect(0, 0, innerWidth, innerHeight);
+        let alive = false;
+        for (const p of parts) {
+          p.life += dt; p.vy += 1100 * dt; p.x += p.vx * dt; p.y += p.vy * dt; p.rot += p.vr * dt;
+          const a = Math.max(0, 1 - p.life / 3);
+          if (a > 0.01 && p.y < innerHeight + 30) {
+            alive = true;
+            ctx.save(); ctx.globalAlpha = a; ctx.translate(p.x, p.y); ctx.rotate(p.rot);
+            ctx.fillStyle = p.col; ctx.fillRect(-p.s / 2, -p.s / 2, p.s, p.s * 0.7); ctx.restore();
+          }
+        }
+        if (alive) raf = requestAnimationFrame(frame);
+        else { cancelAnimationFrame(raf); cv.remove(); }
+      })(last);
+    }
 
     // ── Helpers ──────────────────────────────────────────────
     const { toast, esc, uniqByHandle } = worlds;   // shared SDK building blocks
@@ -641,6 +698,21 @@
       if (!game) return;
       if (game.phase === "lobby") renderLobby();
       else renderGame();
+      reactToTransition();
+    }
+
+    // Fire drop/win sound + confetti when the synced state crosses a threshold.
+    // Works for both players (you hear the opponent's drops and see who won).
+    function reactToTransition() {
+      const discs = game.board ? game.board.reduce((n, v) => n + (v ? 1 : 0), 0) : 0;
+      if (discs > prevDiscs && prevPhase !== null) SFX.drop(); // a disc just landed
+      if (game.phase === "over" && prevPhase && prevPhase !== "over") {
+        if (game.winner === "draw") SFX.draw();
+        else if (me && game.winner === me.handle) { SFX.win(); confettiBurst(); }
+        else SFX.lose();
+      }
+      prevDiscs = discs;
+      prevPhase = game.phase;
     }
 
     function renderLobby() {
