@@ -6,6 +6,7 @@ import * as Sim from "./sim.js";
 import * as El from "./elements.js";
 import * as Life from "./life.js";
 import * as Net from "./net.js";
+import * as Social from "./social.js";
 
 // ───────────────────────────────────────────────────────────────────────────
 // SWARD — a multiplayer 3D incremental grass-plot game on Worlds.
@@ -330,13 +331,22 @@ async function boot() {
 
   buildPalette(); buildShop(); selectTool(G.tool);
   updateClockHud(); updateWallet();
+  await Social.init(G);
   Net.startNeighbors(renderNeighbors);
   Net.startPresence();
   Net.startChannel(onWatered);
   dom.visitBack.addEventListener("click", goHome);
+  // leave-a-gift while visiting
+  const giftBtn = document.createElement("span"); giftBtn.className = "x"; giftBtn.textContent = "🎁 gift";
+  giftBtn.addEventListener("click", () => {
+    if (!G.visiting) return;
+    let best = null, q = 0; for (const k of Social.GOOD_KEYS) if ((G.goods[k] || 0) > q) { q = G.goods[k]; best = k; }
+    if (best && q >= 1) Social.gift(G.visiting, best, 1); else toast("no goods to gift yet — grow some producers 🌼");
+  });
+  dom.visitBar.insertBefore(giftBtn, dom.visitBack);
   dom.muteBtn.addEventListener("click", () => toast("audio arrives soon 🔇"));
   dom.questBtn.addEventListener("click", () => toast("quests & almanac — coming soon 📖"));
-  dom.marketBtn.addEventListener("click", () => toast("market — coming soon 🤝"));
+  dom.marketBtn.addEventListener("click", () => Social.toggle());
   document.addEventListener("visibilitychange", () => { if (document.hidden) saveNow(); });
   window.addEventListener("beforeunload", saveNow);
 
@@ -344,7 +354,7 @@ async function boot() {
 
   G.booted = true;
   dom.loader.classList.add("hide");
-  window.SWARD = { G, Sim, Sky, Grass, W, El, Life, Net };   // debug/inspection handle
+  window.SWARD = { G, Sim, Sky, Grass, W, El, Life, Net, Social };   // debug/inspection handle
   requestAnimationFrame(frame);
 }
 
