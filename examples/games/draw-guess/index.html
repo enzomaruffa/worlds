@@ -745,6 +745,46 @@ main.hidden { display: none; }
   let drawSize = SIZES[1];
   let advancing = false;    // guard so we only fire one room write at a time
   let lastRoundNumSeen = -1;
+  let lastTickSec = -1;
+
+  // ── Sound — tiny WebAudio synth (no assets; resumes on first input) ──
+  let actx = null, sfxMuted = false;
+  function audioResume() { if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (_) {} } if (actx && actx.state === "suspended") actx.resume(); }
+  addEventListener("pointerdown", audioResume); addEventListener("keydown", audioResume);
+  addEventListener("keydown", (e) => { if ((e.key === "m" || e.key === "M") && document.activeElement?.tagName !== "INPUT") { sfxMuted = !sfxMuted; if (typeof toast === "function") toast(sfxMuted ? "🔇 muted" : "🔊 sound on"); } });
+  function blip({ type = "sine", f0, f1, dur = 0.15, gain = 0.2, delay = 0 }) {
+    if (!actx || sfxMuted) return;
+    const t = actx.currentTime + delay;
+    const o = actx.createOscillator(); o.type = type; o.frequency.setValueAtTime(f0, t);
+    if (f1 && f1 !== f0) o.frequency.exponentialRampToValueAtTime(Math.max(1, f1), t + dur);
+    const g = actx.createGain();
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(gain, t + 0.008); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(actx.destination); o.start(t); o.stop(t + dur + 0.02);
+  }
+  const SFX = {
+    correct: () => { [659, 880].forEach((f, i) => blip({ type: "triangle", f0: f, dur: 0.16, gain: 0.18, delay: i * 0.09 })); },
+    win:     () => [523, 659, 784, 1047].forEach((f, i) => blip({ type: "triangle", f0: f, dur: 0.2, gain: 0.2, delay: i * 0.1 })),
+    round:   () => blip({ type: "square", f0: 440, f1: 660, dur: 0.16, gain: 0.14 }),
+    reveal:  () => [392, 523].forEach((f, i) => blip({ type: "triangle", f0: f, dur: 0.2, gain: 0.15, delay: i * 0.12 })),
+    timeout: () => blip({ type: "sawtooth", f0: 300, f1: 120, dur: 0.32, gain: 0.15 }),
+    tick:    () => blip({ type: "sine", f0: 900, dur: 0.05, gain: 0.09 }),
+  };
+  function confettiBurst() {
+    const cv = document.createElement("canvas");
+    cv.style.cssText = "position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:90";
+    document.body.appendChild(cv);
+    const ctx = cv.getContext("2d"), DPR = Math.min(devicePixelRatio || 1, 2);
+    cv.width = innerWidth * DPR; cv.height = innerHeight * DPR; ctx.scale(DPR, DPR);
+    const cols = ["#e7b53c", "#22c55e", "#ff7a7e", "#7aa2ff", "#ffffff", "#f0abfc"], parts = [];
+    for (let i = 0; i < 130; i++) parts.push({ x: innerWidth / 2 + (Math.random() - 0.5) * 160, y: innerHeight * 0.4, vx: (Math.random() - 0.5) * 520, vy: -260 - Math.random() * 520, s: 5 + Math.random() * 6, rot: Math.random() * 6.28, vr: (Math.random() - 0.5) * 8, col: cols[(Math.random() * cols.length) | 0], life: 0 });
+    let raf, last = performance.now();
+    (function frame(now) {
+      const dt = Math.min(0.05, (now - last) / 1000); last = now;
+      ctx.clearRect(0, 0, innerWidth, innerHeight); let alive = false;
+      for (const p of parts) { p.life += dt; p.vy += 1100 * dt; p.x += p.vx * dt; p.y += p.vy * dt; p.rot += p.vr * dt; const a = Math.max(0, 1 - p.life / 3); if (a > 0.01 && p.y < innerHeight + 30) { alive = true; ctx.save(); ctx.globalAlpha = a; ctx.translate(p.x, p.y); ctx.rotate(p.rot); ctx.fillStyle = p.col; ctx.fillRect(-p.s / 2, -p.s / 2, p.s, p.s * 0.7); ctx.restore(); } }
+      if (alive) raf = requestAnimationFrame(frame); else { cancelAnimationFrame(raf); cv.remove(); }
+    })(last);
+  }
   let revealTimer = null;
 
   // ---------------------------------------------------------------------------
@@ -968,6 +1008,7 @@ main.hidden { display: none; }
         guessedThisRound.add(handle);
         appendChat({ who: name, text: "guessed the word! ✅", cls: "correct" });
         renderRoster();
+        if (handle === myHandle) { SFX.win(); confettiBurst(); } else SFX.correct();
       }
       // Controller awards points + advances to reveal (only first winner matters).
       if (iControl() && !game._scored) {
@@ -1192,6 +1233,8 @@ main.hidden { display: none; }
       guessedThisRound.clear();
       clearBoard();
       strokeQueue = [];
+      lastTickSec = -1;
+      SFX.round();
       if (data.drawer) {
         if (data.drawer.handle === myHandle) {
           systemMsg("Your turn to draw! The word is \"" + data.word + "\".");
@@ -1206,8 +1249,10 @@ main.hidden { display: none; }
       const w = data.word || "";
       if (data.lastWinner) {
         systemMsg("\"" + w + "\" — " + data.lastWinner.name + " got it! (+3, drawer +2)");
+        if (!data.lastWinner || data.lastWinner.handle !== myHandle) SFX.reveal();
       } else {
         systemMsg("Time! The word was \"" + w + "\".");
+        SFX.timeout();
       }
     }
 
@@ -1237,6 +1282,7 @@ main.hidden { display: none; }
       const secs = Math.ceil(remain / 1000);
       els.timer.textContent = secs + "s";
       els.timerWrap.classList.toggle("low", secs <= 10);
+      if (secs <= 5 && secs >= 1 && secs !== lastTickSec) { lastTickSec = secs; SFX.tick(); }
       if (remain <= 0 && iControl() && !game._scored && !advancing) {
         timeoutReveal();
       }
