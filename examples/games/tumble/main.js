@@ -47,7 +47,7 @@ const me = { handle: null, name: "you", color: 0xfbbf24 };
 const $ = (x) => document.getElementById(x);
 const dom = {
   canvas: $("scene"),
-  lvlN: $("lvlN"), ptsN: $("ptsN"),
+  lvlN: $("lvlN"), ptsN: $("ptsN"), coinN: $("coinN"),
   timeBar: $("timeBar"), timeFill: $("timeBar").firstElementChild,
   finN: $("finN"), finOf: $("finOf"),
   boardList: $("boardList"),
@@ -336,6 +336,8 @@ const SFX = {
   death: () => { if (gate("death", 300)) tone({ type: "sawtooth", f0: 320, f1: 55, dur: 0.4, gain: 0.26 }); },
   start: () => tone({ type: "triangle", f0: 440, f1: 880, dur: 0.26, gain: 0.16 }),
   finish: () => [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => tone({ type: "triangle", f0: f, dur: 0.2, gain: 0.22 }), i * 90)),
+  coin: () => { tone({ type: "square", f0: 988, dur: 0.07, gain: 0.12 }); tone({ type: "square", f0: 1319, dur: 0.1, gain: 0.12 }); },
+  bonus: () => [784, 1047, 1319].forEach((f, i) => setTimeout(() => tone({ type: "triangle", f0: f, dur: 0.16, gain: 0.2 }), i * 70)),
 };
 
 function box(mat, w, h, d, x, y, z, parent) {
@@ -611,6 +613,19 @@ function buildObjectLevel(def, index) {
       obj.coins.push(built.group);
     }
   }
+  // scatter collectible coins above the platforms so every authored level rewards
+  // exploring too (designed levels rarely place coin objects themselves)
+  if (ASSETS["coin-gold"]) {
+    let ci = 0, placed = 0;
+    for (const a of obj.walk) {
+      if (placed >= 14) break;
+      if (a.fx && a.fx.type === "crumble") continue;        // not over vanishing tiles
+      if ((ci++ % 2) !== 0) continue;                        // every other platform
+      const cxw = (a.minX + a.maxX) / 2, czw = (a.minZ + a.maxZ) / 2;
+      const c = placedClone("coin-gold", group, 1.5, cxw, a.top + 1.5, czw, 0, 0.5);
+      if (c) { obj.coins.push(c); placed++; }
+    }
+  }
   scene.add(group);
   level = { index, group, name: def.name || "Level " + index, obj, finishZ: obj.finish ? obj.finish.maxZ : maxZ + 6 };
 }
@@ -671,7 +686,7 @@ function dressLevel(group, rng, nChunks) {
       group.add(m);
     }
   }
-  // floating coins arcing over the track — pure sparkle (no scoring), spun in the loop
+  // floating coins arcing over the track — collect them (10 = +1 point), spun in the loop
   if (ASSETS["coin-gold"]) {
     for (let ci = 1; ci < nChunks - 1; ci++) {
       if (rng() < 0.45) continue;
@@ -1052,6 +1067,27 @@ function maybeAllFinish() {
 
 // ── leaderboard (cumulative points) ──
 let board = null, myDocId = null, myPoints = 0, rows = [];
+// ── collectible coins: a session tally; every 10 collected earns a board point ──
+let coinCount = 0;
+function collectCoins() {
+  if (!player.mesh) return;
+  const px = player.pos.x, py = player.pos.y, pz = player.pos.z;
+  const lists = [coins, level && level.obj ? level.obj.coins : null];
+  for (const list of lists) {
+    if (!list) continue;
+    for (const c of list) {
+      if (!c || c.userData.got || !c.visible) continue;
+      const dx = c.position.x - px, dy = c.position.y - (py + 1), dz = c.position.z - pz;
+      if (dx * dx + dy * dy + dz * dz < 5.3) { // ~2.3 unit pickup
+        c.userData.got = true; c.visible = false;
+        coinCount++;
+        SFX.coin(); burstDust(c.position, 8, 3, 0xfde047);
+        if (coinCount % 10 === 0) { flashMessage("10 COINS!  +1", true); SFX.bonus(); scorePoint(); }
+        updateHud();
+      }
+    }
+  }
+}
 async function initBoard() {
   try { board = worlds.db.collection(LEADERBOARD); } catch (_) { return; }
   await refreshBoard();
@@ -1121,6 +1157,7 @@ function renderBoard() {
 function updateHud() {
   if (level) dom.lvlN.textContent = String(level.index);
   dom.ptsN.textContent = String(myPoints);
+  if (dom.coinN) dom.coinN.textContent = String(coinCount);
   const n = Math.max(1, activeHandles.size);
   dom.playerN.textContent = String(n);
   dom.finOf.textContent = String(activeHandles.size || 1);
@@ -1225,6 +1262,8 @@ function stepPlayer(dt, t) {
 
   if (hazardEffect(player, t)) { respawn(); return; } // touched a kill hazard
   if (player.pos.y < VOID_Y) respawn();
+
+  collectCoins(); // grab any coins we touched this frame
 
   if (level && level.obj) {
     // ride moving platforms you're standing on

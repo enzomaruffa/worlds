@@ -50,6 +50,8 @@
     #lvlBox .lvl b { color: var(--gold-bright); }
     #lvlBox .pts { font-size: .8rem; color: var(--muted); margin-top: .25rem; }
     #lvlBox .pts b { color: var(--green); font-weight: 700; }
+    #lvlBox #coinN { color: var(--gold-bright); }
+    #lvlBox .coinhint { color: var(--dim); font-size: .68rem; }
 
     /* top-center: brand + timer + finished tally */
     #topCenter { grid-column: 2; grid-row: 1; justify-self: center; text-align: center; display: flex; flex-direction: column; align-items: center; gap: .35rem; min-width: 12rem; }
@@ -146,6 +148,7 @@
       <div class="panel" id="lvlBox">
         <div class="lvl">LEVEL <b id="lvlN">1</b></div>
         <div class="pts">your points <b id="ptsN">0</b></div>
+        <div class="pts">🪙 <b id="coinN">0</b> <span class="coinhint">· 10 = +1pt</span></div>
       </div>
 
       <div id="topCenter">
@@ -161,7 +164,7 @@
 
       <div class="panel" id="players"><b id="playerN">1</b> <span class="small">in the gauntlet</span></div>
 
-      <div id="hint">WASD / arrows to move · SPACE jump · SHIFT dive · M mute</div>
+      <div id="hint">WASD / arrows · SPACE jump · SHIFT dive · grab 🪙 coins · M mute</div>
       <button id="muteBtn" title="mute (M)">🔊</button>
 
       <div id="touch">
