@@ -443,6 +443,24 @@
     out:   { label: "Out",   em: "🚫" },
   };
 
+  // ── Confetti — a little celebration when you commit to going (no libs) ──
+  function confettiBurst() {
+    const cv = document.createElement("canvas");
+    cv.style.cssText = "position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:90";
+    document.body.appendChild(cv);
+    const ctx = cv.getContext("2d"), DPR = Math.min(devicePixelRatio || 1, 2);
+    cv.width = innerWidth * DPR; cv.height = innerHeight * DPR; ctx.scale(DPR, DPR);
+    const cols = ["#22c55e", "#e7b53c", "#7aa2ff", "#ffffff", "#f0abfc", "#ff7a7e"], parts = [];
+    for (let i = 0; i < 120; i++) parts.push({ x: innerWidth / 2 + (Math.random() - 0.5) * 150, y: innerHeight * 0.42, vx: (Math.random() - 0.5) * 500, vy: -250 - Math.random() * 500, s: 5 + Math.random() * 6, rot: Math.random() * 6.28, vr: (Math.random() - 0.5) * 8, col: cols[(Math.random() * cols.length) | 0], life: 0 });
+    let raf, last = performance.now();
+    (function frame(now) {
+      const dt = Math.min(0.05, (now - last) / 1000); last = now;
+      ctx.clearRect(0, 0, innerWidth, innerHeight); let alive = false;
+      for (const p of parts) { p.life += dt; p.vy += 1100 * dt; p.x += p.vx * dt; p.y += p.vy * dt; p.rot += p.vr * dt; const a = Math.max(0, 1 - p.life / 3); if (a > 0.01 && p.y < innerHeight + 30) { alive = true; ctx.save(); ctx.globalAlpha = a; ctx.translate(p.x, p.y); ctx.rotate(p.rot); ctx.fillStyle = p.col; ctx.fillRect(-p.s / 2, -p.s / 2, p.s, p.s * 0.7); ctx.restore(); } }
+      if (alive) raf = requestAnimationFrame(frame); else { cancelAnimationFrame(raf); cv.remove(); }
+    })(last);
+  }
+
   // ── DOM refs ─────────────────────────────────────────────
   const $ = (id) => document.getElementById(id);
   const boot = $("boot");
@@ -668,6 +686,8 @@
   // ── RSVP ─────────────────────────────────────────────────
   async function setRsvp(status) {
     if (!RSVP_META[status]) return;
+    // celebrate committing to the hangout (only when newly switching TO "going")
+    if (status === "going" && (!me || rsvps()[me.handle] !== "going")) confettiBurst();
     const btns = document.querySelectorAll(".rsvp-btn");
     btns.forEach((b) => { b.disabled = true; });
     // optimistic
