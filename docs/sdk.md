@@ -257,6 +257,30 @@ Every site also gets an automatic **"◐ Worlds" leave pill** (top-left) that fl
 visitor back to the universe — so no world is a dead end. Opt out with
 `window.__worldsNoLeave = true` before the `worlds.js` tag.
 
+## Idle / offline progress — `worlds.idle`
+
+The battery every incremental / tend-it game re-implements: remember when the player
+was last here, credit the (capped) time they were away, and show a "while you were
+away" summary. The SDK owns the generic half — `lastSeen`, capped elapsed, a
+heartbeat (auto on tab-hide + unload), and a self-contained summary modal. Your game
+owns the specific half — how its world advances over N seconds.
+
+```js
+const idle = worlds.idle("my-game", { cap: 8 * 3600 });   // cap = max credited seconds (default 8h)
+const secs = await idle.elapsed();        // capped seconds since last visit, or null (first/too-short)
+if (secs) {
+  const report = advanceMyWorld(secs);    // YOUR catch-up math → e.g. { dew: 120, honey: 4 }
+  idle.summary(report, { title: "While you were away" }); // standard modal; pass render(report)->html to theme it
+}
+idle.beat();                              // stamp "last here = now" (also auto on hide/unload)
+```
+
+Persistence of `lastSeen`: `store:"local"` (default) → `localStorage`; `store:"db"` →
+a per-player `worlds.db` doc; `store:"none"` → you own it (pass `lastSeen` in) — for a
+game that already saves its own state + timestamp. Gaps under `min` (default 30s) and
+the first visit return `null`. `elapsed()` consumes the gap once, so a quick reload
+won't double-credit.
+
 ## Notify — `worlds.notify`
 
 ```js
