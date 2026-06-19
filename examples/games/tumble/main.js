@@ -1165,8 +1165,13 @@ bindBtn("btnUp", "fwd"); bindBtn("btnDown", "back"); bindBtn("btnLeft", "left");
 function stepPlayer(dt, t) {
   const diving = player.diveUntil > t;
   const wasAir = !player.grounded; // for landing sfx/dust/shake
-  const mx = (input.right ? 1 : 0) - (input.left ? 1 : 0);
-  const mz = (input.fwd ? 1 : 0) - (input.back ? 1 : 0);
+  // The camera looks toward +Z, so world +X maps to screen-LEFT — flip the
+  // horizontal axis so D/→ moves the player to the right of the screen.
+  let mx = (input.left ? 1 : 0) - (input.right ? 1 : 0);
+  let mz = (input.fwd ? 1 : 0) - (input.back ? 1 : 0);
+  // normalize so diagonals aren't ~41% faster than cardinal directions
+  const mlen = Math.hypot(mx, mz);
+  if (mlen > 1) { mx /= mlen; mz /= mlen; }
   // accelerate toward desired velocity, but with reduced control on ice (slidey)
   // and while committed to a dive.
   let ctrl = player.grounded ? 1 : 0.35;
@@ -1282,17 +1287,20 @@ const lookGoal = new THREE.Vector3();
 const lookCur = new THREE.Vector3();
 let lookInit = false;
 function stepCamera(dt) {
-  camGoal.set(player.pos.x * 0.55, player.pos.y + 9.5, player.pos.z - 13);
-  camera.position.lerp(camGoal, 1 - Math.exp(-6 * dt));
+  // Follow directly behind the player and look straight down +Z. Camera position
+  // and look-target share the SAME x so the view never tilts as you strafe —
+  // "forward" (W / +Z) always points up the screen. The lerps give smooth lag.
+  camGoal.set(player.pos.x, player.pos.y + 9.5, player.pos.z - 13);
+  camera.position.lerp(camGoal, 1 - Math.exp(-7 * dt));
   if (shake > 0.001) { // additive kick on hits/landings, decays fast
     camera.position.x += (Math.random() - 0.5) * shake * 1.6;
     camera.position.y += (Math.random() - 0.5) * shake * 1.2;
     camera.position.z += (Math.random() - 0.5) * shake * 1.6;
     shake *= Math.exp(-9 * dt);
   }
-  lookGoal.set(player.pos.x * 0.35, player.pos.y + 1.5, player.pos.z + 7);
+  lookGoal.set(player.pos.x, player.pos.y + 1.5, player.pos.z + 7);
   if (!lookInit) { lookCur.copy(lookGoal); lookInit = true; }
-  lookCur.lerp(lookGoal, 1 - Math.exp(-7 * dt));
+  lookCur.lerp(lookGoal, 1 - Math.exp(-8 * dt));
   camera.lookAt(lookCur);
 }
 
