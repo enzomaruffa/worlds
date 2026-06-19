@@ -778,36 +778,24 @@ function hazardEffect(p, t) {
         const pa = Math.atan2(dx, dz);
         let diff = Math.abs(((pa - h.mesh.rotation.y + Math.PI) % (Math.PI)) );
         diff = Math.min(diff, Math.PI - diff);
-        if (diff < 0.34) { // swept by the bar → knockback
-          p.vel.x += (dx / d) * 11; p.vel.z += (dz / d) * 6; p.vel.y = Math.max(p.vel.y, 6);
-          kbFlash(); SFX.hit(); addShake(0.45);
-        }
+        if (diff < 0.34) knockback(p, dx, dz, 11, 6, t); // swept by the bar
       }
     } else if (h.kind === "sweeper") {
       const bx = Math.sin(t * h.speed) * h.amp;
       h.mesh.position.x = bx;
       if (Math.abs(p.pos.z - h.z) < 0.9 && Math.abs(p.pos.x - bx) < 1.6 && p.pos.y < 1.3) {
-        p.vel.z -= 12; p.vel.y = Math.max(p.vel.y, 7); // knocked back — jump it next time
-        kbFlash();
+        knockback(p, 0, -1, 12, 7, t); // bumped backward — jump it next time
       }
     } else if (h.kind === "ball") {
       // swinging wrecking ball: knock the player away from the ball's world position
       h.ball.getWorldPosition(h._v);
       const dx = p.pos.x - h._v.x, dy = p.pos.y - h._v.y, dz = p.pos.z - h._v.z;
       const d = Math.hypot(dx, dy, dz);
-      if (d < h.r + 0.7 && d > 0.001) {
-        const f = 18 / d;
-        p.vel.x += dx * f; p.vel.z += dz * f; p.vel.y = Math.max(p.vel.y, 8);
-        kbFlash();
-      }
+      if (d < h.r + 0.7) knockback(p, dx, dz, 16, 8, t); // wrecking ball
     } else if (h.kind === "boulder") {
       const dx = p.pos.x - h.group.position.x, dz = p.pos.z - h.group.position.z;
       const d = Math.hypot(dx, dz);
-      if (d < h.r + 0.7 && p.pos.y < h.y + 3) {
-        const f = 16 / Math.max(d, 0.3);
-        p.vel.x += dx * f; p.vel.z += dz * f; p.vel.y = Math.max(p.vel.y, 7);
-        kbFlash();
-      }
+      if (d < h.r + 0.7 && p.pos.y < h.y + 3) knockback(p, dx, dz, 15, 7, t); // rolling boulder
     } else if (h.kind === "fan") {
       // wind zone: steadily shove the player along the fan's direction while in range
       const dx = p.pos.x - h.x, dz = p.pos.z - h.z;
@@ -931,8 +919,21 @@ const player = {
   surfFx: null,   // effect of the surface under us last frame (ice/conveyor)
   coyoteUntil: 0, // can still jump shortly after walking off an edge
   jumpBufUntil: 0,// a jump pressed just before landing still fires on touchdown
+  knockUntil: 0,  // hazard-knockback cooldown so a single hit doesn't compound into an insane fling
   mesh: makeBean(0xfbbf24),
 };
+// One clean knockback per hit. Hazards used to ADD velocity every frame you were
+// in range (~16ms), compounding to 50-70 u/s and flinging you across the level —
+// this SETS a fixed launch away from the hazard, then locks out re-hits briefly.
+function knockback(p, nx, nz, mag, up, t) {
+  if (t < p.knockUntil) return;
+  const len = Math.hypot(nx, nz) || 1;
+  p.vel.x = (nx / len) * mag;
+  p.vel.z = (nz / len) * mag;
+  p.vel.y = Math.max(p.vel.y, up);
+  p.knockUntil = t + 0.5;
+  kbFlash(); SFX.hit(); addShake(0.4);
+}
 const FOOT_R = 0.62;   // body radius for ground support — you stand solidly at an
                        // edge (and catch a ledge you *just* reach) instead of
                        // dropping the instant your center clears it
