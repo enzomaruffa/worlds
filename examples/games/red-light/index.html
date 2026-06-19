@@ -369,6 +369,7 @@
       cursor: not-allowed;
     }
     #lobbyWaitNote { text-align: center; color: #71717a; font-size: .76rem; }
+    #lobbySeries { margin-top: .6rem; padding-top: .55rem; border-top: 1px solid var(--border); text-align: center; font-size: .82rem; font-weight: 600; color: var(--gold-bright); letter-spacing: .02em; }
 
     /* spectator note overlay for mid-round joiners */
     #spectateNote {
@@ -426,6 +427,7 @@
               <span class="ready-count" id="readyCount">0 of 0 ready</span>
             </div>
             <div id="lobbyRoster"></div>
+            <div id="lobbySeries"></div>
           </div>
 
           <div class="lobby-card">
@@ -473,10 +475,13 @@
     const SEND_HZ    = 12;       // position broadcasts per second (throttle)
     const STALE_MS   = 6000;     // drop remote players unheard-from this long
     const HEARTBEAT_MS = 1500;   // re-broadcast our pose at least this often so idle players don't go stale & vanish
-    const MOVE_WINDOW_MS = 180;  // recent-movement window for red-light elimination
+    const REACTION_GRACE = 450;  // ms after RED appears locally to come to a stop (reaction + coast + latency)
+    const MOVE_EPS = 0.004;      // speed below this counts as "stopped" for red-light elimination
+    const STOP_EASE = 24;        // how fast you decelerate when you let go (snappy enough to stop within the grace)
     const WIN_RESET_MS   = 3500; // host delay before returning to lobby after a win
     const GREEN_MIN = 1800, GREEN_MAX = 4500;
-    const RED_MIN   = 1200, RED_MAX   = 3000;
+    const RED_MIN   = 1500, RED_MAX   = 3200;
+    const WIN_TARGET = 3;        // points to win the match (best-of series)
 
     const { colorFor } = worlds;
     const clientId = worlds.id();
@@ -517,7 +522,23 @@
     };
 
     // light: rendered state everyone agrees on (host-driven)
-    const light = { state: "red", seq: -1, at: 0 };
+    const light = { state: "red", seq: -1, at: 0, redAt: 0 };
+    const matchScores = {};      // handle -> { name, wins } — running best-of series, survives round resets
+    function bumpScore(handle, name) {
+      if (!handle) return;
+      const e = matchScores[handle] || (matchScores[handle] = { name: name || handle, wins: 0 });
+      if (name) e.name = name;
+      e.wins++;
+    }
+    function seriesText() {
+      const rows = Object.values(matchScores).filter(r => r.wins > 0).sort((a, b) => b.wins - a.wins);
+      if (!rows.length) return "";
+      return rows.map(r => `${r.name === me.name ? "You" : r.name} ${r.wins}`).join("  ·  ");
+    }
+    function matchChampion() {
+      for (const h in matchScores) if (matchScores[h].wins >= WIN_TARGET) return matchScores[h];
+      return null;
+    }
 
     // round identity. We tie movement-allowed + reset to seq monotonicity.
     let roundSeq = 0;            // increments on every reset we apply
@@ -596,6 +617,8 @@
       }
 
       readyCountEl.textContent = `${snap.readyCount} of ${snap.total} ready`;
+      const sEl = document.getElementById("lobbySeries");
+      if (sEl) { const t = seriesText(); sEl.textContent = t ? "🏁 series · " + t : ""; sEl.style.display = t ? "block" : "none"; }
 
       readyBtn.classList.toggle("on", snap.ready);
       readyBtn.textContent = snap.ready ? "✓ Ready" : "I'm ready";
@@ -684,9 +707,14 @@
     function setLight(state, seq, at) {
       // accept only newer (or equal-but-changed) light frames
       if (seq != null && seq < light.seq) return;
+      const wasRed = light.state === "red";
       light.state = state;
       light.seq = (seq != null) ? seq : light.seq;
       light.at = at || Date.now();
+      // LOCAL render time of this red — drives a latency-fair reaction grace so a
+      // red frame that arrives late (network lag) never instantly eliminates a
+      // player who was legitimately moving on green. All local-clock, no skew.
+      if (state === "red" && !wasRed) light.redAt = performance.now();
       renderLight();
       updateMoveBtn();
     }
@@ -779,18 +807,27 @@
       showLobby();
     }
 
-    function concludeRound(text) {
+    function concludeRound(text, winnerHandle, winnerName_) {
       if (winnerName) return;
       winnerName = text;        // non-null marks the round as over
-      winText.textContent = text;
-      winSub.textContent = "back to the lobby…";
+      if (winnerHandle) bumpScore(winnerHandle, winnerName_);
+      const champ = matchChampion();
+      if (champ) {
+        winText.textContent = (champ.name === me.name ? "🎉 You take the match!" : `🎉 ${champ.name} takes the match!`);
+        winSub.textContent = `series ${seriesText()} · new match next`;
+      } else {
+        winText.textContent = text;
+        winSub.textContent = winnerHandle ? `series ${seriesText()} · first to ${WIN_TARGET}` : "back to the lobby…";
+      }
       winOverlay.classList.add("show");
+      if (champ) { for (const h in matchScores) delete matchScores[h]; } // fresh series after a match win
       renderLight();
       updateMoveBtn();
+      renderLobby();            // reflect the updated series in the lobby card too
       hostScheduleReset();      // host-gated: only the host broadcasts the reset
     }
-    function showWinner(name) {
-      concludeRound(name === me.name ? "🏆 You win!" : `🏆 ${name} wins!`);
+    function showWinner(name, handle) {
+      concludeRound(name === me.name ? "🏆 You win!" : `🏆 ${name} wins!`, handle, name);
     }
     // Everyone present is eliminated → nobody can win. The host ends the round so
     // it never gets stuck (this is also the single-player "you lost → retry" path).
@@ -884,8 +921,10 @@
       // target velocity from input
       const wantMove = pressed && canMove();
       const targetVel = wantMove ? SPEED : 0;
-      // ease toward target (so stopping isn't instant)
-      self.vel += (targetVel - self.vel) * Math.min(1, EASE * dt);
+      // ease toward target — accelerate gently, but decelerate snappily so a
+      // release-on-red actually brings you to a stop inside the reaction grace.
+      const ease = targetVel > 0 ? EASE : STOP_EASE;
+      self.vel += (targetVel - self.vel) * Math.min(1, ease * dt);
       if (self.vel < 0.0008 && targetVel === 0) self.vel = 0;
 
       if (!self.out && !self.won && !winnerName) {
@@ -895,8 +934,12 @@
           if (self.y > prevY + 1e-6) self.lastMoveAt = now;
         }
 
-        // red-light self-elimination: moved within window while red
-        if (light.state === "red" && (now - self.lastMoveAt) < MOVE_WINDOW_MS && self.y > 0) {
+        // red-light self-elimination: out only if you're STILL MOVING after the
+        // reaction grace past the moment RED appeared on YOUR screen. Checking
+        // live speed (not "moved recently") forgives the natural coast to a stop
+        // and a laggy red frame, so you're only punished for genuinely running on red.
+        if (light.state === "red" && (now - light.redAt) > REACTION_GRACE
+            && self.vel > MOVE_EPS && self.y > 0) {
           eliminateSelf();
         }
 
@@ -905,7 +948,7 @@
           self.y = 1;
           self.won = true;
           publish({ t: "win", handle: me.handle, name: me.name });
-          showWinner(me.name);
+          showWinner(me.name, me.handle);
         }
       }
 
@@ -920,6 +963,10 @@
       self.out = true;
       self.vel = 0;
       release();
+      // show how late you moved after red — turns "unfair!" into a learnable tell
+      const late = Math.max(0, Math.round(self.lastMoveAt - light.redAt));
+      const small = outBadge.querySelector("small");
+      if (small) small.textContent = "moved " + (late / 1000).toFixed(2) + "s after red";
       outBadge.classList.add("show");
       updateMoveBtn();
       // immediate broadcast of OUT
@@ -1119,7 +1166,7 @@
         }
         case "win": {
           if (phase !== "playing") return;
-          if (typeof p.name === "string") showWinner(p.name);
+          if (typeof p.name === "string") showWinner(p.name, p.handle);
           break;
         }
         case "reset": {
@@ -1155,6 +1202,14 @@
       if (phase === "lobby") {
         renderLobby();
         maybeAutoStart();
+      } else if (phase === "playing") {
+        // host migration: if we just inherited host mid-round, take over the light
+        // loop (or re-arm the lobby reset if the round was already won) so the
+        // round can never freeze when the previous host leaves.
+        if (isHost()) {
+          if (winnerName) { if (!resetTimer) hostScheduleReset(); }
+          else if (!hostTimer) startHostLoopIfNeeded();
+        }
       }
     }
 
