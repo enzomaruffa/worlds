@@ -79,6 +79,12 @@ const dom = {
   loaderWho: $("loaderWho"),
   loaderErr: $("loaderErr"),
   speedlines: $("speedlines"),
+  lapOf: $("lapOf"),
+  chargeWrap: $("chargeWrap"),
+  chargeFill: $("chargeFill"),
+  finishCard: $("finishCard"),
+  finishPlace: $("finishPlace"),
+  finishTime: $("finishTime"),
   touch: { left: $("btnLeft"), right: $("btnRight"), gas: $("btnGas"), brake: $("btnBrake"), drift: $("btnDrift") },
 };
 let _slShown = 0;
@@ -1870,7 +1876,12 @@ const lap = {
   wrongWay: false,
   nextCheckpoint: 0,
   prevCpSide: null,
+  finished: false,   // crossed the line on the final lap → race complete
+  totalMs: 0,        // total race time, frozen at finish
+  raceStartMs: 0,    // wall-clock at GO (for total time)
+  place: 0,          // finishing position among karts on this track
 };
+const finishedRemotes = new Set(); // handles that have already finished (for live placing)
 
 function signedFinishDist(x, z) {
   const dx = x - finishCenter.x, dz = z - finishCenter.z;
@@ -1883,7 +1894,7 @@ function nearFinishLine(x, z) {
 }
 
 function onCrossFinish(forward, now) {
-  if (!raceStarted) return;
+  if (!raceStarted || lap.finished) return;
   if (!forward) { toast("↺ turn around"); return; }
   const allChecked = lap.nextCheckpoint >= checkpoints.length;
   if (lap.count > 0 && !allChecked) {
@@ -1907,12 +1918,32 @@ function onCrossFinish(forward, now) {
       SFX.lap();
     }
   }
+  // crossing that completes the final lap → race finished
+  if (lap.count >= curTrack.laps) { finishRace(now); return; }
   lap.count++;
   lap.startMs = now;
   lap.nextCheckpoint = 0;
   lap.prevCpSide = null;
   refreshCheckpointVisuals();
   updateHud();
+}
+
+function finishRace(now) {
+  lap.finished = true;
+  lap.totalMs = now - lap.raceStartMs;
+  lap.place = finishedRemotes.size + 1;
+  try { if (net) net.send({ t: "fin", handle: me.handle, name: me.name }); } catch (_) {}
+  SFX.best();
+  showFinishCard(lap.place, lap.totalMs);
+  updateHud();
+}
+
+function placeText(p) { return p === 1 ? "🥇 1st" : p === 2 ? "🥈 2nd" : p === 3 ? "🥉 3rd" : "P" + p; }
+function showFinishCard(place, ms) {
+  if (!dom.finishCard) return;
+  dom.finishPlace.textContent = placeText(place);
+  dom.finishTime.textContent = fmtTime(ms);
+  dom.finishCard.classList.add("show");
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -2052,8 +2083,11 @@ function stepPhysics(dt, now) {
   player.drift = handbrake || Math.abs(lat) > 5;
 
   // ── mini-turbo: charge while genuinely sliding on the handbrake; cash a boost
-  // on release, scaled by how long you held the slide (blue → orange → purple) ──
-  const sliding = handbrake && Math.abs(lat) > 4 && Math.abs(player.vel) > 12 && !onGrass;
+  // on release, scaled by how long you held the slide (blue → orange → purple).
+  // Gate on TOTAL planar speed (deep drifts carry speed sideways, so forward vel
+  // alone dips below threshold and would wrongly drop the charge). ──
+  const planarSpeed = Math.hypot(fwd, lat);
+  const sliding = handbrake && Math.abs(lat) > 4 && planarSpeed > 9 && !onGrass;
   if (sliding) player.driftCharge += dt;
   let tier = 0;
   for (let i = DRIFT_TIERS.length - 1; i >= 0; i--) { if (player.driftCharge >= DRIFT_TIERS[i].at) { tier = i + 1; break; } }
@@ -2291,12 +2325,20 @@ function updateRacerCount() {
   dom.racerS.textContent = n === 1 ? "" : "s";
 }
 
-// Horn — a discrete one-off EVENT over worlds.actors.
+// Horn + finish — discrete one-off EVENTS over worlds.actors.
 function onActorEvent(cid, payload) {
-  if (!payload || payload.t !== "horn") return;
-  const handle = cidToHandle.get(cid);
-  const r = handle && remotes.get(handle);
-  if (r) { honkOver(r.mesh); SFX.horn(); }
+  if (!payload) return;
+  if (payload.t === "horn") {
+    const handle = cidToHandle.get(cid);
+    const r = handle && remotes.get(handle);
+    if (r) { honkOver(r.mesh); SFX.horn(); }
+  } else if (payload.t === "fin" && payload.handle) {
+    // a rival finished — they hold a place ahead of anyone still racing
+    if (!finishedRemotes.has(payload.handle)) {
+      finishedRemotes.add(payload.handle);
+      if (!lap.finished) toast("🏁 " + (payload.name || "a rival") + " finished " + placeText(finishedRemotes.size));
+    }
+  }
 }
 let lastHorn = 0;
 function honk() {
@@ -2405,7 +2447,8 @@ function rowHtml(r, pos) {
 // HUD helpers
 // ───────────────────────────────────────────────────────────────────────────
 function updateHud() {
-  dom.lapN.textContent = String(raceStarted ? Math.max(1, lap.count) : 1);
+  dom.lapN.textContent = lap.finished ? String(curTrack.laps) : String(raceStarted ? Math.min(curTrack.laps, Math.max(1, lap.count)) : 1);
+  if (dom.lapOf) dom.lapOf.textContent = "/ " + curTrack.laps;
   dom.best.textContent = lap.bestMs != null ? fmtTime(lap.bestMs) : "—";
   if (dom.boardTitle) dom.boardTitle.textContent = "best laps · " + curTrack.name;
 }
@@ -2414,8 +2457,24 @@ function updateTrackHud() {
   if (dom.trackMeta) dom.trackMeta.textContent = curTrack.blurb + " · " + curTrack.laps + " laps";
 }
 function updateLiveTimer(now) {
+  updateChargeMeter();
   if (!raceStarted) { dom.timer.textContent = "0:00.00"; return; }
+  if (lap.finished) { dom.timer.textContent = fmtTime(lap.totalMs); return; } // frozen total
   dom.timer.textContent = fmtTime(now - lap.startMs);
+}
+// Drift mini-turbo charge meter — shows the hidden core mechanic on the HUD.
+const TIER_COLORS = ["#52525b", "#49b6ff", "#ffae3b", "#c06bff"];
+function updateChargeMeter() {
+  if (!dom.chargeWrap) return;
+  const charging = player.driftCharge > 0.05;
+  dom.chargeWrap.classList.toggle("show", charging || player.boost > 0);
+  if (!charging && player.boost <= 0) return;
+  const top = DRIFT_TIERS[DRIFT_TIERS.length - 1].at;
+  const pct = Math.min(1, player.driftCharge / top) * 100;
+  dom.chargeFill.style.width = pct + "%";
+  const col = TIER_COLORS[Math.min(3, player.driftTier)];
+  dom.chargeFill.style.background = col;
+  dom.chargeWrap.style.boxShadow = player.driftTier >= 1 ? `0 0 14px -2px ${col}` : "none";
 }
 function fmtTime(ms) {
   if (ms == null || !isFinite(ms)) return "—";
@@ -2461,6 +2520,9 @@ function startRound(idx) {
   lap.armed = false;
   lap.nextCheckpoint = 0;
   lap.prevCpSide = null;
+  lap.finished = false;
+  finishedRemotes.clear();
+  if (dom.finishCard) dom.finishCard.classList.remove("show");
   dom.last.textContent = "";
   dom.last.classList.remove("good");
   refreshCheckpointVisuals();
@@ -2536,6 +2598,9 @@ function runCountdown() {
       lap.armed = true;
       lap.prevSide = signedFinishDist(player.pos.x, player.pos.z);
       lap.startMs = performance.now();
+      lap.raceStartMs = lap.startMs;
+      lap.finished = false;
+      finishedRemotes.clear();
       lap.count = 1;
       lap.nextCheckpoint = 0;
       lap.prevCpSide = signedCheckpointDist(checkpoints[0], player.pos.x, player.pos.z);
