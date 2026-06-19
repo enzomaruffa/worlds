@@ -721,12 +721,22 @@ function dressLevel(group, rng, nChunks) {
 }
 
 let groundSurf = null; // the AABB the player is standing on (carries .fx), set by groundY
-function groundY(x, z) {
+const STEP_UP = 0.35;  // tallest lip you can walk straight onto (bigger steps need a jump)
+// `prevFeet` = where the player's feet were LAST frame. We only land on a surface
+// the feet were at-or-above — so walking beside a higher platform no longer snaps
+// you up onto it, and a fast fall can't tunnel through a tile it crossed.
+function groundY(x, z, prevFeet) {
   groundSurf = null;
   if (!level) return 0;
   if (level.obj) {
+    if (prevFeet == null) prevFeet = player.pos.y - 0.9;
     let best = null, bestA = null;
-    const consider = (a) => { if (a.dead) return; if (x >= a.minX && x <= a.maxX && z >= a.minZ && z <= a.maxZ && a.top <= player.pos.y + 0.7 && (best === null || a.top > best)) { best = a.top; bestA = a; } };
+    const consider = (a) => {
+      if (a.dead) return;
+      if (x < a.minX || x > a.maxX || z < a.minZ || z > a.maxZ) return;
+      if (prevFeet < a.top - STEP_UP) return;           // it's above you → not a floor, it's a wall
+      if (best === null || a.top > best) { best = a.top; bestA = a; }
+    };
     for (const a of level.obj.walk) consider(a);
     for (const m of level.obj.movers) consider(m.aabb);
     groundSurf = bestA;
@@ -919,8 +929,27 @@ const player = {
   diveUntil: 0,   // diving while t < this
   diveCd: 0,      // can dive again once t > this
   surfFx: null,   // effect of the surface under us last frame (ice/conveyor)
+  coyoteUntil: 0, // can still jump shortly after walking off an edge
+  jumpBufUntil: 0,// a jump pressed just before landing still fires on touchdown
   mesh: makeBean(0xfbbf24),
 };
+const FOOT_R = 0.62;   // body radius for ground support — you stand solidly at an
+                       // edge (and catch a ledge you *just* reach) instead of
+                       // dropping the instant your center clears it
+const COYOTE = 0.11;   // s of post-edge grace to still jump
+const JUMP_BUFFER = 0.13; // s before landing a jump press still counts
+// Grounded if ANY point around the player's feet rests on a platform — turns the
+// old single-point check (bean floats off / misses ledges) into a solid footprint.
+function groundSupport(x, z, prevFeet) {
+  let best = null, bestSurf = null;
+  const pts = [[0, 0], [FOOT_R, 0], [-FOOT_R, 0], [0, FOOT_R], [0, -FOOT_R]];
+  for (const [ox, oz] of pts) {
+    const g = groundY(x + ox, z + oz, prevFeet);
+    if (g !== null && (best === null || g > best)) { best = g; bestSurf = groundSurf; }
+  }
+  groundSurf = bestSurf;
+  return best;
+}
 scene.add(player.mesh);
 
 function resetPlayer() {
@@ -1227,7 +1256,12 @@ function stepPlayer(dt, t) {
   player.vel.z += (wantZ - player.vel.z) * k;
   if ((mx || mz) && !diving) player.heading = Math.atan2(player.vel.x, player.vel.z);
 
-  if (input.jump && player.grounded && !diving) { player.vel.y = JUMP_V; player.grounded = false; SFX.jump(); }
+  // jump: allow within coyote grace; buffer a press made just before landing
+  if (input.jump && !diving && (player.grounded || t < player.coyoteUntil)) {
+    player.vel.y = JUMP_V; player.grounded = false; player.coyoteUntil = 0; SFX.jump();
+  } else if (input.jump && !diving) {
+    player.jumpBufUntil = t + JUMP_BUFFER;
+  }
   // dive — a committed forward lunge (reach ledges, recover, dodge); on a cooldown
   if (input.dive && t > player.diveCd && !diving && (player.grounded || player.vel.y > -3)) {
     player.vel.x += Math.sin(player.heading) * DIVE_BOOST;
@@ -1238,6 +1272,7 @@ function stepPlayer(dt, t) {
   }
   player.vel.y += GRAVITY * dt;
 
+  const prevFeet = player.pos.y - 0.9; // feet position BEFORE this frame's move
   player.pos.x += player.vel.x * dt;
   player.pos.y += player.vel.y * dt;
   player.pos.z += player.vel.z * dt;
@@ -1248,12 +1283,15 @@ function stepPlayer(dt, t) {
     else player.pos.z += player.surfFx.speed * dt;
   }
 
-  // ground collision (groundY records the surface in `groundSurf`)
-  const gy = groundY(player.pos.x, player.pos.z);
+  // ground collision (groundSupport records the surface in `groundSurf`)
+  const gy = groundSupport(player.pos.x, player.pos.z, prevFeet);
   const impact = -player.vel.y;
   if (gy !== null && player.pos.y <= gy + 0.9 && player.vel.y <= 0.01) {
     player.pos.y = gy + 0.9; player.vel.y = 0; player.grounded = true;
+    player.coyoteUntil = t + COYOTE;
     if (wasAir && impact > 3) { SFX.land(); burstDust(player.pos, impact > 14 ? 18 : 10, 3.5); if (impact > 14) addShake(0.35); } // touchdown
+    // a jump buffered just before touchdown fires now
+    if (t < player.jumpBufUntil && !diving) { player.vel.y = JUMP_V; player.grounded = false; player.coyoteUntil = 0; player.jumpBufUntil = 0; SFX.jump(); }
   } else {
     player.grounded = false;
   }
