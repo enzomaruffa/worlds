@@ -22,8 +22,11 @@
   <script>
     // This tools-world just opens the editor, which lives in the tumble game site
     // (so its "publish" writes land in the same worlds.db collection the game reads).
-    var host = location.host.replace(/^tumble-editor\./, "tumble.");
-    var url = location.protocol + "//" + host + "/editor.html";
+    // Works under both path routing (/app/<site>/) and subdomain routing.
+    var game = "tumble";
+    var url = location.pathname.indexOf("/app/") !== -1
+      ? location.origin + "/app/" + game + "/editor.html"
+      : location.protocol + "//" + location.host.replace(/^[a-z0-9-]+\./, game + ".") + "/editor.html";
     document.getElementById("go").href = url;
     location.replace(url);
   </script>
