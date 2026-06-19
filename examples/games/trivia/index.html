@@ -435,6 +435,7 @@
         <div class="ans" id="rCorrect">—</div>
       </div>
       <div class="reveal-you" id="rYou"></div>
+      <div id="rFastest" style="text-align:center;color:var(--gold-bright);font-weight:600;font-size:.85rem;margin:.2rem 0;display:none"></div>
       <p class="section-label" style="margin-top:.4rem">This question</p>
       <div class="gains" id="rGains"></div>
     </div>
@@ -598,7 +599,7 @@
   function blankGame() {
     return {
       phase: "lobby", topic: "", questions: [], current: 0,
-      questionEndsAt: 0, revealEndsAt: 0, scores: {}, players: [], answers: {}, gameNum: 0
+      questionEndsAt: 0, revealEndsAt: 0, scores: {}, streaks: {}, players: [], answers: {}, gameNum: 0
     };
   }
 
@@ -709,9 +710,12 @@ Respond with ONLY a JSON array, no prose, no markdown fences. Schema:
     advanceTimer = setTimeout(() => hostReveal(), ms + 120);
   }
 
+  const SPEED_GRACE = 2500;   // full points if you answer within this (reading + thinking room)
   function scoreFor(at, endsAt) {
     const start = endsAt - QUESTION_MS;
-    const frac = Math.min(1, Math.max(0, (at - start) / QUESTION_MS));   // 0 fast → 1 slow
+    const elapsed = Math.max(0, at - start);
+    if (elapsed <= SPEED_GRACE) return MAX_POINTS;               // grace plateau — knowledge over twitch
+    const frac = Math.min(1, (elapsed - SPEED_GRACE) / (QUESTION_MS - SPEED_GRACE));
     return Math.round(MIN_POINTS + (MAX_POINTS - MIN_POINTS) * (1 - frac));
   }
 
@@ -720,22 +724,32 @@ Respond with ONLY a JSON array, no prose, no markdown fences. Schema:
     clearTimeout(advanceTimer);
     const qi = game.current;
     const q = game.questions[qi];
-    const subs = (answersByQ[qi]) || (game.answers && game.answers[qi]) || {};
+    // merge BOTH sources (live ws accumulator + durable doc) so a buzz that lost
+    // the race with the timer is still scored
+    const docSubs = (game.answers && game.answers[qi] && game.answers[qi].subs) || {};
+    const subs = { ...docSubs, ...(answersByQ[qi] || {}) };
     const scores = { ...game.scores };
+    const streaks = { ...(game.streaks || {}) };
     const gained = {};
+    // fastest correct answerer → "⚡ fastest finger" callout
+    let fastest = null, fastestAt = Infinity;
     for (const h of Object.keys(subs)) {
       const a = subs[h];
       if (!a || typeof a.choice !== "number") continue;
       if (q && a.choice === q.answer) {
-        const g = scoreFor(a.at, game.questionEndsAt);
+        const base = scoreFor(a.at, game.questionEndsAt);
+        streaks[h] = (streaks[h] || 0) + 1;
+        const bonus = Math.min(streaks[h] - 1, 5) * 100;   // streak ≥2 starts paying (+100 per, cap +500)
+        const g = base + bonus;
         scores[h] = (scores[h] || 0) + g;
         gained[h] = g;
-      } else { gained[h] = 0; }
+        if (a.at < fastestAt) { fastestAt = a.at; fastest = h; }
+      } else { gained[h] = 0; streaks[h] = 0; }     // miss breaks the streak
     }
     const answers = { ...(game.answers || {}) };
-    answers[qi] = { subs, gained };
+    answers[qi] = { subs, gained, fastest };
     const ok = await writeDoc({
-      ...game, phase: "reveal", scores, answers, revealEndsAt: Date.now() + REVEAL_MS
+      ...game, phase: "reveal", scores, streaks, answers, revealEndsAt: Date.now() + REVEAL_MS
     });
     if (ok) {
       clearTimeout(advanceTimer);
@@ -980,13 +994,14 @@ Respond with ONLY a JSON array, no prose, no markdown fences. Schema:
     const gained = data.gained || {};
     const myA = subs[me.handle];
     const iWasRight = myA && myA.choice === q.answer;
-    // react ONCE per question reveal: update streak + play the right sound
+    // authoritative streak (from the host-written doc) so the badge matches the bonus
+    myStreak = (game.streaks && game.streaks[me.handle]) || 0;
     const firstReact = reactedReveal !== qi;
     if (firstReact) {
       reactedReveal = qi;
-      if (iWasRight) { myStreak++; SFX.correct(myStreak); } else { myStreak = 0; if (myA) SFX.wrong(); else SFX.reveal(); }
+      if (iWasRight) SFX.correct(myStreak); else if (myA) SFX.wrong(); else SFX.reveal();
     }
-    const streakBadge = (iWasRight && myStreak >= 2) ? ` <span class="gain">🔥 ${myStreak} streak</span>` : "";
+    const streakBadge = (iWasRight && myStreak >= 2) ? ` <span class="gain">🔥 ${myStreak} streak!</span>` : "";
     const youEl = $("rYou");
     if (!myA) { youEl.className = "reveal-you no"; youEl.textContent = "You didn't answer in time."; }
     else if (iWasRight) {
@@ -995,6 +1010,13 @@ Respond with ONLY a JSON array, no prose, no markdown fences. Schema:
     } else {
       youEl.className = "reveal-you no";
       youEl.textContent = `You picked “${q.choices[myA.choice] != null ? q.choices[myA.choice] : "?"}” — not quite.`;
+    }
+    // fastest-finger callout
+    const fEl = $("rFastest");
+    if (fEl) {
+      const fh = data.fastest;
+      if (fh) { const fa = subs[fh]; const ms = fa ? Math.max(0, fa.at - (game.questionEndsAt - QUESTION_MS)) : 0; fEl.textContent = `⚡ Fastest: ${nameFor(fh)} (${(ms/1000).toFixed(1)}s)`; fEl.style.display = ""; }
+      else { fEl.style.display = "none"; }
     }
 
     // per-player gains this question
