@@ -34,7 +34,8 @@ function offsetFor(plotIndex) {
 }
 export function plotOffset(handle) {
   if (handle === G.me.handle) return new THREE.Vector3(0, 0, 0);
-  const n = neighbors.get(handle); return n ? n.offset.clone() : null;
+  if (idxByHandle.has(handle)) return offsetFor(idxByHandle.get(handle));
+  return null;
 }
 
 // ── persistence ───────────────────────────────────────────────────────────────
@@ -70,8 +71,15 @@ export function saveImmediate(data) {
   col.replace(myId, payload).catch(() => localSave(payload));
 }
 
-// ── neighbour LOD tiles ───────────────────────────────────────────────────────
-const KIND_COLOR = { tree: 0x3f9e34, pond: 0x3b86c9, flowers: 0xff8fb1, hive: 0xe6b54a, clover: 0x5fae3e, shrub: 0x9a6fd0, mushrooms: 0xd23b4e };
+// ── neighbour plots: real shaped terrain + real feature models, lazy-loaded ───
+const MAX_NEIGHBORS = 8;                   // only the nearest few render in full 3D
+const idxByHandle = new Map();             // handle → plotIndex (for avatar placement)
+let allList = [];                          // every neighbour (for the ranked board)
+const buildQ = [];                         // staggered build/update jobs (1/frame → no jank)
+
+function seedFromHandle(h) { let s = 0; for (const c of String(h || "")) s = (Math.imul(s, 31) + c.charCodeAt(0)) >>> 0; return s || 1; }
+function gridDist(plotIndex) { const me = spiral(G.plotIndex), c = spiral(plotIndex); return Math.max(Math.abs(c.gx - me.gx), Math.abs(c.gz - me.gz)); }
+const avgCov = (d) => (d.cov && d.cov.length ? d.cov.reduce((a, b) => a + b, 0) / (d.cov.length * 15) : 0);
 
 function nameplate(name, eco, color) {
   const c = document.createElement("canvas"); c.width = 256; c.height = 64;
@@ -82,39 +90,45 @@ function nameplate(name, eco, color) {
   g.fillText(name.slice(0, 12), 44, 28); g.fillStyle = "#9fe06a"; g.font = "600 18px Quicksand"; g.fillText("🌿 " + eco, 44, 50);
   const tex = new THREE.CanvasTexture(c);
   const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true }));
-  sp.scale.set(8, 2, 1); sp.renderOrder = 20; return sp;
+  sp.scale.set(8, 2, 1); sp.renderOrder = 20; sp.userData.np = true; return sp;
 }
+const POST_GEO = new THREE.CylinderGeometry(0.34, 0.4, 2.0, 7), POST_MAT = new THREE.MeshStandardMaterial({ color: 0x8a6a48, roughness: 0.95 });
+const SKIRT_MAT = new THREE.MeshStandardMaterial({ color: 0x3c2c1e, roughness: 1 });
 
-function buildNeighbor(d, offset) {
-  const g = new THREE.Group(); g.position.copy(offset);
-  const avg = d.cov && d.cov.length ? d.cov.reduce((a, b) => a + b, 0) / (d.cov.length * 15) : 0;
-  const base = new THREE.Mesh(new THREE.BoxGeometry(W.PLOT, 2.4, W.PLOT), new THREE.MeshStandardMaterial({ color: 0x6f5238, roughness: 1 }));
-  base.position.y = -1.2; base.receiveShadow = true; g.add(base);
-  const top = new THREE.Mesh(new THREE.PlaneGeometry(W.PLOT - 1, W.PLOT - 1), new THREE.MeshStandardMaterial({ color: new THREE.Color(0x7a5a38).lerp(new THREE.Color(0x4f9e3a), avg), roughness: 0.95 }));
-  top.rotation.x = -Math.PI / 2; top.position.y = 0.05; top.receiveShadow = true; g.add(top);
-  const np = nameplate(d.name || d.handle, d.ecoLevel || 0, d.color || "#6cc24a"); np.position.set(0, 9, 0); g.add(np);
-  rebuildMarkers(g, d);
-  g.userData.pickPlot = d.handle;
-  W.scene.add(g);
+function neighborTerrain(d) {
+  const g = new THREE.Group();
+  const seed = seedFromHandle(d.handle), SEG = 40;
+  const geo = new THREE.PlaneGeometry(W.PLOT, W.PLOT, SEG, SEG); geo.rotateX(-Math.PI / 2);
+  const pos = geo.attributes.position;
+  for (let i = 0; i < pos.count; i++) pos.setY(i, W.heightAt(pos.getX(i), pos.getZ(i), seed));
+  geo.computeVertexNormals();
+  const col = new THREE.Color(0x7a5a38).lerp(new THREE.Color(0x4f9e3a), avgCov(d));
+  const top = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: col, roughness: 0.95 })); top.receiveShadow = true; top.userData.terrain = true; g.add(top);
+  const skirt = new THREE.Mesh(new THREE.BoxGeometry(W.PLOT, 8, W.PLOT), SKIRT_MAT); skirt.position.y = -5.2; g.add(skirt);
+  for (const [sx, sz] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) { const x = sx * (W.HALF - 0.6), z = sz * (W.HALF - 0.6), p = new THREE.Mesh(POST_GEO, POST_MAT); p.position.set(x, W.heightAt(x, z, seed) + 0.7, z); p.castShadow = true; g.add(p); }
   return g;
 }
-function rebuildMarkers(group, d) {
-  for (const m of [...group.children]) if (m.userData.marker) group.remove(m);
-  const MARK = new THREE.ConeGeometry(0.7, 2.2, 6);
-  for (const f of d.features || []) {
-    const col = KIND_COLOR[f.kind] || 0x9fe06a;
-    const mk = new THREE.Mesh(MARK, new THREE.MeshStandardMaterial({ color: col, emissive: col, emissiveIntensity: 0.25, roughness: 0.6 }));
-    mk.position.set(f.x, 1.1 + f.stage * 0.5, f.z); mk.scale.setScalar(0.7 + f.stage * 0.25); mk.userData.marker = true; mk.castShadow = true; group.add(mk);
+function neighborFeatures(group, d) {
+  for (const m of [...group.children]) if (m.userData.feat) group.remove(m);
+  const seed = seedFromHandle(d.handle);
+  for (const f of (d.features || []).slice(0, 12)) {
+    const m = El.stageMesh(f.kind, f.stage);                 // the real feature, at its stage
+    m.position.set(f.x, W.heightAt(f.x, f.z, seed), f.z); m.userData.feat = true; group.add(m);
   }
+}
+function buildNeighbor(d, offset) {
+  const g = neighborTerrain(d); g.position.copy(offset);
+  const np = nameplate(d.name || d.handle, d.ecoLevel || 0, d.color || "#6cc24a"); np.position.set(0, 13, 0); g.add(np);
+  neighborFeatures(g, d);
+  g.userData.pickPlot = d.handle; W.scene.add(g); return g;
 }
 function updateNeighbor(n, d) {
   n.data = d;
-  const top = n.group.children.find((c) => c.geometry && c.geometry.type === "PlaneGeometry");
-  if (top) { const avg = d.cov ? d.cov.reduce((a, b) => a + b, 0) / (d.cov.length * 15) : 0; top.material.color = new THREE.Color(0x7a5a38).lerp(new THREE.Color(0x4f9e3a), avg); }
-  const np = n.group.children.find((c) => c.isSprite); if (np) { n.group.remove(np); }
-  n.group.add(nameplate(d.name || d.handle, d.ecoLevel || 0, d.color || "#6cc24a"));
-  n.group.children.filter((c) => c.isSprite).slice(0, -1).forEach((s) => n.group.remove(s));
-  rebuildMarkers(n.group, d);
+  const top = n.group.children.find((c) => c.userData.terrain);
+  if (top) top.material.color = new THREE.Color(0x7a5a38).lerp(new THREE.Color(0x4f9e3a), avgCov(d));
+  for (const s of n.group.children.filter((c) => c.userData.np)) n.group.remove(s);
+  const np = nameplate(d.name || d.handle, d.ecoLevel || 0, d.color || "#6cc24a"); np.position.set(0, 13, 0); n.group.add(np);
+  neighborFeatures(n.group, d);
 }
 
 let refreshT = null;
@@ -122,27 +136,26 @@ async function refreshNeighbors() {
   if (!col) return;
   let items = [];
   try { items = (await col.list({ limit: 200 })).items || []; } catch { return; }
-  const live = new Set();
-  for (const it of items) {
-    const d = it.data; if (!d || !d.handle || d.handle === G.me.handle) continue;
-    live.add(d.handle);
-    const off = offsetFor(d.plotIndex ?? 0);
-    let n = neighbors.get(d.handle);
-    if (!n) { n = { data: d, offset: off, group: buildNeighbor(d, off) }; neighbors.set(d.handle, n); }
-    else { n.offset.copy(off); n.group.position.copy(off); updateNeighbor(n, d); }
+  const cands = items.map((it) => it.data).filter((d) => d && d.handle && d.handle !== G.me.handle);
+  idxByHandle.clear(); for (const d of cands) idxByHandle.set(d.handle, d.plotIndex ?? 0);
+  allList = cands.map((d) => ({ handle: d.handle, name: d.name || d.handle, color: d.color || "#6cc24a", eco: d.ecoLevel || 0 }));
+  cands.sort((a, b) => gridDist(a.plotIndex ?? 0) - gridDist(b.plotIndex ?? 0));
+  const near = cands.slice(0, MAX_NEIGHBORS), live = new Set(near.map((d) => d.handle));
+  for (const [h, n] of [...neighbors]) if (!live.has(h)) { if (n.group) W.scene.remove(n.group); neighbors.delete(h); }
+  for (const d of near) {
+    const off = offsetFor(d.plotIndex ?? 0), ex = neighbors.get(d.handle);
+    if (ex) { ex.offset.copy(off); if (ex.group) ex.group.position.copy(off); buildQ.push(() => updateNeighbor(ex, d)); }
+    else { neighbors.set(d.handle, { data: d, offset: off, group: null }); buildQ.push(() => { const n = neighbors.get(d.handle); if (n && !n.group) n.group = buildNeighbor(d, off); }); }
   }
-  for (const [h, n] of [...neighbors]) if (!live.has(h)) { W.scene.remove(n.group); neighbors.delete(h); }
   if (onListCb) onListCb(neighborList());
 }
 export function startNeighbors(cb) {
   onListCb = cb;
   if (!col) { if (cb) cb([]); return; }
   refreshNeighbors();
-  try { col.subscribe(() => { clearTimeout(refreshT); refreshT = setTimeout(refreshNeighbors, 600); }); } catch {}
+  try { col.subscribe(() => { clearTimeout(refreshT); refreshT = setTimeout(refreshNeighbors, 700); }); } catch {}
 }
-export function neighborList() {
-  return [...neighbors.values()].map((n) => ({ handle: n.data.handle, name: n.data.name || n.data.handle, color: n.data.color || "#6cc24a", eco: n.data.ecoLevel || 0 }));
-}
+export function neighborList() { return allList; }
 
 // ── presence (live gardeners) ─────────────────────────────────────────────────
 let capGeo = null, headGeo = null;
@@ -172,6 +185,7 @@ export function startPresence() {
 }
 let presT = 0; const presOff = { ox: (Math.random() - 0.5) * 9, oz: (Math.random() - 0.5) * 9 };
 export function tickPresence(dt) {
+  if (buildQ.length) buildQ.shift()();   // one neighbour build/update per frame → no load hitch
   presT += dt;
   if (actorsNet && presT > 0.25) {
     presT = 0;
