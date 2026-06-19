@@ -1028,6 +1028,150 @@
     };
   }
 
+  // sdk/src/idle.ts
+  var HOUR = 3600;
+  var siteName = () => typeof location !== "undefined" ? location.hostname.split(".")[0] : "site";
+  var esc2 = (s) => {
+    const d = document.createElement("div");
+    d.textContent = s == null ? "" : String(s);
+    return d.innerHTML;
+  };
+  function idle(key = "default", opts = {}) {
+    const cap = Math.max(0, opts.cap ?? 8 * HOUR);
+    const min = Math.max(0, opts.min ?? 30);
+    const callerOwns = opts.lastSeen != null;
+    const store = opts.store ?? (callerOwns ? "none" : "local");
+    const lsKey = `worlds:idle:${siteName()}:${key}`;
+    let handle = null, col = null, docId = null, dead = false;
+    async function whoami() {
+      if (handle)
+        return handle;
+      try {
+        const m = await call("GET", "/api/v1/me");
+        handle = m && m.handle;
+      } catch {}
+      return handle;
+    }
+    async function readLastSeen() {
+      if (callerOwns)
+        return opts.lastSeen ?? null;
+      if (store === "local") {
+        try {
+          const v = localStorage.getItem(lsKey);
+          return v ? Number(v) : null;
+        } catch {
+          return null;
+        }
+      }
+      if (store === "db") {
+        try {
+          col = col || collection("__idle");
+          const h = await whoami();
+          const page = await col.list({ filter: { _idle: key }, limit: 50 });
+          const mine = (page.items || []).find((it) => it.created_by === h || it.data && it.data.handle === h);
+          if (mine) {
+            docId = mine.id;
+            return mine.data.lastSeen ?? null;
+          }
+        } catch {}
+      }
+      return null;
+    }
+    function writeLastSeen(ts) {
+      if (callerOwns || store === "none")
+        return;
+      if (store === "local") {
+        try {
+          localStorage.setItem(lsKey, String(ts));
+        } catch {}
+        return;
+      }
+      if (store === "db") {
+        col = col || collection("__idle");
+        (async () => {
+          try {
+            if (docId)
+              await col.update(docId, { lastSeen: ts });
+            else {
+              const h = await whoami();
+              const d = await col.create({ _idle: key, handle: h, lastSeen: ts });
+              docId = d.id;
+            }
+          } catch {}
+        })();
+      }
+    }
+    async function elapsed() {
+      const last = await readLastSeen();
+      const now = Date.now();
+      writeLastSeen(now);
+      if (last == null)
+        return null;
+      const secs = Math.min(cap, Math.max(0, (now - last) / 1000));
+      return secs >= min ? secs : null;
+    }
+    function beat() {
+      if (!dead)
+        writeLastSeen(Date.now());
+    }
+    const onHide = () => {
+      if (document.visibilityState === "hidden")
+        beat();
+    };
+    if (typeof document !== "undefined" && store !== "none") {
+      document.addEventListener("visibilitychange", onHide);
+      window.addEventListener("beforeunload", beat);
+    }
+    function summary(report, sopts = {}) {
+      if (typeof document === "undefined" || !document.body)
+        return;
+      ensureCss();
+      const body = sopts.render ? sopts.render(report) : defaultRender(report);
+      const back = document.createElement("div");
+      back.className = "worlds-idle-back";
+      back.innerHTML = `<div class="worlds-idle-card" role="dialog" aria-modal="true">
+      <div class="worlds-idle-title">${esc2(sopts.title || "While you were away")}</div>
+      <div class="worlds-idle-body">${body}</div>
+      <button class="worlds-idle-x">collect</button></div>`;
+      const close = () => {
+        back.remove();
+        sopts.onClose && sopts.onClose();
+      };
+      back.addEventListener("click", (e) => {
+        if (e.target === back)
+          close();
+      });
+      back.querySelector(".worlds-idle-x").addEventListener("click", close);
+      document.body.appendChild(back);
+      requestAnimationFrame(() => back.classList.add("show"));
+    }
+    function stop() {
+      dead = true;
+      try {
+        document.removeEventListener("visibilitychange", onHide);
+        window.removeEventListener("beforeunload", beat);
+      } catch {}
+    }
+    return { elapsed, beat, summary, stop };
+  }
+  function defaultRender(report) {
+    if (report == null)
+      return "";
+    if (typeof report !== "object")
+      return `<p>${esc2(report)}</p>`;
+    const rows = Object.entries(report).filter(([, v]) => typeof v !== "object").map(([k, v]) => `<div class="worlds-idle-row"><span>${esc2(k)}</span><b>${esc2(v)}</b></div>`);
+    return rows.join("") || "<p>welcome back \uD83C\uDF31</p>";
+  }
+  var cssDone = false;
+  function ensureCss() {
+    if (cssDone || typeof document === "undefined")
+      return;
+    cssDone = true;
+    const s = document.createElement("style");
+    s.textContent = ".worlds-idle-back{position:fixed;inset:0;z-index:2147483646;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.45);opacity:0;transition:opacity .2s}" + ".worlds-idle-back.show{opacity:1}" + ".worlds-idle-card{background:#10161b;color:#e8efe8;border:1px solid #2f4636;border-radius:14px;padding:1.1rem 1.25rem;max-width:min(92vw,24rem);box-shadow:0 18px 60px rgba(0,0,0,.5);font:500 .9rem/1.4 ui-rounded,ui-sans-serif,system-ui,sans-serif;transform:translateY(8px);transition:transform .2s}" + ".worlds-idle-back.show .worlds-idle-card{transform:none}" + ".worlds-idle-title{font-size:1.1rem;font-weight:700;margin-bottom:.6rem}" + ".worlds-idle-row{display:flex;justify-content:space-between;gap:1rem;padding:.18rem 0}.worlds-idle-row b{color:#9fe06a}" + ".worlds-idle-x{margin-top:.9rem;width:100%;cursor:pointer;font:inherit;font-weight:700;padding:.5rem;border-radius:9px;border:1px solid #6cc24a;background:rgba(108,194,74,.16);color:#9fe06a}";
+    document.head.appendChild(s);
+  }
+
   // sdk/src/toast.ts
   var el = null;
   var timer = null;
@@ -1112,6 +1256,7 @@
     room,
     rooms,
     actors,
+    idle,
     id,
     colorFor,
     uniqByHandle,
