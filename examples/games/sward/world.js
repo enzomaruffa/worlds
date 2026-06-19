@@ -1,6 +1,10 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
+import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
+import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 
 // ───────────────────────────────────────────────────────────────────────────
 // world.js — the Three.js stage for a plot of land.
@@ -29,7 +33,7 @@ export const hemi = new THREE.HemisphereLight(0xbfe3ff, 0x4a5b3a, 0.85);
 export const sun = new THREE.DirectionalLight(0xfff1d0, 1.5);
 export const ambient = new THREE.AmbientLight(0xffffff, 0.12);
 
-let renderer = null, controls = null, groundMesh = null, cursor = null;
+let renderer = null, controls = null, groundMesh = null, cursor = null, composer = null, bloomPass = null;
 let plotSeed = 1;
 
 // ── deterministic 2D value noise (terrain shape; stable per plotSeed) ─────────
@@ -124,6 +128,25 @@ export function setCursor(x, z, ok, radius = 1) {
   cursor.material.color.setHex(ok ? 0x9fe06a : 0xff8fb1);
 }
 
+// ── gradient sky dome (richer sky than a flat background) ─────────────────────
+let skyDome = null;
+function buildSkyDome() {
+  const mat = new THREE.ShaderMaterial({
+    side: THREE.BackSide, depthWrite: false, fog: false,
+    uniforms: { top: { value: new THREE.Color(0x4a86d8) }, horizon: { value: new THREE.Color(0xbfe3ff) } },
+    vertexShader: "varying vec3 vDir; void main(){ vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }",
+    fragmentShader: "uniform vec3 top; uniform vec3 horizon; varying vec3 vDir; void main(){ float t = pow(clamp(vDir.y*0.5+0.5,0.0,1.0), 0.5); gl_FragColor = vec4(mix(horizon, top, t), 1.0); }",
+  });
+  skyDome = new THREE.Mesh(new THREE.SphereGeometry(420, 32, 16), mat);
+  skyDome.renderOrder = -1; skyDome.frustumCulled = false;
+  scene.add(skyDome);
+}
+export function setSkyColors(zenith, horizon) {
+  if (!skyDome) return;
+  skyDome.material.uniforms.top.value.copy(zenith);
+  skyDome.material.uniforms.horizon.value.copy(horizon);
+}
+
 // ── plot boundary fence (marks the unlocked land; moves out on expansion) ────
 let boundary = null;
 const postGeoB = new THREE.CylinderGeometry(0.13, 0.17, 1.1, 6);
@@ -201,6 +224,8 @@ export function initWorld(canvas, seed = 1) {
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;   // cinematic colour
+  renderer.toneMappingExposure = 1.12;
 
   sun.position.set(-34, 56, 28);
   sun.castShadow = true;
@@ -211,6 +236,7 @@ export function initWorld(canvas, seed = 1) {
   scene.add(sun, sun.target, hemi, ambient);
 
   buildGround();
+  buildSkyDome();
   buildCursor();
 
   controls = new OrbitControls(camera, renderer.domElement);
@@ -222,6 +248,13 @@ export function initWorld(canvas, seed = 1) {
   controls.enablePan = false;
   controls.rotateSpeed = 0.7;
 
+  // post-processing: subtle bloom so sunlit tips, blossoms, water & fireflies glow
+  composer = new EffectComposer(renderer);
+  composer.addPass(new RenderPass(scene, camera));
+  bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.5, 0.55, 0.82);
+  composer.addPass(bloomPass);
+  composer.addPass(new OutputPass());
+
   resize();
   window.addEventListener("resize", resize);
   return { renderer, controls };
@@ -230,6 +263,7 @@ export function resize() {
   if (!renderer) return;
   const w = window.innerWidth, h = window.innerHeight;
   renderer.setSize(w, h, false);
+  if (composer) composer.setSize(w, h);
   camera.aspect = w / h; camera.updateProjectionMatrix();
 }
 export function focusCamera(x, z, dist = 78) {
@@ -239,5 +273,5 @@ export function focusCamera(x, z, dist = 78) {
 }
 export function setControlsEnabled(b) { if (controls) controls.enabled = b; }
 export function tickControls() { if (controls) controls.update(); }
-export function render() { if (renderer) renderer.render(scene, camera); }
+export function render() { if (composer) composer.render(); else if (renderer) renderer.render(scene, camera); }
 export const getRenderer = () => renderer;
