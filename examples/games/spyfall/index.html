@@ -243,6 +243,21 @@
   }
   .tablebar input:focus { outline: none; border-color: var(--gold); }
   .tablebar button { flex: none; }
+
+  /* possible-locations reference + cross-off */
+  .loc-list { display: flex; flex-wrap: wrap; gap: .4rem; }
+  .loc-chip {
+    font: inherit; font-size: .82rem; cursor: pointer;
+    background: var(--surface-2, #14141a); color: var(--text, #e8e8f0);
+    border: 1px solid var(--border, #2a2a33); border-radius: 999px; padding: .35rem .7rem;
+    transition: opacity .1s, background .1s;
+  }
+  .loc-chip:hover { border-color: var(--gold); }
+  .loc-chip.off { opacity: .32; text-decoration: line-through; }
+  .pick-list { margin: .6rem 0; }
+  .win-banner { font-size: 2rem; font-weight: 800; letter-spacing: .04em; margin: .2rem 0; }
+  .win-banner.crew { color: var(--good, #22c55e); }
+  .win-banner.spy { color: var(--danger); }
 </style>
 </head>
 <body>
@@ -350,8 +365,25 @@
       </div>
     </div>
 
-    <div class="card">
-      <button id="btnReveal" class="btn-danger btn-block">Reveal the spy &amp; end round</button>
+    <div class="card" id="locCard">
+      <p class="section-label">Possible locations <span class="muted" style="font-weight:400">· tap to cross off</span></p>
+      <div class="loc-list" id="locList"></div>
+    </div>
+
+    <div class="card" id="actionCard">
+      <button id="btnAccuse" class="btn-danger btn-block">🗳 Accuse the spy &amp; end the round</button>
+      <button id="btnSpyGuess" class="btn-danger btn-block hidden" style="margin-top:.6rem">🎯 Guess the location (spy only)</button>
+
+      <div id="accusePicker" class="hidden">
+        <p class="section-label">Who is the spy? This ends the round &amp; scores it.</p>
+        <div id="accuseList" class="pick-list"></div>
+        <button id="btnAccuseCancel" class="btn-ghost btn-block">Cancel</button>
+      </div>
+      <div id="guessPicker" class="hidden">
+        <p class="section-label">Pick the location — guess right and you (the spy) win.</p>
+        <div id="guessList" class="pick-list"></div>
+        <button id="btnGuessCancel" class="btn-ghost btn-block">Cancel</button>
+      </div>
     </div>
   </main>
 
@@ -364,14 +396,16 @@
     <div class="card">
       <div class="verdict">
         <div class="flourish" id="overFlourish">🎭</div>
-        <div class="tag">The spy was</div>
+        <div class="win-banner" id="overWinner">—</div>
+        <div class="tag" id="overReason"></div>
+        <div class="tag" style="margin-top:.6rem">The spy was</div>
         <div class="spy-name" id="overSpy">—</div>
         <div class="loc-was">The location was <b id="overLoc">—</b></div>
       </div>
     </div>
     <div class="card">
-      <p class="section-label">Who played</p>
-      <ul class="roster" id="overRoster"></ul>
+      <p class="section-label">Scoreboard</p>
+      <ul class="roster" id="overScores"></ul>
     </div>
     <div class="card">
       <div class="btn-row">
@@ -471,7 +505,7 @@
     for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
     return a;
   }
-  function blankGame() { return { phase: "lobby", location: null, roles: {}, spy: null, players: [], endsAt: 0, startedBy: null }; }
+  function blankGame() { return { phase: "lobby", location: null, roles: {}, spy: null, players: [], endsAt: 0, startedBy: null, result: null, scores: (game && game.scores) || {} }; }
   // Live roster — self ALWAYS included, even before presence echoes back.
   function lobbyMembers() { return uniqByHandle([...(me ? [{ handle: me.handle, name: me.name }] : []), ...presence]); }
 
@@ -499,7 +533,9 @@
         spy,
         players,
         endsAt: Date.now() + ROUND_MS,
-        startedBy: { handle: me.handle, name: me.name }
+        startedBy: { handle: me.handle, name: me.name },
+        result: null,
+        scores: (game && game.scores) || {},   // cumulative across rounds
       };
       const ok = await writeDoc(next);
       if (!ok) { toast("Someone else started — syncing…"); await refetch(); }
@@ -511,11 +547,33 @@
     }
   }
 
-  async function revealRound() {
-    if (!game || game.phase !== "playing") return;
-    const next = { ...game, phase: "over", endsAt: Date.now() };
+  // Resolve the round with a winner + cumulative scoring. Single writer per
+  // resolution (the accuser, the spy who guessed, or whoever's clock hit 0),
+  // so the last-write race is a non-issue in practice.
+  async function resolveRound(result) {
+    if (!game || game.phase !== "playing" || game.result) return;
+    const scores = { ...(game.scores || {}) };
+    const inRound = uniqByHandle(game.players);
+    if (result.winner === "crew") {
+      for (const p of inRound) if (p.handle !== game.spy) scores[p.handle] = (scores[p.handle] || 0) + 1;
+      if (result.reason === "accuse" && result.byHandle && result.byHandle !== game.spy) scores[result.byHandle] = (scores[result.byHandle] || 0) + 1; // accuser bonus
+    } else { // spy wins
+      scores[game.spy] = (scores[game.spy] || 0) + 2;
+    }
+    const next = { ...game, phase: "over", endsAt: Date.now(), result, scores };
     const ok = await writeDoc(next);
     if (!ok) await refetch();
+  }
+  function accuse(targetHandle, targetName) {
+    if (!game || game.spy === me.handle) return; // the spy can't accuse
+    const crewWins = targetHandle === game.spy;
+    resolveRound({ winner: crewWins ? "crew" : "spy", reason: "accuse",
+      byHandle: me.handle, byName: me.name, accusedHandle: targetHandle, accusedName: targetName });
+  }
+  function spyGuess(locName) {
+    if (!game || game.spy !== me.handle) return;
+    const right = locName === game.location;
+    resolveRound({ winner: right ? "spy" : "crew", reason: "guess", byHandle: me.handle, byName: me.name, guess: locName });
   }
 
   async function newRound() { await startRound(); }
@@ -650,12 +708,41 @@
     $("btnStart").disabled = starting || n < 3;
   }
 
+  let crossed = new Set();        // local: locations you've ruled out (UI aid)
+  let lastRenderRound = null;     // reset crossed-off list each new round
   function renderPlaying() {
     showScreen("playing");
     renderRoster($("playRoster"), game.players);
     $("playCount").textContent = `${uniqByHandle(game.players).length}`;
     renderSecret();
+    // fresh round → reset local cross-offs + close any open picker
+    const roundKey = game.startedBy && game.endsAt;
+    if (roundKey !== lastRenderRound) { crossed = new Set(); lastRenderRound = roundKey; closePickers(); }
+    renderLocations();
+    renderActions();
     startTick();
+  }
+  function renderLocations() {
+    const wrap = $("locList"); if (!wrap) return;
+    wrap.innerHTML = "";
+    for (const loc of LOCATIONS) {
+      const b = document.createElement("button");
+      b.className = "loc-chip" + (crossed.has(loc.name) ? " off" : "");
+      b.textContent = loc.name;
+      b.addEventListener("click", () => { if (crossed.has(loc.name)) crossed.delete(loc.name); else crossed.add(loc.name); b.classList.toggle("off"); });
+      wrap.appendChild(b);
+    }
+  }
+  function closePickers() {
+    $("accusePicker") && $("accusePicker").classList.add("hidden");
+    $("guessPicker") && $("guessPicker").classList.add("hidden");
+  }
+  function renderActions() {
+    const amInRound = game.players.some((p) => p.handle === me.handle);
+    const isSpy = game.spy === me.handle;
+    // crew accuse; spy guesses; spectators get neither
+    $("btnAccuse").style.display = (amInRound && !isSpy) ? "" : "none";
+    $("btnSpyGuess").style.display = (amInRound && isSpy) ? "" : "none";
   }
 
   function renderSecret() {
@@ -685,10 +772,38 @@
     stopTick();
     showScreen("over");
     const spyP = uniqByHandle(game.players).find((p) => p.handle === game.spy);
-    $("overSpy").textContent = spyP ? spyP.name : (game.spy || "Unknown");
+    const spyName = spyP ? spyP.name : (game.spy || "Unknown");
+    $("overSpy").textContent = spyName;
     $("overLoc").textContent = game.location || "—";
-    $("overFlourish").textContent = pick(["🎭", "🕵️", "🔍", "🎩"]);
-    renderRoster($("overRoster"), game.players, { revealSpy: true, spy: game.spy });
+    const r = game.result;
+    const crewWon = r && r.winner === "crew";
+    $("overFlourish").textContent = r ? (crewWon ? "🎉" : "🕵️") : "🎭";
+    $("overWinner").textContent = r ? (crewWon ? "CREW WINS" : "SPY WINS") : "Round over";
+    $("overWinner").className = "win-banner " + (r ? (crewWon ? "crew" : "spy") : "");
+    let reason = "";
+    if (r) {
+      const who = r.byName || "someone";
+      if (r.reason === "accuse") reason = crewWon ? `${who} fingered the spy` : `${who} accused ${esc(r.accusedName || "the wrong player")} — wrong!`;
+      else if (r.reason === "guess") reason = crewWon ? `the spy guessed ${esc(r.guess || "")} — wrong location` : `the spy nailed the location (${esc(r.guess || "")})`;
+      else if (r.reason === "timeout") reason = "time ran out — the crew never caught the spy";
+    }
+    $("overReason").innerHTML = reason;
+    // scoreboard (cumulative), sorted high→low
+    const scores = game.scores || {};
+    const nameByHandle = {};
+    for (const p of uniqByHandle(game.players)) nameByHandle[p.handle] = p.name;
+    const rows = Object.keys(scores).map((h) => ({ handle: h, name: nameByHandle[h] || h, pts: scores[h] }))
+      .sort((a, b) => b.pts - a.pts);
+    const el = $("overScores"); el.innerHTML = "";
+    if (!rows.length) { el.innerHTML = '<li class="muted" style="border:none;background:transparent">No scores yet</li>'; }
+    for (const row of rows) {
+      const li = document.createElement("li");
+      const isMe = me && row.handle === me.handle;
+      const isSpy = row.handle === game.spy;
+      if (isMe) li.classList.add("me-row");
+      li.innerHTML = `<span class="pdot"></span><span>${esc(row.name)}${isSpy ? ' <span class="spy-tag">spy</span>' : ""}</span><span class="you" style="margin-left:auto;color:var(--gold-bright)">${row.pts} pt${row.pts === 1 ? "" : "s"}</span>`;
+      el.appendChild(li);
+    }
   }
 
   // ── Countdown timer (visual only, derived from endsAt) ───
@@ -716,8 +831,8 @@
     if (remaining <= 0) {
       stopTick();
       $("clock").textContent = "0:00";
-      // anyone may flip to "over"; first writer wins, others sync via subscribe
-      if (game.phase === "playing") revealRound();
+      // clock ran out → the crew never caught the spy, so the spy wins
+      if (game.phase === "playing" && !game.result) resolveRound({ winner: "spy", reason: "timeout" });
     }
   }
 
@@ -761,9 +876,37 @@
 
   // ── Button wiring ────────────────────────────────────────
   $("btnStart").addEventListener("click", startRound);
-  $("btnReveal").addEventListener("click", revealRound);
   $("btnNewRound").addEventListener("click", newRound);
   $("btnBackLobby").addEventListener("click", backToLobby);
+
+  // accuse flow: pick a suspect → ends + scores the round
+  $("btnAccuse").addEventListener("click", () => {
+    const list = $("accuseList"); list.innerHTML = "";
+    for (const p of uniqByHandle(game.players)) {
+      if (p.handle === me.handle) continue; // can't accuse yourself
+      const b = document.createElement("button");
+      b.className = "btn-danger btn-block"; b.style.marginBottom = ".4rem";
+      b.textContent = "It's " + p.name + "!";
+      b.addEventListener("click", () => { closePickers(); accuse(p.handle, p.name); });
+      list.appendChild(b);
+    }
+    $("guessPicker").classList.add("hidden");
+    $("accusePicker").classList.remove("hidden");
+  });
+  $("btnAccuseCancel").addEventListener("click", () => $("accusePicker").classList.add("hidden"));
+  // spy guess flow: pick the location → win if right
+  $("btnSpyGuess").addEventListener("click", () => {
+    const list = $("guessList"); list.innerHTML = "";
+    for (const loc of LOCATIONS) {
+      const b = document.createElement("button");
+      b.className = "loc-chip"; b.textContent = loc.name;
+      b.addEventListener("click", () => { closePickers(); spyGuess(loc.name); });
+      list.appendChild(b);
+    }
+    $("accusePicker").classList.add("hidden");
+    $("guessPicker").classList.remove("hidden");
+  });
+  $("btnGuessCancel").addEventListener("click", () => $("guessPicker").classList.add("hidden"));
   $("btnLeaveLobby").addEventListener("click", leaveTable);
   $("btnLeavePlay").addEventListener("click", leaveTable);
   $("btnLeaveOver").addEventListener("click", leaveTable);
