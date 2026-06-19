@@ -243,6 +243,15 @@
   #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
   footer.foot { text-align: center; color: var(--muted); font-size: 11px; margin-top: 22px; }
+
+  /* best-of match scoreboard */
+  .match-score {
+    display: flex; align-items: center; justify-content: center; gap: .6rem;
+    margin: 0 0 .5rem; font-size: .95rem; color: var(--muted);
+  }
+  .match-score .vs { color: var(--dim, #52525b); }
+  .match-score .r b { color: #ff7a7e; font-size: 1.15rem; }
+  .match-score .y b { color: #ffe27a; font-size: 1.15rem; }
 </style>
 </head>
 <body>
@@ -322,6 +331,7 @@
     <!-- ── GAME ── -->
     <section id="screenGame" class="card game hidden">
       <div style="text-align:center"><span class="spectate-tag hidden" id="specTag">spectating</span></div>
+      <div id="matchScore" class="match-score hidden"></div>
       <div class="statusbar"><div class="turnpill" id="turnPill"><span class="disc"></span><span id="turnText">…</span></div></div>
 
       <div class="boardwrap" id="boardWrap">
@@ -355,6 +365,14 @@
     const boardEl = $("board");
     const colBtnsEl = $("colBtns");
     const boardWrap = $("boardWrap");
+    // full-column tap: tapping anywhere in a column drops there (mobile-friendly —
+    // the thin ▾ strip was a tiny target with no hover on touch).
+    boardEl.addEventListener("click", (e) => {
+      if (!game || game.phase !== "playing") return;
+      const cells = [...boardEl.children];
+      const i = cells.indexOf(e.target.closest(".cell"));
+      if (i >= 0) dropDisc(i % COLS);
+    });
 
     // ── Worlds handles ───────────────────────────────────────
     // Many concurrent tables: worlds.rooms is the directory (lobby browser + join
@@ -455,9 +473,12 @@
         winner: null,               // handle | "draw" | null
         line: null,                 // [cellIndex,...] | null
         firstSeat: "p1",            // which seat moves first this game (rematch flips)
+        score: { p1: 0, p2: 0 },    // best-of match score across rematches
+        turnDeadline: 0,            // wall-clock ms the current mover must act by
         startedBy: null
       };
     }
+    const TURN_MS = 45000;          // per-move clock; stalling past it forfeits the turn
 
     // role of a handle in the current game: "p1" | "p2" | null
     function seatOf(handle) {
@@ -592,6 +613,8 @@
       g.winner = null;
       g.line = null;
       g.turn = g.players[g.firstSeat || "p1"].handle;
+      g.turnDeadline = Date.now() + TURN_MS;
+      if (!g.score) g.score = { p1: 0, p2: 0 };
       g.startedBy = { handle: me.handle, name: me.name };
     }
 
@@ -609,6 +632,7 @@
           next.board = emptyBoard();
           next.turn = null; next.winner = null; next.line = null;
         }
+        next.score = { p1: 0, p2: 0 }; // fresh series for the next pairing
         orderSeats(next);
         const ok = await writeDoc(next);
         if (!ok) await refetch();
@@ -643,6 +667,8 @@
           next.winner = me.handle;
           next.line = win.line;
           next.turn = null;
+          next.score = { p1: (game.score && game.score.p1) || 0, p2: (game.score && game.score.p2) || 0 };
+          next.score[seat]++;       // best-of match tally
         } else if (isFull(board)) {
           next.phase = "over";
           next.winner = "draw";
@@ -650,6 +676,7 @@
           next.turn = null;
         } else {
           next.turn = game.players[seat === "p1" ? "p2" : "p1"].handle;
+          next.turnDeadline = Date.now() + TURN_MS; // reset clock for the next mover
         }
 
         const ok = await writeDoc(next);
@@ -849,6 +876,14 @@
       const pill = $("turnPill");
       const txt = $("turnText");
       pill.className = "turnpill";
+      // match scoreboard (best-of series), shown once both seats are filled
+      const ms = $("matchScore");
+      const sc = game.score || { p1: 0, p2: 0};
+      if (game.players.p1 && game.players.p2 && (sc.p1 || sc.p2 || game.phase !== "lobby")) {
+        ms.classList.remove("hidden");
+        ms.innerHTML = `<span class="r">${esc(nameOf("p1") || "P1")} <b>${sc.p1 || 0}</b></span><span class="vs">—</span><span class="y"><b>${sc.p2 || 0}</b> ${esc(nameOf("p2") || "P2")}</span>`;
+      } else { ms.classList.add("hidden"); }
+
       if (game.phase === "over") {
         if (game.winner === "draw") { txt.textContent = "It's a draw."; pill.classList.add("win"); }
         else {
@@ -864,12 +899,37 @@
       const tSeat = seatOfTurn();
       if (tSeat) pill.classList.add(tSeat);
       const myTurn = me && game.turn === me.handle;
-      if (myTurn) { pill.classList.add("your"); txt.textContent = "Your turn — drop a disc"; }
+      const secs = game.turnDeadline ? Math.max(0, Math.ceil((game.turnDeadline - Date.now()) / 1000)) : null;
+      const clock = (secs != null && secs <= 20) ? `  ⏱ ${secs}s` : "";
+      if (myTurn) { pill.classList.add("your"); txt.textContent = "Your turn — drop a disc" + clock; }
       else {
         const waitName = tSeat ? nameOf(tSeat) : "opponent";
-        txt.textContent = mySeat() ? `Waiting for ${waitName}…` : `${waitName}'s turn`;
+        txt.textContent = (mySeat() ? `Waiting for ${waitName}…` : `${waitName}'s turn`) + clock;
       }
     }
+
+    // per-second tick: refresh the turn clock + auto-forfeit a staller. The WAITING
+    // seated player is the single writer of the forfeit, so there's no write race.
+    setInterval(() => {
+      if (!game || game.phase !== "playing") return;
+      renderStatus();
+      const seat = mySeat();
+      if (!seat || busy) return;
+      if (game.turn === me.handle) return;          // my turn → I'm not waiting
+      if (!game.turnDeadline || Date.now() < game.turnDeadline + 1000) return; // +1s grace
+      // opponent stalled past the clock → claim the win
+      busy = true;
+      (async () => {
+        try {
+          const next = JSON.parse(JSON.stringify(game));
+          next.phase = "over"; next.winner = me.handle; next.turn = null; next.line = null;
+          next.score = { p1: (game.score && game.score.p1) || 0, p2: (game.score && game.score.p2) || 0 };
+          next.score[seat]++;
+          const ok = await writeDoc(next);
+          if (!ok) await refetch();
+        } finally { busy = false; }
+      })();
+    }, 1000);
 
     // ── Tables browser (worlds.rooms directory) ──────────────
     function renderTables(list) {
