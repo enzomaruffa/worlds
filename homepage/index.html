@@ -85,6 +85,25 @@
   #settings .actions { display:flex; gap:8px; justify-content:flex-end; margin-top:18px; }
   #settings button { font:600 13px var(--disp); border-radius:9px; padding:9px 17px; cursor:pointer; border:1px solid var(--rule); background:var(--bg); color:var(--soft); }
   #settings button.save { background:var(--gold); color:#101012; border-color:var(--gold); }
+  /* deploy modal */
+  #dscrim { position:fixed; inset:0; background:rgba(0,0,0,.6); display:none; align-items:center; justify-content:center; z-index:20; }
+  #dscrim.on { display:flex; }
+  #deploy { width:min(460px,92vw); background:var(--elev); border:1px solid var(--rule); border-radius:16px; padding:24px; }
+  #deploy h2 { margin:0 0 4px; font:700 17px var(--disp); }
+  #deploy .sub { color:var(--mute); font-size:12px; margin-bottom:16px; }
+  #deploy label { display:block; font:600 11px var(--disp); color:var(--mute); text-transform:uppercase; letter-spacing:.08em; margin:14px 0 5px; }
+  #deploy input[type=text] { width:100%; background:var(--bg); border:1px solid var(--rule); border-radius:9px; color:var(--ink); padding:10px 13px; font-size:14px; outline:none; }
+  #deploy input:focus { border-color:var(--gold); }
+  #drop { border:1.5px dashed var(--rule); border-radius:12px; padding:24px; text-align:center; color:var(--mute); cursor:pointer; font-size:13px; transition:border-color .1s, background .1s; }
+  #drop u { color:var(--gold); }
+  #drop.over { border-color:var(--gold); background:rgba(245,158,11,.08); color:var(--ink); }
+  #deploy .hint { color:var(--mute); font-size:11px; margin-top:6px; }
+  #deploy .err { font-size:12px; min-height:1em; margin-top:10px; color:#f87171; }
+  #deploy .err.ok { color:#34d399; }
+  #deploy .actions { display:flex; gap:8px; justify-content:flex-end; margin-top:18px; }
+  #deploy button { font:600 13px var(--disp); border-radius:9px; padding:9px 17px; cursor:pointer; border:1px solid var(--rule); background:var(--bg); color:var(--soft); }
+  #deploy button.save { background:var(--gold); color:#101012; border-color:var(--gold); }
+  #deploy button:disabled { opacity:.5; cursor:default; }
 </style>
 </head>
 <body>
@@ -92,6 +111,7 @@
   <div class="brand"><b>worlds</b> <span class="tag" id="count"></span></div>
   <nav>
     <a class="btn pilot" id="pilot" href="#">🚀 explore the universe</a>
+    <a class="btn" id="bDeploy" href="#">✦ deploy a world</a>
     <a class="btn" href="/docs/quickstart.md">docs</a>
     <button id="bSettings" title="your profile">⚙</button>
   </nav>
@@ -138,6 +158,25 @@
     <div class="actions">
       <button id="sCancel">cancel</button>
       <button class="save" id="sSave">save</button>
+    </div>
+  </div>
+</div>
+
+<div id="dscrim">
+  <div id="deploy">
+    <h2>deploy a world</h2>
+    <div class="sub">Drop a folder with an <code>index.html</code> — it goes live at <code>&lt;name&gt;.worlds…</code> instantly. No CLI, no tarball. Assets (images, models) included.</div>
+    <div id="drop">📁 drop a folder here, or <u>browse</u>
+      <input type="file" id="dFiles" webkitdirectory directory multiple hidden />
+    </div>
+    <div class="hint" id="dPicked"></div>
+    <label>site name</label>
+    <input type="text" id="dName" placeholder="my-game" autocomplete="off" />
+    <div class="hint">a–z, 0–9, dashes. Re-deploying a name you own overwrites it.</div>
+    <div class="err" id="dErr"></div>
+    <div class="actions">
+      <button id="dCancel">cancel</button>
+      <button class="save" id="dDeploy" disabled>deploy</button>
     </div>
   </div>
 </div>
@@ -256,6 +295,62 @@
     if (!res.ok) { sErr.textContent = (data.error && data.error.message) || "could not save"; return; }
     scrim.classList.remove("on");
     load();
+  };
+
+  // ---------- deploy a world (drag-drop a folder → live, no CLI) ----------
+  const dscrim = document.getElementById("dscrim");
+  const dFiles = document.getElementById("dFiles"), dName = document.getElementById("dName"), dErr = document.getElementById("dErr");
+  const dDeploy = document.getElementById("dDeploy"), dPicked = document.getElementById("dPicked"), drop = document.getElementById("drop");
+  let picked = [];
+  const slug = (s) => (s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  document.getElementById("bDeploy").onclick = (e) => {
+    e.preventDefault();
+    picked = []; dPicked.textContent = ""; dName.value = ""; dErr.textContent = ""; dErr.className = "err"; dDeploy.disabled = true;
+    dscrim.classList.add("on");
+  };
+  document.getElementById("dCancel").onclick = () => dscrim.classList.remove("on");
+  dscrim.addEventListener("click", (e) => { if (e.target === dscrim) dscrim.classList.remove("on"); });
+  drop.onclick = () => dFiles.click();
+  function setPicked(list) {
+    picked = list;
+    const top = (picked[0]?.path || "").split("/")[0];
+    if (!dName.value && top) dName.value = slug(top);
+    const kb = Math.round(picked.reduce((n, f) => n + f.file.size, 0) / 1024);
+    dPicked.textContent = picked.length ? `${picked.length} files · ${kb} KB` : "";
+    const hasIndex = picked.some((f) => /(^|\/)index\.html$/i.test(f.path));
+    dDeploy.disabled = !picked.length || !hasIndex;
+    dErr.className = "err";
+    dErr.textContent = picked.length && !hasIndex ? "⚠ no index.html in that folder" : "";
+  }
+  dFiles.onchange = (e) => setPicked([...e.target.files].map((f) => ({ path: f.webkitRelativePath || f.name, file: f })));
+  ["dragenter", "dragover"].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add("over"); }));
+  ["dragleave", "dragend"].forEach((ev) => drop.addEventListener(ev, () => drop.classList.remove("over")));
+  drop.addEventListener("drop", async (e) => {
+    e.preventDefault(); drop.classList.remove("over");
+    const roots = [...(e.dataTransfer.items || [])].map((i) => i.webkitGetAsEntry && i.webkitGetAsEntry()).filter(Boolean);
+    const out = [];
+    async function walk(entry, prefix) {
+      if (entry.isFile) { const f = await new Promise((res, rej) => entry.file(res, rej)); out.push({ path: prefix + entry.name, file: f }); }
+      else if (entry.isDirectory) { const r = entry.createReader(); let b; do { b = await new Promise((res) => r.readEntries(res)); for (const en of b) await walk(en, prefix + entry.name + "/"); } while (b.length); }
+    }
+    for (const r of roots) await walk(r, "");
+    if (out.length) setPicked(out);
+    else if (e.dataTransfer.files?.length) setPicked([...e.dataTransfer.files].map((f) => ({ path: f.name, file: f })));
+  });
+  dDeploy.onclick = async () => {
+    const site = slug(dName.value);
+    if (!site) { dErr.textContent = "pick a site name"; dErr.className = "err"; return; }
+    dDeploy.disabled = true; dErr.textContent = "deploying…"; dErr.className = "err";
+    const fd = new FormData();
+    fd.append("site", site);
+    for (const f of picked) fd.append(f.path, f.file, f.file.name);
+    try {
+      const res = await fetch("/api/v1/deploy-folder", { method: "POST", headers: { "x-worlds-csrf": "1" }, body: fd });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { dErr.textContent = (data.error && data.error.message) || "deploy failed"; dErr.className = "err"; dDeploy.disabled = false; return; }
+      dErr.textContent = "✓ live at " + (data.url || site); dErr.className = "err ok";
+      setTimeout(() => { dscrim.classList.remove("on"); load(); }, 1500);
+    } catch (err) { dErr.textContent = err.message || "deploy failed"; dErr.className = "err"; dDeploy.disabled = false; }
   };
 
   await load();
