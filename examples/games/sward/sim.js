@@ -23,9 +23,10 @@ const SEASON_GROW = [1.3, 1.0, 0.6, 0.22];
 const SEASON_DEW = [1.15, 1.25, 0.9, 0.45];
 
 export const UPGRADES = {
-  rake:       { name: "Auto-rake", icon: "🧹", base: 40,  mult: 2.4, max: 5, desc: "Clears stray debris on its own." },
-  sprinkler:  { name: "Sprinkler", icon: "💦", base: 90,  mult: 2.8, max: 5, desc: "Keeps the soil watered — faster, lusher growth." },
-  fertilizer: { name: "Fertilizer", icon: "🌟", base: 150, mult: 3.2, max: 5, desc: "Richer soil multiplies grass growth." },
+  rake:        { name: "Auto-rake",   icon: "🧹",   base: 50,   mult: 2.6, max: 8,  desc: "Clears stray debris on its own (faster per level)." },
+  sprinkler:   { name: "Sprinkler",   icon: "💦",   base: 120,  mult: 2.8, max: 10, desc: "Keeps the soil watered — faster, lusher growth." },
+  fertilizer:  { name: "Fertilizer",  icon: "🌟",   base: 220,  mult: 3.1, max: 12, desc: "Richer soil multiplies grass growth." },
+  greenkeeper: { name: "Greenkeeper", icon: "🧑‍🌾", base: 900,  mult: 3.0, max: 8,  desc: "Auto-seeds grass into open ground." },
 };
 
 // gameplay state (net.js persists this; localStorage is the C4 stand-in)
@@ -33,8 +34,10 @@ export const S = {
   debris: [],                       // {id, x, z, kind, mesh, reward}
   blocked: new Uint8Array(NC),      // 1 = soil can't grow (under debris)
   water: new Float32Array(NC),      // transient moisture overlay 0..1
-  upgrades: { rake: 0, sprinkler: 0, fertilizer: 0 },
+  upgrades: { rake: 0, sprinkler: 0, fertilizer: 0, greenkeeper: 0 },
   features: [],                     // {id, kind, x, z, stage, stageT, group}
+  plotLevel: 0,                     // expansion: how many rings of land are unlocked
+  unlocked: {},                     // which feature kinds the player has bought access to
   lastSeen: 0,
   rakeTimer: 0,
   climax: false,
@@ -81,6 +84,9 @@ export function rewild() {
   Grass.coverage.fill(0); Grass.health.fill(1);
   G.spores = (G.spores || 0) + gain; G.year = (G.year || 1) + 1;
   G.dew = 0; G.ecoLevel = 0; G.ecoPeak = 0; G.goods = emptyGoods();   // keep perks, almanac, questsDone, stats
+  S.upgrades = { rake: 0, sprinkler: 0, fertilizer: 0, greenkeeper: 0 }; // soft upgrades reset (perks are the permanent layer)
+  S.plotLevel = 0; S.unlocked = {};
+  W.setBoundary(growHalf());
   scatterDebris(15, (G.plotSeed ^ (G.year * 101)) >>> 0);
   if (perkLvl("greenStart")) { seedPatch(0, 0, 6, 0.55); seedPatch(5, 4, 3, 0.4); seedPatch(-5, -4, 3, 0.4); }
   S.lastSeen = Date.now(); Grass.rebuild();
@@ -109,7 +115,7 @@ function unblockAround(x, z, r) {
 }
 
 function spawnDebris(x, z, kind, id) {
-  const m = W.cloneModel(kind, 1.0 + Math.random() * 0.8, { receive: true });
+  const m = W.cloneModel(kind, 1.7 + Math.random() * 1.3, { receive: true });
   if (!m) return null;
   m.position.set(x, W.heightAt(x, z), z);
   m.rotation.y = Math.random() * Math.PI * 2;
@@ -124,10 +130,21 @@ function spawnDebris(x, z, kind, id) {
 export function scatterDebris(n, seed) {
   let a = (seed ^ 0xABCD) >>> 0;
   const rnd = () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  const span = growHalf() * 2 - 2;
   for (let i = 0; i < n; i++) {
-    const x = (rnd() - 0.5) * (W.PLOT - 7), z = (rnd() - 0.5) * (W.PLOT - 7);
-    if (!W.insidePlot(x, z)) continue;
+    const x = (rnd() - 0.5) * span, z = (rnd() - 0.5) * span;
+    if (!insideGrowable(x, z)) continue;
     spawnDebris(x, z, DEBRIS_KINDS[(rnd() * DEBRIS_KINDS.length) | 0], "deb-" + Date.now().toString(36) + "-" + i);
+  }
+}
+// debris littering a freshly-unlocked outer ring (called on expansion)
+function scatterDebrisRing() {
+  const outer = growHalf(), inner = Math.max(0, outer - RING);
+  for (let i = 0; i < 9; i++) {
+    let x, z, tries = 0;
+    do { x = (Math.random() - 0.5) * outer * 2; z = (Math.random() - 0.5) * outer * 2; tries++; } while (Math.abs(x) < inner && Math.abs(z) < inner && tries < 24);
+    if (!insideGrowable(x, z)) continue;
+    spawnDebris(x, z, DEBRIS_KINDS[(Math.random() * DEBRIS_KINDS.length) | 0], "deb-" + Date.now().toString(36) + "-r" + i);
   }
 }
 
@@ -155,7 +172,7 @@ export function seedPatch(x, z, radius, amount) {
   let any = false;
   for (let dz = -rr; dz <= rr; dz++) for (let dx = -rr; dx <= rr; dx++) {
     const nx = ix + dx, nz = iz + dz; if (nx < 0 || nz < 0 || nx >= N || nz >= N) continue;
-    const ci = cidx(nx, nz); if (S.blocked[ci]) continue;
+    const ci = cidx(nx, nz); if (S.blocked[ci] || !growableCell(nx, nz)) continue;
     if (dx * dx + dz * dz > rr * rr) continue;
     Grass.coverage[ci] = Math.max(Grass.coverage[ci], amount); any = true;
   }
@@ -177,6 +194,31 @@ export function buyUpgrade(key) {
   if (G.dew < cost) return false;
   G.dew -= cost; S.upgrades[key] = (S.upgrades[key] || 0) + 1;
   return true;
+}
+
+// ── plot expansion (the headline Dew sink — unlock your land ring by ring) ────
+const START_HALF = 9, RING = 3.5;
+export const MAX_PLOT_LEVEL = Math.max(1, Math.floor((W.HALF - 1 - START_HALF) / RING)); // ~7
+export const growHalf = () => Math.min(W.HALF - 1, START_HALF + (S.plotLevel || 0) * RING);
+export const insideGrowable = (x, z) => { const h = growHalf(); return Math.abs(x) <= h && Math.abs(z) <= h; };
+const growableCell = (ix, iz) => { const c = Grass.cellCenter(ix, iz); return insideGrowable(c.x, c.z); };
+export const plotMaxed = () => (S.plotLevel || 0) >= MAX_PLOT_LEVEL;
+export const expandCost = () => Math.round(400 * Math.pow(3.5, S.plotLevel || 0));
+export function expandPlot() {
+  if (plotMaxed() || G.dew < expandCost()) return false;
+  G.dew -= expandCost(); S.plotLevel = (S.plotLevel || 0) + 1;
+  W.setBoundary(growHalf());
+  scatterDebrisRing();   // the freshly-unlocked ring comes with debris to clear
+  return true;
+}
+
+// ── progressive feature unlocks (gate content over the long game) ─────────────
+export const UNLOCK_COST = { clover: 120, flowers: 500, shrub: 1500, mushrooms: 4000, pond: 9000, tree: 22000, hive: 55000 };
+export const isUnlocked = (kind) => !UNLOCK_COST[kind] || !!(S.unlocked && S.unlocked[kind]);
+export const unlockCost = (kind) => UNLOCK_COST[kind] || 0;
+export function unlockFeature(kind) {
+  if (isUnlocked(kind) || G.dew < unlockCost(kind)) return false;
+  G.dew -= unlockCost(kind); (S.unlocked = S.unlocked || {})[kind] = 1; return true;
 }
 
 // ── features: free placement, influence fields, evolution ────────────────────
@@ -231,7 +273,8 @@ function placeMesh(f) {
 
 export function placeFeature(kind, x, z, free) {
   const def = El.FEATURES[kind]; if (!def) return null;
-  if (!free) { if (G.dew < def.cost) return null; G.dew -= def.cost; }
+  if (!free && (!insideGrowable(x, z) || !isUnlocked(kind) || G.dew < def.cost)) return null;
+  if (!free) G.dew -= def.cost;
   const start = perkLvl("earlyBloom") ? Math.min(1, El.maxStage(kind)) : 0;
   const f = { id: "ft-" + Date.now().toString(36) + "-" + ((Math.random() * 1e6) | 0), kind, x, z, stage: start, stageT: 0 };
   S.features.push(f); placeMesh(f); fieldsDirty = true;
@@ -306,13 +349,16 @@ export function step(dt, env) {
   }
 
   // grow + spread coverage (single relaxation pass into tmp, then commit)
+  const keeper = S.upgrades.greenkeeper || 0;
   let green = 0;
   for (let iz = 0; iz < N; iz++) for (let ix = 0; ix < N; ix++) {
     const i = cidx(ix, iz);
     let cov = Grass.coverage[i];
     const cap = 1 - 0.55 * Math.min(1, shadeF[i]);   // grass thins under deep canopy
-    if (!S.blocked[i]) {
+    if (!S.blocked[i] && growableCell(ix, iz)) {
       const moist = 0.4 + 0.6 * Math.min(1, S.water[i] + moistF[i]);
+      // greenkeeper slowly auto-seeds open ground
+      if (cov <= 0.02 && keeper) cov += 0.018 * keeper * dt;
       // self-growth toward the (shade-limited) cap if already seeded
       if (cov > 0.02) cov += growth * moist * dt * (cap - cov);
       // spread from neighbours
@@ -338,7 +384,7 @@ export function step(dt, env) {
   ecosystem();
 
   // Dew (ecosystem multiplies it — the GROW payoff)
-  const dewRate = green * 0.02 * SEASON_DEW[season] * (0.3 + 0.7 * sun) * (1 + G.ecoLevel * 0.28) * (1 + 0.25 * perkLvl("goldenDew"));
+  const dewRate = green * 0.016 * SEASON_DEW[season] * (0.3 + 0.7 * sun) * (1 + G.ecoLevel * 0.28) * (1 + 0.25 * perkLvl("goldenDew"));
   G.dew += dewRate * dt;
   S._dewRate = dewRate;
 
@@ -381,7 +427,7 @@ export function serialize() {
     goods: Object.fromEntries(Object.entries(G.goods || {}).map(([k, v]) => [k, Math.round((v || 0) * 10) / 10])),
     almanac: [...(G.almanac || [])], questsDone: [...(G.questsDone || [])], stats: G.stats || {},
     perks: { ...(G.perks || {}) }, year: G.year || 1,
-    upgrades: { ...S.upgrades },
+    upgrades: { ...S.upgrades }, plotLevel: S.plotLevel || 0, unlocked: { ...(S.unlocked || {}) },
     debris: S.debris.map((d) => ({ x: +d.x.toFixed(2), z: +d.z.toFixed(2), kind: d.kind, id: d.id, reward: d.reward })),
     features: S.features.map((f) => ({ kind: f.kind, x: +f.x.toFixed(2), z: +f.z.toFixed(2), stage: f.stage, stageT: +(f.stageT || 0).toFixed(3) })),
     cov, covD: D, lastSeen: Date.now(),
@@ -410,14 +456,17 @@ export function init(g, saved) {
   G.stats = (saved && saved.stats) || { debrisCleared: 0, specimensCaught: 0, neighborsWatered: 0 };
   G.perks = (saved && saved.perks) || {};
   G.year = (saved && saved.year) || 1;
+  S.upgrades = { rake: 0, sprinkler: 0, fertilizer: 0, greenkeeper: 0 };
+  S.plotLevel = 0; S.unlocked = {};
 
   if (saved && saved.debris) {
     G.dew = saved.dew || 0; G.spores = saved.spores || 0; G.ecoLevel = saved.ecoLevel || 0; G.ecoPeak = saved.ecoPeak || 0;
-    S.upgrades = { rake: 0, sprinkler: 0, fertilizer: 0, ...(saved.upgrades || {}) };
+    S.upgrades = { rake: 0, sprinkler: 0, fertilizer: 0, greenkeeper: 0, ...(saved.upgrades || {}) };
+    S.plotLevel = saved.plotLevel || 0; S.unlocked = { ...(saved.unlocked || {}) };
     for (const fs of saved.features || []) { const f = placeFeature(fs.kind, fs.x, fs.z, true); if (f) { f.stage = fs.stage | 0; f.stageT = fs.stageT || 0; placeMesh(f); } }
     for (const d of saved.debris) {
       const id = d.id || ("deb-" + Math.random().toString(36).slice(2));
-      const m = W.cloneModel(d.kind, 1.0, { receive: true });
+      const m = W.cloneModel(d.kind, 2.0, { receive: true });
       if (m) { m.position.set(d.x, W.heightAt(d.x, d.z), d.z); m.rotation.y = Math.random() * 6.28; m.userData.pickId = id; m.userData.kind = "debris"; W.scene.add(m); debrisRoots.push(m); }
       S.debris.push({ id, x: d.x, z: d.z, kind: d.kind, mesh: m, reward: d.reward || 8 });
       blockAround(d.x, d.z, 1.6);
@@ -428,6 +477,7 @@ export function init(g, saved) {
     scatterDebris(15, g.plotSeed);
     S.lastSeen = Date.now();
   }
+  W.setBoundary(growHalf());
   Grass.rebuild();   // offline catch-up is now driven by worlds.idle (see runOffline)
 }
 

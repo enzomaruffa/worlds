@@ -72,30 +72,40 @@ function updateClockHud() {
   dom.sunIcon.textContent = Sky.sunIcon();
 }
 
-// ── palette (tools now; features added in C5) ────────────────────────────────
+// ── palette (tools + features; features unlock progressively) ─────────────────
 function buildPalette() {
   dom.paletteRow.innerHTML = "";
-  const add = (key, ic, nm, cost) => {
+  const tile = (key, ic, nm, cost, locked) => {
     const el = document.createElement("div");
     el.className = "tool" + (G.tool === key ? " sel" : "");
-    el.dataset.tool = key; el.dataset.cost = cost;
-    el.innerHTML = `<span class="ic">${ic}</span><span class="nm">${nm}</span><span class="cost">${cost ? cost + " 💧" : "free"}</span>`;
-    el.addEventListener("click", () => selectTool(key));
+    el.dataset.tool = key; el.dataset.cost = cost; el.dataset.locked = locked ? "1" : "";
+    el.style.opacity = locked ? "0.78" : "";
+    el.innerHTML = `<span class="ic">${ic}</span><span class="nm">${nm}</span>` +
+      `<span class="cost">${locked ? "🔒 " + fmt(cost) + " 💧" : cost ? cost + " 💧" : "free"}</span>`;
+    el.addEventListener("click", () => locked ? tryUnlock(key.slice(5)) : selectTool(key));
     dom.paletteRow.appendChild(el);
   };
-  for (const t of TOOLS) add(t.key, t.ic, t.nm, t.cost);
+  for (const t of TOOLS) tile(t.key, t.ic, t.nm, t.cost, false);
   const div = document.createElement("div"); div.style = "width:1px;background:var(--border-soft);margin:.1rem .15rem;flex:none"; dom.paletteRow.appendChild(div);
-  for (const k of El.FEATURE_KEYS) { const f = El.FEATURES[k]; add("feat:" + k, f.icon, f.name, f.cost); }
+  for (const k of El.FEATURE_KEYS) {
+    const f = El.FEATURES[k], locked = !Sim.isUnlocked(k);
+    tile("feat:" + k, f.icon, f.name, locked ? Sim.unlockCost(k) : f.cost, locked);
+  }
   refreshPaletteAfford();
+}
+function tryUnlock(kind) {
+  Audio.resume();
+  const cost = Sim.unlockCost(kind);
+  if (Sim.unlockFeature(kind)) { Audio.sfx.quest(); toast(`Unlocked ${El.FEATURES[kind].name}! 🌟`); buildPalette(); selectTool("feat:" + kind); updateWallet(); }
+  else toast(`unlock ${El.FEATURES[kind].name} — need ${fmt(cost)} 💧`);
 }
 function selectTool(key) {
   G.tool = key;
-  for (const el of dom.paletteRow.children) el.classList.toggle("sel", el.dataset.tool === key);
+  for (const el of dom.paletteRow.children) el.classList.toggle("sel", el.dataset.tool === key && !el.dataset.locked);
   const t = TOOLS.find((x) => x.key === key);
   if (t) dom.hint.textContent = t.hint;
-  else if (key.startsWith("feat:")) { const f = El.FEATURES[key.slice(5)]; dom.hint.textContent = `click to place a ${f.name.toLowerCase()} · grab & drag to reposition · tap it to inspect`; }
+  else if (key.startsWith("feat:")) { const f = El.FEATURES[key.slice(5)]; dom.hint.textContent = `place a ${f.name.toLowerCase()} on your land · grab & drag to reposition · tap it to inspect`; }
 }
-function toolCost(key) { if (key && key.startsWith("feat:")) return El.FEATURES[key.slice(5)].cost; const t = TOOLS.find((x) => x.key === key); return t ? t.cost : 0; }
 function refreshPaletteAfford() {
   for (const el of dom.paletteRow.children) {
     const c = el.querySelector(".cost"); if (!c) continue;
@@ -118,7 +128,16 @@ function buildShop() {
 }
 function renderShop() {
   if (!shopEl || shopEl.style.display === "none") return;
-  let html = `<h3 style="margin:0 0 .5rem;font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;color:var(--dim)">upgrades</h3>`;
+  // ── expand land (the headline Dew sink) ──
+  const exMaxed = Sim.plotMaxed(), exCost = Sim.expandCost(), exCan = !exMaxed && G.dew >= exCost;
+  let html = `<h3 style="margin:0 0 .5rem;font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;color:var(--leaf)">your land · plot ${(Sim.S.plotLevel || 0) + 1}/${Sim.MAX_PLOT_LEVEL + 1}</h3>
+    <div style="display:flex;gap:.5rem;align-items:center;margin:.35rem 0 .7rem">
+      <span style="font-size:1.3rem">🪴</span>
+      <div style="flex:1;min-width:0"><div style="font-weight:600;font-size:.82rem">Expand the plot</div>
+      <div style="font-size:.68rem;color:var(--muted);line-height:1.3">Push the fence out — more land to grow grass, plant features & roam.</div></div>
+      <button id="expandBtn" ${exMaxed ? "disabled" : ""} style="pointer-events:auto;cursor:pointer;font-family:inherit;font-size:.72rem;font-weight:700;padding:.32rem .5rem;border-radius:.5rem;border:1px solid ${exCan ? "var(--leaf)" : "var(--border)"};background:${exCan ? "rgba(108,194,74,.18)" : "rgba(11,18,13,.6)"};color:${exMaxed ? "var(--dim)" : exCan ? "var(--leaf-bright)" : "var(--bloom)"}">${exMaxed ? "max" : fmt(exCost) + " 💧"}</button>
+    </div>`;
+  html += `<h3 style="margin:0 0 .5rem;font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;color:var(--dim)">upgrades</h3>`;
   for (const key of Object.keys(Sim.UPGRADES)) {
     const u = Sim.UPGRADES[key], lvl = Sim.S.upgrades[key] || 0, maxed = Sim.upgradeMaxed(key), cost = Sim.upgradeCost(key);
     const can = !maxed && G.dew >= cost;
@@ -146,6 +165,8 @@ function renderShop() {
     <button id="rewildBtn" style="pointer-events:auto;cursor:pointer;width:100%;font-family:inherit;font-weight:700;padding:.5rem;border-radius:.55rem;border:1px solid var(--spore);background:rgba(217,168,255,.14);color:var(--spore)">🍄 Let it rewild${rewildArm ? " — tap again to confirm" : ""}</button></div>`;
 
   shopEl.innerHTML = html;
+  const eb = shopEl.querySelector("#expandBtn");
+  if (eb) eb.addEventListener("click", () => { if (Sim.expandPlot()) { Grass.rebuild(); Audio.sfx.place(); flash("plot expanded 🪴"); toast("Your land grew! New ground to clear & grow 🌱"); updateWallet(); renderShop(); } else toast("not enough 💧 to expand"); });
   for (const b of shopEl.querySelectorAll("button[data-up]")) b.addEventListener("click", () => { if (Sim.buyUpgrade(b.dataset.up)) { toast(Sim.UPGRADES[b.dataset.up].name + " upgraded!"); updateWallet(); renderShop(); } else toast("not enough 💧"); });
   for (const b of shopEl.querySelectorAll("button[data-perk]")) b.addEventListener("click", () => { if (Sim.buyPerk(b.dataset.perk)) { toast(Sim.PERKS[b.dataset.perk].name + " unlocked! 🍄"); updateWallet(); renderShop(); } else toast("not enough 🍄 spores"); });
   const rb = shopEl.querySelector("#rewildBtn");
@@ -210,7 +231,9 @@ function applyAt(cx, cy) {
   }
   const g = W.pickGround(cx, cy);
   if (!g || !W.insidePlot(g.x, g.z)) { hideInspect(); return; }
+  const onLand = Sim.insideGrowable(g.x, g.z);
   if (tool === "seed") {
+    if (!onLand) return toast("expand your plot to grow here 🌱");
     if (G.dew < SEED_COST) return toast("need " + SEED_COST + " 💧");
     if (Sim.seedPatch(g.x, g.z, 2.2, 0.34)) { G.dew -= SEED_COST; Grass.rebuild(); Audio.sfx.seed(); updateWallet(); }
   } else if (tool === "water") {
@@ -218,7 +241,8 @@ function applyAt(cx, cy) {
     Sim.waterPatch(g.x, g.z, 2.4); G.dew -= WATER_COST; Audio.sfx.water(); updateWallet();
   } else if (tool.startsWith("feat:")) {
     const kind = tool.slice(5), cost = El.FEATURES[kind].cost;
-    if (G.dew < cost) return toast("need " + cost + " 💧");
+    if (!onLand) return toast("expand your plot to build here 🌱");
+    if (G.dew < cost) return toast("need " + fmt(cost) + " 💧");
     const f = Sim.placeFeature(kind, g.x, g.z);
     if (f) { Life.sync(); updateWallet(); flash(El.FEATURES[kind].icon); Audio.sfx.place(); showInspect(f.id); }
   }
@@ -278,12 +302,12 @@ function renderBoard() {
 }
 function visit(handle, name) {
   const off = Net.plotOffset(handle); if (!off) return;
-  G.visiting = handle; W.focusCamera(off.x, off.z, 50);
+  G.visiting = handle; W.focusCamera(off.x, off.z, 82);
   dom.visitName.textContent = name; dom.visitBar.classList.add("show");
   dom.hint.textContent = "visiting — tap their plot to 💧 water it (helps them grow, earns you Dew)";
   hideInspect();
 }
-function goHome() { G.visiting = null; W.focusCamera(0, 0, 50); dom.visitBar.classList.remove("show"); dom.hint.textContent = "drag to orbit · tap a tool, then the plot"; }
+function goHome() { G.visiting = null; W.focusCamera(0, 0, 82); dom.visitBar.classList.remove("show"); dom.hint.textContent = "drag to orbit · tap a tool, then the plot"; }
 function onWatered(p) { Sim.waterPatch(0, 0, W.HALF + 4); G.dew += 5; toast(`${esc(p.fromName || "a neighbor")} watered your plot 💦  +5`); updateWallet(); }
 
 function discoverHook() {
@@ -316,12 +340,18 @@ function frame(now) {
   const dt = Math.min((now - last) / 1000, 0.05);
   last = now;
 
-  // placement cursor
+  // placement cursor — red when you can't act there (off-land or can't afford)
   if (pointer.on && G.tool && !G.visiting) {
     const t = TOOLS.find((x) => x.key === G.tool);
+    const isFeat = G.tool.startsWith("feat:");
+    const cost = isFeat ? El.FEATURES[G.tool.slice(5)].cost : (t ? t.cost : 0);
+    const radius = isFeat ? 1.6 : (t ? t.r : 1);
+    const needsLand = isFeat || G.tool === "seed";
     const g = W.pickGround(pointer.x, pointer.y);
-    if (g && W.insidePlot(g.x, g.z)) W.setCursor(g.x, g.z, G.tool === "rake" || G.dew >= (t ? t.cost : 0), t ? t.r : 1);
-    else W.setCursor(null);
+    if (g && W.insidePlot(g.x, g.z)) {
+      const ok = (G.tool === "rake" || G.dew >= cost) && (!needsLand || Sim.insideGrowable(g.x, g.z));
+      W.setCursor(g.x, g.z, ok, radius);
+    } else W.setCursor(null);
   } else W.setCursor(null);
 
   Sky.update(dt);
@@ -384,7 +414,7 @@ async function boot() {
 
   const stage = (s) => { dom.loaderWho.textContent = s; };
   stage("shaping the land…"); W.initWorld(dom.canvas, G.plotSeed);
-  W.focusCamera(0, 0, 50);
+  W.focusCamera(0, 0, 82);
   stage("unpacking props…"); await W.loadModels(["rocks", "rocks_smallA", "rocks_smallB", "stump_round", "log", "grass", ...El.MODEL_NAMES]);
 
   stage("sprouting grass…"); Grass.buildGrass();
@@ -392,6 +422,8 @@ async function boot() {
   stage("tilling the soil…"); Sim.init(G, saved);   // builds debris, restores field
   // a fresh plot gets a couple of starter tufts so the wind + grass read instantly
   if (!saved) { Sim.seedPatch(2, 1, 1.8, 0.4); Sim.seedPatch(-3, -2, 1.6, 0.35); Grass.rebuild(); }
+  // frame the unlocked land (small at first, zooms out as you expand)
+  W.focusCamera(0, 0, Math.min(120, Sim.growHalf() * 2.7 + 22));
 
   const at = new URLSearchParams(location.search).get("at");   // ?at=<gameMs> freezes time (preview)
   if (at != null) Sky.setAbsolute(Number(at));

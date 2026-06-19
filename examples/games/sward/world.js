@@ -12,10 +12,10 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 // Lights live here but are *driven* by sky.js (sun sweeps, colour, season).
 // ───────────────────────────────────────────────────────────────────────────
 
-export const PLOT = 46;          // plot side length, world units
+export const PLOT = 72;          // plot side length, world units (big — unlocked ring by ring)
 export const HALF = PLOT / 2;
-export const HILL = 2.2;         // peak-to-trough terrain height
-const SEG = 96;                  // ground mesh resolution
+export const HILL = 3.0;         // peak-to-trough terrain height
+const SEG = 128;                 // ground mesh resolution
 
 export const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x87bde6);
@@ -124,6 +124,25 @@ export function setCursor(x, z, ok, radius = 1) {
   cursor.material.color.setHex(ok ? 0x9fe06a : 0xff8fb1);
 }
 
+// ── plot boundary fence (marks the unlocked land; moves out on expansion) ────
+let boundary = null;
+const postGeoB = new THREE.CylinderGeometry(0.13, 0.17, 1.1, 6);
+const postMatB = new THREE.MeshStandardMaterial({ color: 0x6f4a28, roughness: 0.9 });
+export function setBoundary(h) {
+  if (!boundary) { boundary = new THREE.Group(); scene.add(boundary); }
+  while (boundary.children.length) boundary.remove(boundary.children[0]);
+  const perSide = 14;
+  for (let s = 0; s < 4; s++) for (let i = 0; i < perSide; i++) {
+    const t = (i / perSide) * 2 - 1;
+    let x, z;
+    if (s === 0) { x = t * h; z = -h; } else if (s === 1) { x = t * h; z = h; }
+    else if (s === 2) { x = -h; z = t * h; } else { x = h; z = t * h; }
+    const p = new THREE.Mesh(postGeoB, postMatB);
+    p.position.set(x, heightAt(x, z) + 0.5, z); p.castShadow = true; p.receiveShadow = true;
+    boundary.add(p);
+  }
+}
+
 // ── raycasting ──────────────────────────────────────────────────────────────
 const ray = new THREE.Raycaster();
 const ndc = new THREE.Vector2();
@@ -186,8 +205,8 @@ export function initWorld(canvas, seed = 1) {
   sun.position.set(-34, 56, 28);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
-  sun.shadow.camera.near = 5; sun.shadow.camera.far = 180;
-  const sc = sun.shadow.camera; sc.left = -HALF - 6; sc.right = HALF + 6; sc.top = HALF + 6; sc.bottom = -HALF - 6;
+  sun.shadow.camera.near = 5; sun.shadow.camera.far = 260;
+  const sc = sun.shadow.camera; sc.left = -HALF - 8; sc.right = HALF + 8; sc.top = HALF + 8; sc.bottom = -HALF - 8;
   sun.shadow.bias = -0.0005;
   scene.add(sun, sun.target, hemi, ambient);
 
@@ -197,9 +216,9 @@ export function initWorld(canvas, seed = 1) {
   controls = new OrbitControls(camera, renderer.domElement);
   controls.target.set(0, 0, 0);
   controls.enableDamping = true; controls.dampingFactor = 0.08;
-  controls.minDistance = 14; controls.maxDistance = 92;
-  controls.maxPolarAngle = Math.PI * 0.46;   // never dip under the horizon
-  controls.minPolarAngle = Math.PI * 0.12;
+  controls.minDistance = 16; controls.maxDistance = 150;
+  controls.maxPolarAngle = Math.PI * 0.49;   // allow a lower, more cinematic angle
+  controls.minPolarAngle = Math.PI * 0.1;
   controls.enablePan = false;
   controls.rotateSpeed = 0.7;
 
@@ -213,10 +232,10 @@ export function resize() {
   renderer.setSize(w, h, false);
   camera.aspect = w / h; camera.updateProjectionMatrix();
 }
-export function focusCamera(x, z, dist = 46) {
+export function focusCamera(x, z, dist = 78) {
   if (!controls) return;
   controls.target.set(x, 0, z);
-  camera.position.set(x, dist * 0.74, z + dist * 0.86);
+  camera.position.set(x + dist * 0.18, dist * 0.6, z + dist * 0.9);   // lower, more cinematic 3/4 view
 }
 export function setControlsEnabled(b) { if (controls) controls.enabled = b; }
 export function tickControls() { if (controls) controls.update(); }
