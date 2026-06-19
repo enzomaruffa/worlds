@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { scene, heightAt } from "./world.js";
+import { scene, heightAt, PLOT, HALF } from "./world.js";
 import * as Sim from "./sim.js";
 import * as Sky from "./sky.js";
 
@@ -82,7 +82,75 @@ export function update(dt, t) {
       c.mesh.rotation.y = Math.atan2(c.tx - c.x, c.tz - c.z);
     }
   }
+  updateCatch(dt);
+  const ek = currentEvent()?.key ?? null;
+  if (ek !== lastEvent) { if (ek === "windstorm") Sim.scatterDebris(3, (Sky.gameNow() | 0)); lastEvent = ek; }
 }
+let lastEvent = null;
 
-export function clear() { for (const c of critters) remove(c); critters = []; }
+export function clear() { for (const c of critters) remove(c); critters = []; clearCatch(); }
 export const count = () => critters.length;
+export const activeTypes = () => new Set(critters.map((c) => c.type));
+
+// ── live events (deterministic from the shared clock) ─────────────────────────
+export const EVENTS = [
+  { key: "shower",    name: "Spring shower",     icon: "🌧️", seasons: [0], win: [0.34, 0.58], rain: true },
+  { key: "migration", name: "Monarch migration", icon: "🦋", seasons: [1], win: [0.3, 0.72] },
+  { key: "fireflies", name: "Firefly night",     icon: "✨", seasons: [0, 1], win: [0.82, 0.98] },
+  { key: "windstorm", name: "Autumn windstorm",  icon: "🍂", seasons: [2], win: [0.4, 0.62] },
+  { key: "frost",     name: "First frost",       icon: "❄️", seasons: [3], win: [0.18, 0.42] },
+  { key: "festival",  name: "Bloom festival",    icon: "🎏", seasons: [0, 1, 2], win: [0.46, 0.64] },
+];
+function hashInt(n) { n = (n ^ 0x9e3779b9) >>> 0; n = Math.imul(n ^ (n >>> 16), 0x45d9f3b) >>> 0; return (n ^ (n >>> 16)) >>> 0; }
+export function currentEvent() {
+  const day = Math.floor(Sky.gameNow() / Sky.DAY_MS), season = Sky.seasonIndex(), t = Sky.dayT();
+  const elig = EVENTS.filter((e) => !e.seasons || e.seasons.includes(season));
+  if (!elig.length) return null;
+  const e = elig[hashInt(day * 7 + season) % elig.length];
+  return (t > e.win[0] && t < e.win[1]) ? e : null;
+}
+export const isRaining = () => { const e = currentEvent(); return !!(e && e.rain); };
+
+// ── catchable critters ("a bug flies by") ─────────────────────────────────────
+export const catchRoots = [];
+let catchT = 2;
+const CATCH = {
+  monarch:  { name: "monarch", icon: "🦋", dew: 26, color: 0xff8a3c },
+  firefly:  { name: "firefly", icon: "✨", dew: 16, color: 0xc8ff7a, glow: true },
+  ladybug:  { name: "ladybug", icon: "🐞", dew: 20, color: 0xe23b3b },
+  dragonfly:{ name: "dragonfly", icon: "🪰", dew: 22, color: 0x6fd0e6 },
+};
+function spawnCatchable(type) {
+  const def = CATCH[type]; if (!def) return;
+  const m = new THREE.Mesh(new THREE.SphereGeometry(0.32, 8, 6), new THREE.MeshStandardMaterial({ color: def.color, emissive: def.color, emissiveIntensity: def.glow ? 0.9 : 0.45, roughness: 0.5 }));
+  const side = Math.random() < 0.5 ? -1 : 1;
+  const z = (Math.random() - 0.5) * PLOT * 0.7;
+  m.position.set(side * (HALF + 3), 4 + Math.random() * 4, z);
+  m.userData.pickId = "catch-" + Date.now().toString(36) + (Math.random() * 1000 | 0); m.userData.kind = "catch";
+  m.userData.vx = -side * (3 + Math.random() * 2); m.userData.ph = Math.random() * 6.28; m.userData.ttl = 14; m.userData.type = type;
+  scene.add(m); catchRoots.push(m);
+}
+export function tryCatch(id) {
+  const i = catchRoots.findIndex((m) => m.userData.pickId === id); if (i < 0) return null;
+  const m = catchRoots[i], def = CATCH[m.userData.type];
+  scene.remove(m); catchRoots.splice(i, 1);
+  return { type: m.userData.type, name: def.name, icon: def.icon, dew: def.dew, specimen: true };
+}
+function clearCatch() { for (const m of catchRoots) scene.remove(m); catchRoots.length = 0; }
+function updateCatch(dt) {
+  const ev = currentEvent();
+  catchT -= dt;
+  if (catchT <= 0) {
+    const migrating = ev && ev.key === "migration", night = Sky.dayT() > 0.8 || Sky.dayT() < 0.18;
+    catchT = migrating ? 1.2 + Math.random() * 1.5 : 6 + Math.random() * 8;
+    if (catchRoots.length < (migrating ? 6 : 2)) {
+      const type = migrating ? "monarch" : night ? "firefly" : ["ladybug", "monarch", "dragonfly"][Math.random() * 3 | 0];
+      spawnCatchable(type);
+    }
+  }
+  for (let i = catchRoots.length - 1; i >= 0; i--) {
+    const m = catchRoots[i]; m.userData.ttl -= dt; m.userData.ph += dt * 4;
+    m.position.x += m.userData.vx * dt; m.position.y += Math.sin(m.userData.ph) * dt * 1.2;
+    if (m.userData.ttl <= 0 || Math.abs(m.position.x) > HALF + 5) { scene.remove(m); catchRoots.splice(i, 1); }
+  }
+}
