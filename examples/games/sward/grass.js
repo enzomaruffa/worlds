@@ -144,6 +144,20 @@ export function rebuild() {
   if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
 }
 
+// Cheap colour-only refresh (no matrix rebuild) — for frequent season/time tints.
+export function retint() {
+  if (!mesh) return;
+  for (let i = 0; i < blades.length; i++) {
+    const bl = blades[i], cov = coverage[bl.ci];
+    if (cov < 0.04) continue;
+    _c.copy(dry).lerp(lush, THREE.MathUtils.clamp(health[bl.ci], 0, 1));
+    _c.lerp(tip, 0.12 + 0.12 * bl.cj * cov);
+    _c.offsetHSL(0, 0, (bl.cj - 0.5) * 0.06);
+    mesh.setColorAt(i, _c);
+  }
+  if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+}
+
 // C3 calls this to retint grass per season / time of day.
 export function setPalette({ lush: l, dry: d, tip: t, wind } = {}) {
   if (l != null) lush.set(l);
