@@ -5,6 +5,7 @@ import * as Sky from "./sky.js";
 import * as Sim from "./sim.js";
 import * as El from "./elements.js";
 import * as Life from "./life.js";
+import * as Net from "./net.js";
 
 // ───────────────────────────────────────────────────────────────────────────
 // SWARD — a multiplayer 3D incremental grass-plot game on Worlds.
@@ -23,6 +24,7 @@ const dom = {
   hint: $("hint"), msgTxt: $("msgTxt"), paletteRow: $("paletteRow"), inspect: $("inspect"),
   seasonN: $("seasonN"), todN: $("todN"), yearN: $("yearN"), sunIcon: $("sunIcon"),
   muteBtn: $("muteBtn"), questBtn: $("questBtn"), marketBtn: $("marketBtn"),
+  neighbors: $("neighbors"), visitBar: $("visitBar"), visitName: $("visitName"), visitBack: $("visitBack"),
   loader: $("loader"), loaderWho: $("loaderWho"), loaderErr: $("loaderErr"),
 };
 
@@ -163,7 +165,11 @@ dom.canvas.addEventListener("pointerup", (e) => {
 });
 
 function applyAt(cx, cy) {
-  if (G.visiting) return;
+  if (G.visiting) {
+    const g = W.pickGround(cx, cy);
+    if (g) { Net.water(G.visiting, G.me.name); G.dew += 2; flash("💦"); toast(`you watered ${esc(dom.visitName.textContent)}'s plot  +2 💧`); updateWallet(); }
+    return;
+  }
   const tool = G.tool || "rake";
   if (tool === "rake") {
     const hit = W.pickObjects(cx, cy, Sim.roots);
@@ -216,12 +222,31 @@ function showInspect(id) {
 }
 function hideInspect() { dom.inspect.classList.remove("show"); dom.inspect.dataset.id = ""; }
 
-// ── persistence (C6 swaps localStorage for worlds.db) ────────────────────────
-const saveKey = () => "sward:" + G.me.handle;
-let saveTimer = null;
-function saveSoon() { clearTimeout(saveTimer); saveTimer = setTimeout(saveNow, 1500); }
-function saveNow() { try { localStorage.setItem(saveKey(), JSON.stringify(Sim.serialize())); } catch (_) {} }
-function loadSaved() { try { const raw = localStorage.getItem(saveKey()); return raw ? JSON.parse(raw) : null; } catch (_) { return null; } }
+// ── persistence + neighborhood (worlds.db via net.js) ─────────────────────────
+function saveSoon() { Net.save(Sim.serialize()); }
+function saveNow() { Net.saveImmediate(Sim.serialize()); }
+
+function renderNeighbors(list) {
+  const el = dom.neighbors;
+  if (!list || !list.length) { el.innerHTML = '<div class="empty">just you, for now 🌱</div>'; return; }
+  el.innerHTML = "";
+  for (const n of list) {
+    const row = document.createElement("div");
+    row.className = "nb" + (n.handle === G.visiting ? " me" : "");
+    row.innerHTML = `<span class="sw" style="background:${esc(n.color)}"></span><span class="who">${esc(n.name)}</span><span class="eco">🌿${n.eco}</span>`;
+    row.addEventListener("click", () => visit(n.handle, n.name));
+    el.appendChild(row);
+  }
+}
+function visit(handle, name) {
+  const off = Net.plotOffset(handle); if (!off) return;
+  G.visiting = handle; W.focusCamera(off.x, off.z, 50);
+  dom.visitName.textContent = name; dom.visitBar.classList.add("show");
+  dom.hint.textContent = "visiting — tap their plot to 💧 water it (helps them grow, earns you Dew)";
+  hideInspect();
+}
+function goHome() { G.visiting = null; W.focusCamera(0, 0, 50); dom.visitBar.classList.remove("show"); dom.hint.textContent = "drag to orbit · tap a tool, then the plot"; }
+function onWatered(p) { Sim.waterPatch(0, 0, W.HALF + 4); G.dew += 5; toast(`${esc(p.fromName || "a neighbor")} watered your plot 💦  +5`); updateWallet(); }
 
 // ── main loop ────────────────────────────────────────────────────────────────
 let last = performance.now(), hudT = 0, simAccum = 0, dirtyGrass = false;
@@ -249,6 +274,10 @@ function frame(now) {
   if (dirtyGrass) { Grass.rebuild(); dirtyGrass = false; }
   Grass.update(dt);
   Life.update(dt, now / 1000);
+  Net.tickPresence(dt);
+
+  saveAccum += dt;
+  if (saveAccum > 9) { saveAccum = 0; saveSoon(); }
 
   hudT += dt;
   if (hudT > 0.25) {
@@ -262,13 +291,12 @@ function frame(now) {
     // climax celebration (once per achievement)
     if (Sim.S.climax && !climaxShown) { climaxShown = true; flash("Climax ecosystem! ✨"); toast("Every feature at its peak — Spore bonus banked on rewild 🍄", 4500); }
     if (!Sim.S.climax) climaxShown = false;
-    saveSoon();
   }
 
   W.tickControls();
   W.render();
 }
-let lifeSig = "", climaxShown = false;
+let lifeSig = "", climaxShown = false, saveAccum = 0;
 
 // ── boot ──────────────────────────────────────────────────────────────────────
 async function boot() {
@@ -291,7 +319,7 @@ async function boot() {
   stage("unpacking props…"); await W.loadModels(["rocks", "rocks_smallA", "rocks_smallB", "stump_round", "log", "grass", ...El.MODEL_NAMES]);
 
   stage("sprouting grass…"); Grass.buildGrass();
-  const saved = loadSaved();
+  stage("joining the neighborhood…"); const saved = await Net.init(G);   // load my plot doc (or create), set plotIndex
   stage("tilling the soil…"); const idle = Sim.init(G, saved);   // builds debris, restores field, offline catch-up
   // a fresh plot gets a couple of starter tufts so the wind + grass read instantly
   if (!saved) { Sim.seedPatch(2, 1, 1.8, 0.4); Sim.seedPatch(-3, -2, 1.6, 0.35); Grass.rebuild(); }
@@ -302,6 +330,10 @@ async function boot() {
 
   buildPalette(); buildShop(); selectTool(G.tool);
   updateClockHud(); updateWallet();
+  Net.startNeighbors(renderNeighbors);
+  Net.startPresence();
+  Net.startChannel(onWatered);
+  dom.visitBack.addEventListener("click", goHome);
   dom.muteBtn.addEventListener("click", () => toast("audio arrives soon 🔇"));
   dom.questBtn.addEventListener("click", () => toast("quests & almanac — coming soon 📖"));
   dom.marketBtn.addEventListener("click", () => toast("market — coming soon 🤝"));
@@ -312,7 +344,7 @@ async function boot() {
 
   G.booted = true;
   dom.loader.classList.add("hide");
-  window.SWARD = { G, Sim, Sky, Grass, W, El, Life };   // debug/inspection handle
+  window.SWARD = { G, Sim, Sky, Grass, W, El, Life, Net };   // debug/inspection handle
   requestAnimationFrame(frame);
 }
 
