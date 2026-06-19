@@ -2,6 +2,7 @@ import * as THREE from "three";
 import * as W from "./world.js";
 import * as Grass from "./grass.js";
 import * as El from "./elements.js";
+import { PRODUCERS, emptyGoods } from "./social.js";
 
 // ───────────────────────────────────────────────────────────────────────────
 // sim.js — the incremental engine: clean → grow → earn.
@@ -305,6 +306,12 @@ export function step(dt, env) {
   G.dew += dewRate * dt;
   S._dewRate = dewRate;
 
+  // goods production from mature features (tradeable in the market)
+  if (G.goods) for (const p of PRODUCERS) {
+    let n = 0; for (const f of S.features) if (f.kind === p.kind && f.stage >= p.stage) n++;
+    if (n) G.goods[p.good] = (G.goods[p.good] || 0) + p.rate * n * dt * SEASON_DEW[season];
+  }
+
   // auto-rake
   if (S.upgrades.rake && S.debris.length) {
     S.rakeTimer += dt;
@@ -335,6 +342,7 @@ export function serialize() {
   }
   return {
     dew: Math.round(G.dew), spores: G.spores | 0, ecoLevel: G.ecoLevel | 0, ecoPeak: G.ecoPeak | 0,
+    goods: Object.fromEntries(Object.entries(G.goods || {}).map(([k, v]) => [k, Math.round((v || 0) * 10) / 10])),
     upgrades: { ...S.upgrades },
     debris: S.debris.map((d) => ({ x: +d.x.toFixed(2), z: +d.z.toFixed(2), kind: d.kind, id: d.id, reward: d.reward })),
     features: S.features.map((f) => ({ kind: f.kind, x: +f.x.toFixed(2), z: +f.z.toFixed(2), stage: f.stage, stageT: +(f.stageT || 0).toFixed(3) })),
@@ -358,6 +366,7 @@ export function init(g, saved) {
   S.blocked.fill(0); S.water.fill(0); shadeF.fill(0); moistF.fill(0); pollenF.fill(0); nectarF.fill(0);
   Grass.coverage.fill(0); Grass.health.fill(1);
   G.ecoPeak = 0; fieldsDirty = true;
+  G.goods = saved && saved.goods ? { ...emptyGoods(), ...saved.goods } : emptyGoods();
 
   if (saved && saved.debris) {
     G.dew = saved.dew || 0; G.spores = saved.spores || 0; G.ecoLevel = saved.ecoLevel || 0; G.ecoPeak = saved.ecoPeak || 0;
