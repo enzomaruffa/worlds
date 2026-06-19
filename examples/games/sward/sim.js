@@ -61,6 +61,7 @@ export const PERKS = {
   compost:    { name: "Compost",        icon: "🪱", base: 2, mult: 1.8, max: 3, desc: "+50% Dew from clearing debris per level." },
   earlyBloom: { name: "Early bloom",    icon: "⏩", base: 5, mult: 1,   max: 1, desc: "New features start one stage ahead." },
   greenStart: { name: "Evergreen start", icon: "🌿", base: 4, mult: 1,  max: 1, desc: "Rewilded plots begin with a grassy head start." },
+  greenhouse: { name: "Greenhouse",     icon: "🏡", base: 4, mult: 1.8, max: 3, desc: "Longer offline cap (+50%/lvl) & bigger AFK yield (+20%/lvl)." },
 };
 export const perkLvl = (k) => (G.perks && G.perks[k]) || 0;
 export const perkCost = (k) => Math.round(PERKS[k].base * Math.pow(PERKS[k].mult, perkLvl(k)));
@@ -427,24 +428,32 @@ export function init(g, saved) {
     scatterDebris(15, g.plotSeed);
     S.lastSeen = Date.now();
   }
-  Grass.rebuild();
-  return offlineCatchUp(saved);
+  Grass.rebuild();   // offline catch-up is now driven by worlds.idle (see runOffline)
 }
 
-// Advance the sim by real elapsed time since lastSeen, capped, in coarse chunks.
-function offlineCatchUp(saved) {
-  if (!saved || !S.lastSeen) return null;
-  const elapsed = Math.max(0, Math.min(8 * 3600, (Date.now() - S.lastSeen) / 1000));   // cap 8h
-  if (elapsed < 30) return null;
-  const dewBefore = G.dew;
-  // average day → sun ~0.45, neutral season blend; chunk in 30s steps (cap iterations)
-  const STEP = 30; let t = elapsed, guard = 0;
-  while (t > 0 && guard++ < 2000) {
-    step(Math.min(STEP, t), { season: 1, sunlight: 0.5, rain: false });
-    t -= STEP;
-  }
+// ── idle / offline progression (driven by the worlds.idle SDK primitive) ──────
+const HOUR = 3600;
+export const idleCap = () => 8 * HOUR * (1 + 0.5 * perkLvl("greenhouse"));   // Greenhouse extends the cap
+export const idleYieldMult = () => 1 + 0.2 * perkLvl("greenhouse");          // …and the offline yield
+const avgCover = () => { let s = 0; for (let i = 0; i < Grass.coverage.length; i++) s += Grass.coverage[i]; return s / Grass.coverage.length; };
+const stageSum = () => S.features.reduce((a, f) => a + f.stage, 0);
+
+// Advance the world by `seconds` (already capped by the SDK) at an average-day
+// rate, then diff into a report. Returns deltas for the "while you were away" modal.
+export function runOffline(seconds) {
+  const before = { dew: G.dew, goods: { ...G.goods }, cover: avgCover(), stages: stageSum() };
+  const STEP = 30; let t = seconds, guard = 0;
+  while (t > 0 && guard++ < 5000) { step(Math.min(STEP, t), { season: 1, sunlight: 0.5, rain: false }); t -= STEP; }
   Grass.rebuild();
-  return { secs: elapsed, dew: Math.round(G.dew - dewBefore) };
+  // Greenhouse boosts the offline yield: top up Dew + goods by (mult-1) × what grew
+  const mult = idleYieldMult();
+  if (mult > 1) {
+    G.dew += (G.dew - before.dew) * (mult - 1);
+    for (const k in G.goods) G.goods[k] = (G.goods[k] || 0) + ((G.goods[k] || 0) - (before.goods[k] || 0)) * (mult - 1);
+  }
+  const report = { secs: seconds, dew: Math.round(G.dew - before.dew), goods: {}, grass: Math.round((avgCover() - before.cover) * 100), grown: Math.max(0, stageSum() - before.stages) };
+  for (const k in G.goods) { const d = Math.round((G.goods[k] || 0) - (before.goods[k] || 0)); if (d > 0) report.goods[k] = d; }
+  return report;
 }
 
 export const roots = debrisRoots;
