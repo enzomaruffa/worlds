@@ -128,14 +128,35 @@ function renderShop() {
       <button data-up="${key}" ${maxed ? "disabled" : ""} style="pointer-events:auto;cursor:pointer;font-family:inherit;font-size:.72rem;font-weight:700;padding:.32rem .5rem;border-radius:.5rem;border:1px solid ${can ? "var(--leaf)" : "var(--border)"};background:${can ? "rgba(108,194,74,.18)" : "rgba(11,18,13,.6)"};color:${maxed ? "var(--dim)" : can ? "var(--leaf-bright)" : "var(--bloom)"}">${maxed ? "max" : fmt(cost) + " 💧"}</button>
     </div>`;
   }
-  shopEl.innerHTML = html;
-  for (const b of shopEl.querySelectorAll("button[data-up]")) {
-    b.addEventListener("click", () => {
-      if (Sim.buyUpgrade(b.dataset.up)) { toast(Sim.UPGRADES[b.dataset.up].name + " upgraded!"); updateWallet(); renderShop(); }
-      else toast("not enough 💧");
-    });
+  // ── Spore perks + rewild (prestige) ──
+  html += `<h3 style="margin:.9rem 0 .5rem;font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;color:var(--spore)">spore perks · 🍄 ${fmt(G.spores)}</h3>`;
+  for (const key of Object.keys(Sim.PERKS)) {
+    const p = Sim.PERKS[key], lvl = Sim.perkLvl(key), maxed = Sim.perkMaxed(key), cost = Sim.perkCost(key), can = !maxed && G.spores >= cost;
+    html += `<div style="display:flex;gap:.5rem;align-items:center;margin:.35rem 0">
+      <span style="font-size:1.3rem">${p.icon}</span>
+      <div style="flex:1;min-width:0"><div style="font-weight:600;font-size:.82rem">${p.name} <span style="color:var(--dim);font-weight:400">${lvl}/${p.max}</span></div>
+      <div style="font-size:.68rem;color:var(--muted);line-height:1.3">${p.desc}</div></div>
+      <button data-perk="${key}" ${maxed ? "disabled" : ""} style="pointer-events:auto;cursor:pointer;font-family:inherit;font-size:.72rem;font-weight:700;padding:.32rem .5rem;border-radius:.5rem;border:1px solid ${can ? "var(--spore)" : "var(--border)"};background:${can ? "rgba(217,168,255,.16)" : "rgba(11,18,13,.6)"};color:${maxed ? "var(--dim)" : can ? "var(--spore)" : "var(--bloom)"}">${maxed ? "max" : fmt(cost) + " 🍄"}</button>
+    </div>`;
   }
+  const gain = Sim.sporesFor(G.ecoPeak || 0);
+  html += `<div style="margin-top:.7rem;padding-top:.6rem;border-top:1px solid var(--border-soft)">
+    <div style="font-size:.74rem;color:var(--muted);margin-bottom:.4rem">Let your plot go wild — reset everything for <b style="color:var(--spore)">${gain} 🍄 spores</b> (from eco peak ${G.ecoPeak || 0}). Perks, almanac & spores are kept.</div>
+    <button id="rewildBtn" style="pointer-events:auto;cursor:pointer;width:100%;font-family:inherit;font-weight:700;padding:.5rem;border-radius:.55rem;border:1px solid var(--spore);background:rgba(217,168,255,.14);color:var(--spore)">🍄 Let it rewild${rewildArm ? " — tap again to confirm" : ""}</button></div>`;
+
+  shopEl.innerHTML = html;
+  for (const b of shopEl.querySelectorAll("button[data-up]")) b.addEventListener("click", () => { if (Sim.buyUpgrade(b.dataset.up)) { toast(Sim.UPGRADES[b.dataset.up].name + " upgraded!"); updateWallet(); renderShop(); } else toast("not enough 💧"); });
+  for (const b of shopEl.querySelectorAll("button[data-perk]")) b.addEventListener("click", () => { if (Sim.buyPerk(b.dataset.perk)) { toast(Sim.PERKS[b.dataset.perk].name + " unlocked! 🍄"); updateWallet(); renderShop(); } else toast("not enough 🍄 spores"); });
+  const rb = shopEl.querySelector("#rewildBtn");
+  if (rb) rb.addEventListener("click", () => {
+    if (!rewildArm) { rewildArm = true; renderShop(); setTimeout(() => { rewildArm = false; }, 4000); return; }
+    rewildArm = false;
+    const g = Sim.rewild(); Grass.rebuild(); Life.sync();
+    flash("rewilded 🍄 +" + g); toast(`Your plot returned to seed — banked ${g} 🍄 spores. A fresh plot begins 🌱`, 4500);
+    updateWallet(); renderShop(); saveNow();
+  });
 }
+let rewildArm = false;
 
 // ── input: grab features to move, tap to act/inspect, drag empty to orbit ─────
 let pointer = { x: 0, y: 0, on: false }, down = null, grab = null;

@@ -54,6 +54,38 @@ export const upgradeCost = (key) => {
 };
 export const upgradeMaxed = (key) => (S.upgrades[key] || 0) >= UPGRADES[key].max;
 
+// permanent Spore perks — survive a rewild (prestige)
+export const PERKS = {
+  richSoil:   { name: "Rich soil",      icon: "🌱", base: 2, mult: 1.7, max: 5, desc: "+20% grass growth per level." },
+  goldenDew:  { name: "Golden dew",     icon: "💧", base: 2, mult: 1.7, max: 5, desc: "+25% Dew income per level." },
+  compost:    { name: "Compost",        icon: "🪱", base: 2, mult: 1.8, max: 3, desc: "+50% Dew from clearing debris per level." },
+  earlyBloom: { name: "Early bloom",    icon: "⏩", base: 5, mult: 1,   max: 1, desc: "New features start one stage ahead." },
+  greenStart: { name: "Evergreen start", icon: "🌿", base: 4, mult: 1,  max: 1, desc: "Rewilded plots begin with a grassy head start." },
+};
+export const perkLvl = (k) => (G.perks && G.perks[k]) || 0;
+export const perkCost = (k) => Math.round(PERKS[k].base * Math.pow(PERKS[k].mult, perkLvl(k)));
+export const perkMaxed = (k) => perkLvl(k) >= PERKS[k].max;
+export function buyPerk(k) {
+  if (!PERKS[k] || perkMaxed(k) || (G.spores || 0) < perkCost(k)) return false;
+  G.spores -= perkCost(k); G.perks[k] = perkLvl(k) + 1; return true;
+}
+// spores banked on rewild, from the ecosystem peak reached (+climax bonus)
+export const sporesFor = (peak) => Math.floor(Math.pow(Math.max(0, peak), 1.3)) + (S.climax ? 3 : 0);
+export function rewild() {
+  const gain = sporesFor(G.ecoPeak || 0);
+  for (const f of S.features) if (f.group) W.scene.remove(f.group);
+  for (const d of S.debris) if (d.mesh) W.scene.remove(d.mesh);
+  S.features.length = 0; featureRoots.length = 0; S.debris.length = 0; debrisRoots.length = 0;
+  S.blocked.fill(0); S.water.fill(0); shadeF.fill(0); moistF.fill(0); pollenF.fill(0); nectarF.fill(0); fieldsDirty = true;
+  Grass.coverage.fill(0); Grass.health.fill(1);
+  G.spores = (G.spores || 0) + gain; G.year = (G.year || 1) + 1;
+  G.dew = 0; G.ecoLevel = 0; G.ecoPeak = 0; G.goods = emptyGoods();   // keep perks, almanac, questsDone, stats
+  scatterDebris(15, (G.plotSeed ^ (G.year * 101)) >>> 0);
+  if (perkLvl("greenStart")) { seedPatch(0, 0, 6, 0.55); seedPatch(5, 4, 3, 0.4); seedPatch(-5, -4, 3, 0.4); }
+  S.lastSeen = Date.now(); Grass.rebuild();
+  return gain;
+}
+
 function cellXY(i) { return { ix: i % N, iz: (i / N) | 0 }; }
 const cidx = (ix, iz) => iz * N + ix;
 
@@ -107,7 +139,8 @@ export function clearDebris(pickId) {
   const ri = debrisRoots.indexOf(d.mesh); if (ri >= 0) debrisRoots.splice(ri, 1);
   unblockAround(d.x, d.z, 1.8);
   S.debris.splice(i, 1);
-  G.dew += d.reward;
+  const reward = Math.round(d.reward * (1 + 0.5 * perkLvl("compost")));
+  G.dew += reward; d.reward = reward;
   if (G.stats) G.stats.debrisCleared = (G.stats.debrisCleared || 0) + 1;
   // tilled soil sprouts a little starter grass right away
   seedPatch(d.x, d.z, 1.4, 0.18);
@@ -198,7 +231,8 @@ function placeMesh(f) {
 export function placeFeature(kind, x, z, free) {
   const def = El.FEATURES[kind]; if (!def) return null;
   if (!free) { if (G.dew < def.cost) return null; G.dew -= def.cost; }
-  const f = { id: "ft-" + Date.now().toString(36) + "-" + ((Math.random() * 1e6) | 0), kind, x, z, stage: 0, stageT: 0 };
+  const start = perkLvl("earlyBloom") ? Math.min(1, El.maxStage(kind)) : 0;
+  const f = { id: "ft-" + Date.now().toString(36) + "-" + ((Math.random() * 1e6) | 0), kind, x, z, stage: start, stageT: 0 };
   S.features.push(f); placeMesh(f); fieldsDirty = true;
   // clear grass + block right under a placed feature so it sits cleanly
   return f;
@@ -259,7 +293,7 @@ export function step(dt, env) {
   const sun = env.sunlight;
   const fert = 1 + 0.5 * (S.upgrades.fertilizer || 0);
   const sprinkler = (S.upgrades.sprinkler || 0);
-  const growth = 0.22 * SEASON_GROW[season] * fert * (0.25 + 0.75 * sun);
+  const growth = 0.22 * SEASON_GROW[season] * fert * (0.25 + 0.75 * sun) * (1 + 0.2 * perkLvl("richSoil"));
 
   if (fieldsDirty) computeFields();
 
@@ -303,7 +337,7 @@ export function step(dt, env) {
   ecosystem();
 
   // Dew (ecosystem multiplies it — the GROW payoff)
-  const dewRate = green * 0.02 * SEASON_DEW[season] * (0.3 + 0.7 * sun) * (1 + G.ecoLevel * 0.28);
+  const dewRate = green * 0.02 * SEASON_DEW[season] * (0.3 + 0.7 * sun) * (1 + G.ecoLevel * 0.28) * (1 + 0.25 * perkLvl("goldenDew"));
   G.dew += dewRate * dt;
   S._dewRate = dewRate;
 
@@ -345,6 +379,7 @@ export function serialize() {
     dew: Math.round(G.dew), spores: G.spores | 0, ecoLevel: G.ecoLevel | 0, ecoPeak: G.ecoPeak | 0,
     goods: Object.fromEntries(Object.entries(G.goods || {}).map(([k, v]) => [k, Math.round((v || 0) * 10) / 10])),
     almanac: [...(G.almanac || [])], questsDone: [...(G.questsDone || [])], stats: G.stats || {},
+    perks: { ...(G.perks || {}) }, year: G.year || 1,
     upgrades: { ...S.upgrades },
     debris: S.debris.map((d) => ({ x: +d.x.toFixed(2), z: +d.z.toFixed(2), kind: d.kind, id: d.id, reward: d.reward })),
     features: S.features.map((f) => ({ kind: f.kind, x: +f.x.toFixed(2), z: +f.z.toFixed(2), stage: f.stage, stageT: +(f.stageT || 0).toFixed(3) })),
@@ -372,6 +407,8 @@ export function init(g, saved) {
   G.almanac = new Set((saved && saved.almanac) || []);
   G.questsDone = new Set((saved && saved.questsDone) || []);
   G.stats = (saved && saved.stats) || { debrisCleared: 0, specimensCaught: 0, neighborsWatered: 0 };
+  G.perks = (saved && saved.perks) || {};
+  G.year = (saved && saved.year) || 1;
 
   if (saved && saved.debris) {
     G.dew = saved.dew || 0; G.spores = saved.spores || 0; G.ecoLevel = saved.ecoLevel || 0; G.ecoPeak = saved.ecoPeak || 0;
