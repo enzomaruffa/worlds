@@ -1,0 +1,1372 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Survive This — Worlds</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #08070a;
+    --surface: #100c10;
+    --surface-2: #18121a;
+    --border: #2c2230;
+    --border-soft: #1f1822;
+    --red: #ef4444;
+    --red-bright: #f87171;
+    --ember: #f97316;
+    --ember-bright: #fb923c;
+    --text: #ede4ec;
+    --muted: #b7a7b8;
+    --muted-2: #847488;
+    --danger: #ef4444;
+    --good: #34d399;
+    --gold: #fbbf24;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background:
+      radial-gradient(1100px 560px at 50% -12%, rgba(249,115,22,.10), transparent 60%),
+      radial-gradient(900px 500px at 80% 120%, rgba(239,68,68,.07), transparent 60%),
+      var(--bg);
+    color: var(--text);
+    font-family: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+  a { color: var(--ember-bright); }
+  .wrap { width: min(860px, 94vw); margin: 0 auto; padding: 1.25rem 0 4rem; }
+
+  /* ── Header ─────────────────────────────── */
+  header.top {
+    display: flex; align-items: center; gap: .75rem;
+    padding: .25rem 0 1rem;
+    border-bottom: 1px solid var(--border-soft);
+    margin-bottom: 1.25rem;
+  }
+  .badge {
+    width: 42px; height: 42px; border-radius: 11px; flex: none;
+    display: grid; place-items: center;
+    background: linear-gradient(160deg, #241823, #0c080c);
+    border: 1px solid var(--border);
+    box-shadow: 0 0 0 1px rgba(249,115,22,.10) inset;
+    font-size: 1.35rem;
+  }
+  .titles h1 { margin: 0; font-size: 1.18rem; letter-spacing: .04em; font-weight: 600; }
+  .titles h1 .accent { color: var(--ember); }
+  .titles p { margin: .1rem 0 0; font-size: .78rem; color: var(--muted-2); letter-spacing: .02em; }
+  .me-chip {
+    margin-left: auto; display: flex; align-items: center; gap: .5rem;
+    padding: .35rem .6rem; border-radius: 999px;
+    background: var(--surface); border: 1px solid var(--border);
+    font-size: .78rem; color: var(--muted); white-space: nowrap;
+  }
+  .me-chip img { width: 22px; height: 22px; border-radius: 50%; object-fit: cover; }
+  .me-chip .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--good); box-shadow: 0 0 8px var(--good); }
+
+  /* ── Cards ───────────────────────────────── */
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 1.1rem 1.15rem; }
+  .card + .card, .card + .grid, .grid + .card { margin-top: 1rem; }
+  .section-label { font-size: .7rem; text-transform: uppercase; letter-spacing: .18em; color: var(--muted-2); margin: 0 0 .65rem; }
+  .grid { display: grid; gap: 1rem; }
+  @media (min-width: 720px) { .grid.cols { grid-template-columns: 1fr 1fr; align-items: start; } }
+
+  /* ── Buttons ─────────────────────────────── */
+  button {
+    font-family: inherit; font-size: .92rem; font-weight: 600;
+    cursor: pointer; border-radius: 10px; border: 1px solid transparent;
+    padding: .7rem 1rem; transition: transform .06s ease, filter .15s ease, background .15s ease;
+    color: #140a06;
+  }
+  button:active { transform: translateY(1px); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  .btn-primary { background: linear-gradient(180deg, var(--ember-bright), var(--ember)); }
+  .btn-primary:hover:not(:disabled) { filter: brightness(1.06); }
+  .btn-ghost { background: var(--surface-2); color: var(--text); border-color: var(--border); }
+  .btn-ghost:hover:not(:disabled) { border-color: #4a3a4f; }
+  .btn-danger { background: transparent; color: #fca5a5; border-color: #7f1d1d; }
+  .btn-danger:hover:not(:disabled) { background: rgba(239,68,68,.08); }
+  .btn-block { width: 100%; }
+  .btn-row { display: flex; gap: .6rem; flex-wrap: wrap; }
+  .btn-row > button { flex: 1; min-width: 130px; }
+
+  /* ── Inputs ──────────────────────────────── */
+  .field { display: flex; flex-direction: column; gap: .35rem; }
+  .field label { font-size: .72rem; text-transform: uppercase; letter-spacing: .14em; color: var(--muted-2); }
+  input[type="text"], textarea {
+    width: 100%; padding: .7rem .85rem; border-radius: 10px;
+    border: 1px solid var(--border); background: var(--surface-2); color: var(--text);
+    font: inherit; font-size: .95rem;
+  }
+  textarea { resize: none; line-height: 1.45; }
+  input[type="text"]:focus, textarea:focus { outline: none; border-color: var(--ember); }
+  input[type="text"]:disabled, textarea:disabled { opacity: .6; cursor: not-allowed; }
+  .seg { display: inline-flex; gap: .4rem; flex-wrap: wrap; }
+  .seg button {
+    padding: .5rem .9rem; border-radius: 999px; font-size: .85rem;
+    background: var(--surface-2); color: var(--text); border: 1px solid var(--border);
+  }
+  .seg button.on { background: linear-gradient(180deg, var(--ember-bright), var(--ember)); color: #140a06; border-color: transparent; }
+  .seg button:disabled { opacity: .5; }
+  .chips { display: flex; gap: .4rem; flex-wrap: wrap; margin-top: .4rem; }
+  .chip-suggest {
+    padding: .35rem .7rem; border-radius: 999px; font-size: .78rem; font-weight: 500;
+    background: var(--surface-2); color: var(--muted); border: 1px solid var(--border-soft); cursor: pointer;
+  }
+  .chip-suggest:hover:not(:disabled) { color: var(--text); border-color: var(--ember); }
+
+  /* ── Roster ──────────────────────────────── */
+  ul.roster { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .45rem; }
+  ul.roster li {
+    display: flex; align-items: center; gap: .6rem;
+    padding: .5rem .65rem; border-radius: 9px;
+    background: var(--surface-2); border: 1px solid var(--border-soft); font-size: .9rem;
+  }
+  ul.roster li .pdot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted-2); flex: none; }
+  ul.roster li.ready .pdot { background: var(--good); box-shadow: 0 0 6px rgba(52,211,153,.6); }
+  ul.roster li.me-row { border-color: rgba(249,115,22,.4); }
+  ul.roster li .tag { font-size: .66rem; margin-left: auto; letter-spacing: .12em; text-transform: uppercase; font-weight: 700; }
+  ul.roster li .tag.you { color: var(--ember); }
+  ul.roster li .tag.host { color: var(--ember-bright); }
+  ul.roster li .tag.ready { color: var(--good); }
+  ul.roster li .tag.wait { color: var(--muted-2); }
+  ul.roster li .names { display: flex; flex-direction: column; line-height: 1.15; min-width: 0; }
+  ul.roster li .names .h { font-size: .68rem; color: var(--muted-2); }
+  .count-pill { color: var(--muted-2); font-weight: 400; }
+
+  .howto { font-size: .85rem; color: var(--muted); }
+  .howto ol { margin: .4rem 0 0; padding-left: 1.1rem; }
+  .howto li { margin: .25rem 0; }
+  .howto b { color: var(--text); }
+
+  /* ── Loading / judging ───────────────────── */
+  .loading { text-align: center; padding: 2.5rem 1rem; }
+  .loading .spin {
+    width: 46px; height: 46px; margin: 0 auto 1rem; border-radius: 50%;
+    border: 3px solid var(--border); border-top-color: var(--ember); animation: spin 1s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .loading .big { font-size: 1.15rem; font-weight: 600; }
+  .loading .sub { font-size: .82rem; color: var(--muted-2); margin-top: .35rem; }
+  .loading .skull { font-size: 2.4rem; margin-bottom: .6rem; animation: bob 1.8s ease-in-out infinite; }
+  @keyframes bob { 50% { transform: translateY(-6px); } }
+
+  /* ── Plan phase ──────────────────────────── */
+  .qhead { display: flex; align-items: center; justify-content: space-between; gap: .75rem; flex-wrap: wrap; }
+  .qhead .qmeta { font-size: .72rem; letter-spacing: .14em; text-transform: uppercase; color: var(--muted-2); }
+  .qhead .qmeta b { color: var(--ember); }
+  .qtimer { display: flex; align-items: center; gap: .6rem; }
+  .qtimer .num {
+    font-size: 1.7rem; font-weight: 700; font-variant-numeric: tabular-nums;
+    width: 2.6ch; text-align: right; color: var(--ember-bright);
+  }
+  .qtimer.warn .num { color: var(--danger); animation: pulse 1s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .5; } }
+  .progress { height: 6px; border-radius: 999px; background: var(--border); margin-top: .9rem; overflow: hidden; }
+  .progress > i { display: block; height: 100%; background: linear-gradient(90deg, var(--ember), var(--ember-bright)); width: 100%; transition: width .25s linear; }
+
+  .scenario {
+    margin: 1rem 0 0; padding: 1.1rem 1.15rem; border-radius: 14px;
+    background: linear-gradient(180deg, rgba(239,68,68,.10), rgba(249,115,22,.05));
+    border: 1px solid rgba(249,115,22,.30);
+    font-size: 1.28rem; font-weight: 600; line-height: 1.35; letter-spacing: -.01em;
+  }
+  @media (max-width: 520px) { .scenario { font-size: 1.12rem; } }
+  .scenario .lab { display: block; font-size: .68rem; letter-spacing: .2em; text-transform: uppercase; color: var(--ember-bright); font-weight: 700; margin-bottom: .45rem; }
+
+  .planbox { margin-top: 1.1rem; }
+  .planbox .row { display: flex; justify-content: space-between; align-items: baseline; }
+  .planbox .cc { font-size: .72rem; color: var(--muted-2); font-variant-numeric: tabular-nums; }
+  .locked-note {
+    margin-top: .9rem; text-align: center; font-size: .92rem; color: var(--good);
+    padding: .7rem; border-radius: 10px; background: rgba(52,211,153,.08); border: 1px solid rgba(52,211,153,.25);
+  }
+  .locked-note b { color: var(--good); }
+
+  /* lock-in pips */
+  .pips { display: flex; gap: .3rem; flex-wrap: wrap; margin-top: 1rem; align-items: center; }
+  .pips .lab { font-size: .72rem; color: var(--muted-2); letter-spacing: .12em; text-transform: uppercase; margin-right: .25rem; }
+  .pip { width: 12px; height: 12px; border-radius: 50%; background: var(--border); transition: background .2s ease, transform .2s ease; }
+  .pip.on { background: var(--good); box-shadow: 0 0 6px rgba(52,211,153,.6); transform: scale(1.05); }
+
+  /* team chat */
+  .chat { margin-top: 1.1rem; border-top: 1px dashed var(--border); padding-top: .9rem; }
+  .chat .log { display: flex; flex-direction: column; gap: .25rem; max-height: 110px; overflow-y: auto; margin-bottom: .55rem; }
+  .chat .msg { font-size: .82rem; color: var(--muted); }
+  .chat .msg b { color: var(--text); font-weight: 600; }
+  .chat .msg .self { color: var(--ember-bright); }
+  .chat .bar { display: flex; gap: .5rem; }
+  .chat .bar input { flex: 1; padding: .5rem .7rem; font-size: .85rem; }
+  .chat .bar button { flex: none; padding: .5rem .8rem; }
+  .chat .empty { font-size: .8rem; color: var(--muted-2); font-style: italic; }
+
+  /* ── Team status bar ─────────────────────── */
+  .teambar {
+    display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+    padding: .7rem .9rem; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--border-soft);
+    flex-wrap: wrap;
+  }
+  .teambar .lives { font-size: 1.15rem; letter-spacing: .12em; }
+  .teambar .meta { font-size: .78rem; color: var(--muted-2); text-transform: uppercase; letter-spacing: .1em; }
+  .teambar .meta b { color: var(--gold); font-size: .95rem; }
+
+  /* ── Reveal ──────────────────────────────── */
+  .story {
+    margin: .2rem 0 0; padding: 1.1rem 1.15rem; border-radius: 14px;
+    background: var(--surface-2); border: 1px solid var(--border-soft);
+    font-size: 1.05rem; line-height: 1.6; min-height: 4.5rem; cursor: pointer;
+  }
+  .story::after { content: "▍"; color: var(--ember); animation: pulse 1s steps(1) infinite; }
+  .story.done { cursor: default; }
+  .story.done::after { content: ""; }
+  .verdicts { display: flex; flex-direction: column; gap: .45rem; }
+  .verdict {
+    display: flex; align-items: flex-start; gap: .65rem; padding: .6rem .75rem; border-radius: 10px;
+    background: var(--surface-2); border: 1px solid var(--border-soft); font-size: .9rem;
+  }
+  .verdict.dead { border-color: rgba(239,68,68,.35); background: rgba(239,68,68,.05); }
+  .verdict.alive { border-color: rgba(52,211,153,.30); }
+  .verdict .icon { font-size: 1.25rem; flex: none; line-height: 1.2; }
+  .verdict .body { min-width: 0; }
+  .verdict .who { font-weight: 700; }
+  .verdict .who .h { font-weight: 400; color: var(--muted-2); font-size: .78rem; }
+  .verdict .fate { color: var(--muted); }
+  .verdict .style { margin-left: auto; flex: none; font-size: .76rem; color: var(--gold); font-weight: 700; white-space: nowrap; }
+  .teamnote { text-align: center; font-style: italic; color: var(--ember-bright); margin: .2rem 0 0; font-size: .95rem; }
+
+  /* ── Over ────────────────────────────────── */
+  .over-banner { text-align: center; padding: .6rem 0 .4rem; }
+  .over-banner .big { font-size: 2.1rem; font-weight: 700; letter-spacing: .02em; }
+  .over-banner .big.win { color: var(--good); }
+  .over-banner .big.lose { color: var(--red-bright); }
+  .over-banner .grade { font-size: 4rem; font-weight: 700; line-height: 1; margin: .4rem 0; }
+  .over-banner .gradesub { font-size: .85rem; color: var(--muted); }
+  .over-banner .epilogue { font-size: 1rem; color: var(--muted); font-style: italic; margin: .9rem auto 0; max-width: 46ch; }
+  .statgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: .6rem; margin-top: .4rem; }
+  .stat { text-align: center; padding: .8rem .4rem; border-radius: 11px; background: var(--surface-2); border: 1px solid var(--border-soft); }
+  .stat .v { font-size: 1.5rem; font-weight: 700; color: var(--ember-bright); font-variant-numeric: tabular-nums; }
+  .stat .k { font-size: .68rem; text-transform: uppercase; letter-spacing: .1em; color: var(--muted-2); margin-top: .15rem; }
+  .bestplan { margin-top: 1rem; padding: .9rem 1rem; border-radius: 12px; background: var(--surface-2); border: 1px solid rgba(251,191,36,.3); }
+  .bestplan .lab { font-size: .68rem; letter-spacing: .16em; text-transform: uppercase; color: var(--gold); }
+  .bestplan .who { font-weight: 700; margin-top: .2rem; }
+  .bestplan .txt { color: var(--muted); font-size: .9rem; margin-top: .25rem; }
+
+  .muted { color: var(--muted); }
+  .hidden { display: none !important; }
+  .center { text-align: center; }
+  .tiny { font-size: .75rem; color: var(--muted-2); }
+  footer.foot { margin-top: 2rem; text-align: center; font-size: .72rem; color: var(--muted-2); letter-spacing: .04em; }
+  #boot { text-align: center; padding: 4rem 1rem; color: var(--muted); }
+
+  /* ── Tables (lobby browser) ─────────────── */
+  .tablehead { display: flex; align-items: center; justify-content: space-between; gap: .75rem; margin-bottom: 1rem; }
+  .tablehead .code { font-family: ui-monospace, monospace; font-size: .8rem; color: var(--ember); letter-spacing: .12em; }
+  ul.tablelist { list-style: none; margin: 0 0 1rem; padding: 0; display: flex; flex-direction: column; gap: .55rem; }
+  ul.tablelist li.tablerow {
+    display: flex; align-items: center; gap: .75rem;
+    padding: .7rem .8rem; border-radius: 11px;
+    background: var(--surface-2); border: 1px solid var(--border-soft);
+  }
+  .tablerow .meta { flex: 1; min-width: 0; }
+  .tablerow .nm { font-weight: 600; font-size: .95rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tablerow .sub { font-size: .78rem; color: var(--muted-2); margin-top: .12rem; }
+  .tablerow .sub .code { font-family: ui-monospace, monospace; letter-spacing: .1em; color: var(--ember); }
+  .tablerow .sub .playing { color: var(--good); }
+  .tablerow button { flex: none; padding: .5rem .9rem; }
+  .empty-note { color: var(--muted-2); font-size: .85rem; font-style: italic; text-align: center; padding: 1.1rem .25rem; }
+  .tablebar { display: flex; gap: .55rem; flex-wrap: wrap; align-items: center; }
+  .tablebar input {
+    flex: 1; min-width: 120px; padding: .65rem .8rem; border-radius: 10px;
+    border: 1px solid var(--border); background: var(--surface-2); color: var(--text);
+    font: inherit; font-size: .9rem; text-transform: uppercase; letter-spacing: .12em;
+  }
+  .tablebar input:focus { outline: none; border-color: var(--ember); }
+  .tablebar button { flex: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="badge">💀</div>
+    <div class="titles">
+      <h1>SURVIVE <span class="accent">THIS</span></h1>
+      <p>Co-op. Write a plan. The AI decides if you live.</p>
+    </div>
+    <div class="me-chip" id="meChip"><span class="dot"></span><span id="meName">connecting…</span></div>
+  </header>
+
+  <div id="boot">Establishing secure channel…</div>
+
+  <!-- ░░░ TABLES (lobby browser) ░░░ -->
+  <main id="screenTables" class="hidden">
+    <div class="card">
+      <p class="section-label">Open parties</p>
+      <p class="muted" style="margin:0 0 1rem;font-size:.88rem">Each party is its own doomed expedition. Start a fresh one, jump into an open party below, or punch in a private code a friend shared.</p>
+      <ul class="tablelist" id="tableList"></ul>
+      <div class="btn-row">
+        <button id="btnNewTable" class="btn-primary">New party</button>
+        <button id="btnNewPrivate" class="btn-ghost">New private party</button>
+      </div>
+      <div class="tablebar" style="margin-top:1rem">
+        <input id="codeInput" maxlength="4" placeholder="CODE" autocomplete="off" />
+        <button id="btnJoinCode" class="btn-ghost">Join by code</button>
+      </div>
+    </div>
+  </main>
+
+  <!-- ░░░ LOBBY ░░░ -->
+  <main id="screenLobby" class="hidden">
+    <div class="tablehead">
+      <button id="btnLeaveLobby" class="btn-ghost" style="flex:none">← Parties</button>
+      <span class="code" id="tableCodeLobby"></span>
+    </div>
+    <div class="grid cols">
+      <div class="card">
+        <p class="section-label">The party <span class="count-pill" id="lobbyCount"></span></p>
+        <ul class="roster" id="lobbyRoster"></ul>
+        <div style="margin-top:1rem">
+          <button id="btnReady" class="btn-primary btn-block">I'm ready</button>
+        </div>
+      </div>
+      <div class="card">
+        <p class="section-label" id="setupLabel">Host setup</p>
+        <div id="hostSetup">
+          <div class="field">
+            <label for="themeInput">Theme <span style="text-transform:none;letter-spacing:0;color:var(--muted-2)">(optional)</span></label>
+            <input id="themeInput" type="text" placeholder="e.g. haunted cruise, space station, the office" maxlength="60" autocomplete="off" />
+            <div class="chips" id="themeChips"></div>
+          </div>
+          <div class="field" style="margin-top:1rem">
+            <label>Rounds</label>
+            <div class="seg" id="roundSeg"></div>
+          </div>
+          <button id="btnStart" class="btn-primary btn-block" style="margin-top:1.1rem">Start the doom</button>
+          <p class="tiny center" style="margin:.7rem 0 0">Auto-starts when everyone is ready. Min 1 player.</p>
+        </div>
+        <div id="guestWait" class="hidden">
+          <div class="howto">
+            Waiting for the host to set the theme and begin.
+            <ol>
+              <li>Hit <b>I'm ready</b> when you're set.</li>
+              <li>Each round throws an absurd deadly scenario — <b>write your survival plan</b> before the timer hits zero.</li>
+              <li>The AI weaves everyone's plans into one story and decides who lives. <b>Plans that team up survive better.</b></li>
+              <li>Your party shares its lives. <b>Survive every round together.</b></li>
+            </ol>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- ░░░ LOADING ░░░ -->
+  <main id="screenLoading" class="hidden">
+    <div class="tablehead">
+      <button id="btnLeaveLoading" class="btn-ghost" style="flex:none">← Parties</button>
+      <span class="code" id="tableCodeLoading"></span>
+    </div>
+    <div class="card">
+      <div class="loading">
+        <div class="skull">💀</div>
+        <div class="spin"></div>
+        <div class="big">Conjuring your doom…</div>
+        <div class="sub" id="loadingSub">Brewing absurd ways to die</div>
+      </div>
+    </div>
+  </main>
+
+  <!-- ░░░ PLAN ░░░ -->
+  <main id="screenPlan" class="hidden">
+    <div class="tablehead">
+      <button id="btnLeavePlan" class="btn-ghost" style="flex:none">← Parties</button>
+      <span class="code" id="tableCodePlan"></span>
+    </div>
+    <div class="card">
+      <div class="qhead">
+        <div class="qmeta">Round <b id="pIndex">1</b> of <span id="pTotal">5</span></div>
+        <div class="qtimer" id="pTimer"><span class="num" id="pNum">75</span></div>
+      </div>
+      <div class="scenario"><span class="lab">☠ The situation</span><span id="pScenario">—</span></div>
+      <div class="progress"><i id="pBar"></i></div>
+
+      <div class="planbox" id="planBox">
+        <div class="field">
+          <div class="row"><label for="planInput">Your survival plan</label><span class="cc" id="planCC">0 / 240</span></div>
+          <textarea id="planInput" rows="3" maxlength="240" placeholder="Describe exactly how you survive this. Be clever. Team up with your party."></textarea>
+        </div>
+        <button id="btnLock" class="btn-primary btn-block" style="margin-top:.7rem">Lock in plan</button>
+      </div>
+      <div class="locked-note hidden" id="lockedNote">Plan locked in — <b>hang tight</b> while the others scramble.</div>
+
+      <div class="pips" id="pPips"></div>
+
+      <div class="chat" id="teamChat">
+        <p class="section-label" style="margin-bottom:.5rem">Team chat <span style="text-transform:none;letter-spacing:0;color:var(--muted-2)">— coordinate before you lock</span></p>
+        <div class="log" id="chatLog"><div class="empty">No messages yet — say hi, divide the labor.</div></div>
+        <div class="bar">
+          <input id="chatInput" type="text" maxlength="120" placeholder="Quick — who handles what?" autocomplete="off" />
+          <button id="chatSend" class="btn-ghost">Send</button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- ░░░ JUDGING ░░░ -->
+  <main id="screenJudging" class="hidden">
+    <div class="tablehead">
+      <button id="btnLeaveJudging" class="btn-ghost" style="flex:none">← Parties</button>
+      <span class="code" id="tableCodeJudging"></span>
+    </div>
+    <div class="card">
+      <div class="loading">
+        <div class="skull">⚖️</div>
+        <div class="spin"></div>
+        <div class="big">The fates deliberate…</div>
+        <div class="sub">Weaving your plans into one glorious disaster</div>
+      </div>
+    </div>
+  </main>
+
+  <!-- ░░░ REVEAL ░░░ -->
+  <main id="screenReveal" class="hidden">
+    <div class="tablehead">
+      <button id="btnLeaveReveal" class="btn-ghost" style="flex:none">← Parties</button>
+      <span class="code" id="tableCodeReveal"></span>
+    </div>
+    <div class="card">
+      <div class="qhead">
+        <div class="qmeta">Round <b id="rIndex">1</b> of <span id="rTotal">5</span></div>
+        <div class="qmeta" id="rNextIn"></div>
+      </div>
+      <div class="teambar" style="margin-top:.8rem">
+        <span class="lives" id="rLives">❤️❤️❤️</span>
+        <span class="meta">Style score <b id="rScore">0</b></span>
+      </div>
+      <div class="story" id="rStory">—</div>
+      <p class="section-label" style="margin-top:1rem">Who made it</p>
+      <div class="verdicts" id="rVerdicts"></div>
+      <p class="teamnote" id="rTeamNote"></p>
+      <button id="btnNext" class="btn-primary btn-block hidden" style="margin-top:1rem">Next round</button>
+    </div>
+  </main>
+
+  <!-- ░░░ OVER ░░░ -->
+  <main id="screenOver" class="hidden">
+    <div class="tablehead">
+      <button id="btnLeaveOver" class="btn-ghost" style="flex:none">← Parties</button>
+      <span class="code" id="tableCodeOver"></span>
+    </div>
+    <div class="card">
+      <div class="over-banner">
+        <div class="big" id="overBig">—</div>
+        <div class="grade" id="overGrade">—</div>
+        <div class="gradesub" id="overGradeSub"></div>
+        <div class="epilogue" id="overEpilogue"></div>
+      </div>
+    </div>
+    <div class="card">
+      <p class="section-label">The run</p>
+      <div class="statgrid">
+        <div class="stat"><div class="v" id="statRounds">0</div><div class="k">Rounds cleared</div></div>
+        <div class="stat"><div class="v" id="statSurvived">0</div><div class="k">Survivals</div></div>
+        <div class="stat"><div class="v" id="statDeaths">0</div><div class="k">Casualties</div></div>
+      </div>
+      <div class="bestplan hidden" id="bestPlan">
+        <div class="lab">⭐ Plan of the run</div>
+        <div class="who" id="bestWho">—</div>
+        <div class="txt" id="bestTxt"></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="btn-row">
+        <button id="btnPlayAgain" class="btn-primary">Play again</button>
+        <button id="btnBackLobby" class="btn-ghost">Back to lobby</button>
+      </div>
+      <p class="tiny center" id="overHint" style="margin:.7rem 0 0"></p>
+    </div>
+  </main>
+
+  <footer class="foot">SURVIVE THIS · a Worlds party game · AI-judged co-op doom</footer>
+</div>
+
+<script src="/worlds.js"></script>
+<script>
+(() => {
+  "use strict";
+
+  // ── Constants / identity ─────────────────────────────────
+  const PLAN_MS = 75000;          // per-round planning window
+  const REVEAL_MS = 22000;        // reveal auto-advance safety net (host can skip)
+  const ROUND_OPTIONS = [3, 5, 7];
+  const PLAN_MAX = 240;
+  const THEME_SUGGEST = ["Haunted cruise", "Space station", "The office", "Medieval village", "Zombie mall", "Deep sea", "Theme park", "Wild West"];
+  const clientId = worlds.id();
+
+  const FALLBACK_SCENARIOS = [
+    "A swarm of bees — each one individually on fire — is descending on your picnic.",
+    "Your parachute, you discover mid-skydive, is just a backpack stuffed with very angry raccoons.",
+    "The floor is lava. This is not a metaphor. The carpet is now magma and rising.",
+    "A 40-foot rubber duck is rolling down Main Street and you're directly in its path.",
+    "You've been shrunk to the size of a marble and dropped into a blender that switches on in 30 seconds.",
+    "The vending machine has gained sentience, taken hostages, and demands exact change it will never accept.",
+    "A meteor made entirely of solidified hot sauce is about to hit the taco stand you're standing in.",
+    "The escalator is now infinite and speeding up, and the mall food court is the only exit.",
+    "Your houseplant has grown teeth overnight and the whole garden is closing in for brunch.",
+    "A tornado full of cutlery is tearing through the campsite and dinner is in twelve seconds.",
+    "The elevator cable snapped, but instead of falling it's launching upward through the roof.",
+    "An avalanche of last season's discount mannequins is thundering down the ski slope.",
+    "The lake froze instantly with you mid-cannonball, and the ice is cracking like a windshield.",
+    "A pack of segways with glowing red eyes has cornered you in the parking garage."
+  ];
+
+  const EPILOGUE_WIN = [
+    "Against all odds — and several raccoons — your party limped home alive. Therapy starts Monday.",
+    "Battered, singed, and weirdly proud, the whole crew made it out. Someone get these legends a snack.",
+    "You survived. Not gracefully. Not with dignity. But you survived, together.",
+    "The party walks into the sunset, traumatized but breathing. Roll credits."
+  ];
+  const EPILOGUE_WIPE = [
+    "The party is survived by their group chat. Press F to pay respects.",
+    "And so the expedition ended — not with a bang, but with a series of avoidable mistakes.",
+    "Everyone died. On the bright side, the plans were very creative. Mostly.",
+    "The doom won this time. The doom usually wins. Run it back?"
+  ];
+  const FALLBACK_FATES_ALIVE = ["pulls through by sheer dumb luck", "improvises a miracle", "survives, somehow, gracelessly", "lives to overshare about it"];
+  const FALLBACK_FATES_DEAD = ["does not, in fact, make it", "is last seen making a poor decision", "meets a deeply preventable end", "becomes a cautionary tale"];
+
+  // ── DOM ──────────────────────────────────────────────────
+  const $ = (id) => document.getElementById(id);
+  const boot = $("boot");
+  const screens = {
+    tables: $("screenTables"), lobby: $("screenLobby"), loading: $("screenLoading"),
+    plan: $("screenPlan"), judging: $("screenJudging"), reveal: $("screenReveal"), over: $("screenOver")
+  };
+
+  // ── Worlds handles ───────────────────────────────────────
+  // Many concurrent parties: worlds.rooms is the directory (browser + join codes);
+  // each party is one worlds.room carrying the authoritative game doc AND the live
+  // roster (host/ready/start). The game state lives in the room.
+  const { toast, esc } = worlds;
+  const hall = worlds.rooms("survive", {
+    initial: blankGame(),
+    minPlayers: 1,
+    autoStart: false,            // host-driven (host sets the theme)
+    onChange: onRoomChange,
+    onStart: onRoomStart,
+    onReturn: onRoomReturn
+  });
+
+  // ── Runtime state ────────────────────────────────────────
+  let me = null;                 // {handle,name,...}
+  let ROOM = null;               // the joined party (worlds.room) or null
+  let unsubRoom = null;          // teardown for the joined party's onChange
+  let chan = null;               // per-party ephemeral channel (plans + chat)
+  let unsubChan = null;          // teardown for the channel subscription
+  let snap = null;               // latest room snapshot (roster/host/ready/started)
+  let game = null;               // ROOM state (authoritative game doc)
+  // host-chosen setup (local until start)
+  let theme = "";
+  let nRounds = ROUND_OPTIONS[1];
+  // per-round local
+  let myPlan = null;             // my locked plan text this round (null = not locked)
+  let plansByR = {};             // round -> { handle -> {text, at} } (host accumulates; everyone mirrors for pips)
+  let chatMsgs = [];             // ephemeral team chat (current party)
+  let tickHandle = null;
+  let starting = false, generating = false, judging = false;
+  let advanceTimer = null;       // host-only scheduled advance
+  let revealTypedFor = -1;       // round whose story we've already typed out
+  let typeTimer = null;          // typewriter interval
+  let overSfxDone = false;       // end-game fanfare fired once
+
+  // ── Sound — tiny WebAudio synth (no assets; resumes on first input) ──
+  let actx = null, sfxMuted = false;
+  function audioResume() { if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (_) {} } if (actx && actx.state === "suspended") actx.resume(); }
+  addEventListener("pointerdown", audioResume); addEventListener("keydown", audioResume);
+  addEventListener("keydown", (e) => { if ((e.key === "m" || e.key === "M") && e.target.tagName !== "INPUT" && e.target.tagName !== "TEXTAREA") { sfxMuted = !sfxMuted; toast(sfxMuted ? "🔇 muted" : "🔊 sound on"); } });
+  function blip({ type = "sine", f0, f1, dur = 0.15, gain = 0.2, delay = 0 }) {
+    if (!actx || sfxMuted) return;
+    const t = actx.currentTime + delay;
+    const o = actx.createOscillator(); o.type = type; o.frequency.setValueAtTime(f0, t);
+    if (f1 && f1 !== f0) o.frequency.exponentialRampToValueAtTime(Math.max(1, f1), t + dur);
+    const g = actx.createGain();
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(gain, t + 0.008); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(actx.destination); o.start(t); o.stop(t + dur + 0.02);
+  }
+  const SFX = {
+    lock:    () => blip({ type: "square", f0: 520, f1: 720, dur: 0.09, gain: 0.14 }),
+    tick:    () => blip({ type: "sine", f0: 880, dur: 0.05, gain: 0.1 }),
+    survive: () => [523, 659, 784].forEach((f, i) => blip({ type: "triangle", f0: f, dur: 0.16, gain: 0.16, delay: i * 0.08 })),
+    death:   () => blip({ type: "sawtooth", f0: 220, f1: 70, dur: 0.45, gain: 0.18 }),
+    win:     () => [523, 659, 784, 1047, 1319].forEach((f, i) => blip({ type: "triangle", f0: f, dur: 0.24, gain: 0.2, delay: i * 0.12 })),
+    wipe:    () => [330, 247, 175, 110].forEach((f, i) => blip({ type: "sawtooth", f0: f, dur: 0.34, gain: 0.18, delay: i * 0.16 })),
+  };
+
+  // ── Helpers ──────────────────────────────────────────────
+  function showScreen(name) {
+    boot.classList.add("hidden");
+    for (const k in screens) screens[k].classList.toggle("hidden", k !== name);
+  }
+  function roster() {
+    if (snap) return snap.members.map((m) => ({ handle: m.handle, name: m.name }));
+    return me ? [{ handle: me.handle, name: me.name }] : [];
+  }
+  function isHost() { return snap ? snap.isHost : false; }
+  function nameFor(handle) {
+    const p = roster().find((x) => x.handle === handle);
+    if (p) return p.name;
+    const g = (game && game.players || []).find((x) => x.handle === handle);
+    return g ? g.name : handle;
+  }
+  function players() { return (game && game.players && game.players.length) ? game.players : roster(); }
+  function blankGame() {
+    return {
+      phase: "lobby", theme: "", rounds: 5, scenarios: [], round: 0,
+      players: [], teamLives: 0, teamLivesMax: 0, score: 0,
+      plans: {}, results: {}, planEndsAt: 0, revealEndsAt: 0,
+      outcome: "", epilogue: "", gameNum: 0
+    };
+  }
+
+  // ── Authoritative game doc lives in the room (s.state) ───
+  async function writeDoc(next) {
+    if (!ROOM) return false;
+    try { await ROOM.set(next); game = next; return true; }
+    catch (e) { return false; }
+  }
+  async function patchDoc(patch) {
+    if (!ROOM) return false;
+    try { const next = { ...game, ...patch }; await ROOM.merge(patch); game = next; return true; }
+    catch (e) { return false; }
+  }
+
+  // ── Lobby: readiness (delegated to the room snapshot) ────
+  function readyCount() { return snap ? snap.readyCount : 0; }
+  function myReady() { return snap ? snap.ready : false; }
+
+  // ── AI: scenario generation (host only, batched up front) ─
+  function parseJSON(text) {
+    if (!text) return null;
+    let raw = String(text).trim();
+    raw = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
+    try { return JSON.parse(raw); } catch (e) {}
+    // grab the first {...} or [...] block
+    const tryRange = (open, close) => {
+      const s = raw.indexOf(open), e = raw.lastIndexOf(close);
+      if (s >= 0 && e > s) { try { return JSON.parse(raw.slice(s, e + 1)); } catch (e2) {} }
+      return null;
+    };
+    return tryRange("[", "]") || tryRange("{", "}");
+  }
+
+  function shuffled(arr) {
+    const a = arr.slice();
+    for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+    return a;
+  }
+
+  async function generateScenarios(t, n) {
+    const themeLine = t ? `Theme: everything happens in / around "${t}".` : "";
+    const prompt =
+`You are the gleefully theatrical narrator of an absurd co-op survival party game.
+Write ${n} ridiculous, darkly comedic, LETHAL predicaments a group of friends must survive together.
+${themeLine}
+Rules:
+- Each is 1-2 vivid sentences, present tense, addressed to the whole group ("you").
+- Escalate the danger and absurdity from the first to the last.
+- Make each a springboard for creative survival plans (weird objects, cartoon physics, time pressure).
+- Funny and PG-13 — never gross, cruel, or about real tragedy.
+Respond with ONLY a JSON array of exactly ${n} strings. No prose, no markdown fences.`;
+    try {
+      const res = await worlds.ai.complete({ prompt, model: "smart", max_tokens: 1200 });
+      let arr = parseJSON(res && res.text);
+      if (arr && !Array.isArray(arr) && Array.isArray(arr.scenarios)) arr = arr.scenarios;
+      if (Array.isArray(arr)) {
+        const cleaned = arr.map((s) => String(s).trim()).filter((s) => s.length > 4).slice(0, n);
+        if (cleaned.length >= 1) return cleaned;
+      }
+    } catch (e) { console.warn("[survive] scenario gen failed", e); }
+    return shuffled(FALLBACK_SCENARIOS).slice(0, n);
+  }
+
+  // ── AI: judgment (host only, per round) ──────────────────
+  function fallbackJudgment(scenario, subs, ps) {
+    // generous coin-flip-ish fallback so the game never hard-breaks
+    const verdicts = ps.map((p, i) => {
+      const has = subs[p.handle] && subs[p.handle].text && subs[p.handle].text.trim();
+      const survived = has ? (Math.random() > 0.25) : false;
+      const pool = survived ? FALLBACK_FATES_ALIVE : FALLBACK_FATES_DEAD;
+      return { handle: p.handle, survived, fate: nameFor(p.handle) + " " + pool[Math.floor(Math.random() * pool.length)] + ".", style: has ? 4 + Math.floor(Math.random() * 4) : 0 };
+    });
+    return { story: "The plans collide in a blur of panic and questionable physics. Some of you make it. Some of you really, really don't.", verdicts, teamNote: "A messy effort, but an effort." };
+  }
+
+  async function judgePlans(scenario, subs, ps) {
+    const lines = ps.map((p, i) => {
+      const txt = (subs[p.handle] && subs[p.handle].text || "").trim();
+      return `${i + 1}. ${p.name} (@${p.handle}): ${txt || "(no plan — froze in panic)"}`;
+    }).join("\n");
+    const system =
+`You are the witty, fair, theatrical narrator of a co-op survival party game. You decide who lives and who dies based on how clever, funny, and cartoon-plausible each player's plan is. You LOVE teamwork: when players' plans reference or combine with each other, boost their survival odds and style scores. Be playful, never mean or gross. PG-13.`;
+    const prompt =
+`SCENARIO: ${scenario}
+
+The party's survival plans:
+${lines}
+
+Narrate ONE chaotic paragraph (4-7 sentences) in which all of these plans collide, then judge each player.
+A player with no plan almost certainly dies — comically. Reward plans that team up.
+
+Respond with ONLY this JSON (no markdown, no extra text):
+{"story":"one vivid paragraph weaving every plan together","verdicts":[{"handle":"HANDLE","survived":true,"fate":"one short funny sentence about their outcome","style":7}],"teamNote":"one short quip about the group's performance"}
+"style" is an integer 0-10 (cleverness + humor + teamwork). Include EVERY player exactly once, matched by their @handle.`;
+    try {
+      const res = await worlds.ai.complete({ messages: [{ role: "user", content: prompt }], system, model: "smart", max_tokens: 1100 });
+      const obj = parseJSON(res && res.text);
+      if (obj && typeof obj === "object") {
+        const byHandle = {};
+        (Array.isArray(obj.verdicts) ? obj.verdicts : []).forEach((v) => { if (v && v.handle != null) byHandle[String(v.handle).replace(/^@/, "")] = v; });
+        const verdicts = ps.map((p) => {
+          const v = byHandle[p.handle] || {};
+          const has = subs[p.handle] && (subs[p.handle].text || "").trim();
+          let style = Number(v.style);
+          if (!Number.isFinite(style)) style = has ? 4 : 0;
+          style = Math.max(0, Math.min(10, Math.round(style)));
+          return {
+            handle: p.handle,
+            survived: v.survived === true,
+            fate: (typeof v.fate === "string" && v.fate.trim()) ? v.fate.trim().slice(0, 160) : (v.survived ? nameFor(p.handle) + " scrapes through." : nameFor(p.handle) + " doesn't make it."),
+            style
+          };
+        });
+        const story = (typeof obj.story === "string" && obj.story.trim()) ? obj.story.trim() : "Chaos erupts. The dust settles. The results speak for themselves.";
+        const teamNote = (typeof obj.teamNote === "string" && obj.teamNote.trim()) ? obj.teamNote.trim().slice(0, 140) : "";
+        return { story, verdicts, teamNote };
+      }
+    } catch (e) { console.warn("[survive] judgment failed", e); }
+    return fallbackJudgment(scenario, subs, ps);
+  }
+
+  // ── Host: phase machine ──────────────────────────────────
+  async function startGame(t, n) {
+    if (starting || generating) return;
+    if (!isHost()) { toast("Only the host can start."); return; }
+    const ps = roster();
+    if (ps.length < 1) { toast("Need at least 1 player."); return; }
+    starting = true; generating = true;
+    const num = ((game && game.gameNum) || 0) + 1;
+    const lives = Math.max(2, ps.length);
+    await writeDoc({ ...blankGame(), phase: "loading", theme: t, rounds: n, players: ps, teamLives: lives, teamLivesMax: lives, gameNum: num });
+    let scenarios = [];
+    try { scenarios = await generateScenarios(t, n); }
+    finally { generating = false; }
+    if (!scenarios.length) scenarios = shuffled(FALLBACK_SCENARIOS).slice(0, n);
+    plansByR = {};
+    const ok = await writeDoc({
+      ...game, phase: "plan", theme: t, rounds: n, scenarios, players: ps,
+      teamLives: lives, teamLivesMax: lives, score: 0, round: 0,
+      plans: {}, results: {}, planEndsAt: Date.now() + PLAN_MS, revealEndsAt: 0, gameNum: num
+    });
+    starting = false;
+    if (ok) scheduleJudge();
+  }
+
+  function scheduleJudge() {
+    if (!isHost() || !game || game.phase !== "plan") return;
+    clearTimeout(advanceTimer);
+    const ms = Math.max(0, (game.planEndsAt || 0) - Date.now());
+    advanceTimer = setTimeout(() => hostJudge(), ms + 150);
+  }
+
+  function lockedSet(round) {
+    const local = plansByR[round] || {};
+    const fromDoc = (game.plans && game.plans[round]) || {};
+    return new Set([...Object.keys(local), ...Object.keys(fromDoc)]);
+  }
+
+  async function maybeJudgeEarly() {
+    if (!isHost() || !game || game.phase !== "plan") return;
+    const locked = lockedSet(game.round);
+    if (locked.size >= players().length) hostJudge();
+  }
+
+  async function hostJudge() {
+    if (!isHost() || !game || game.phase !== "plan" || judging) return;
+    judging = true;
+    clearTimeout(advanceTimer);
+    const r = game.round;
+    const scenario = game.scenarios[r] || FALLBACK_SCENARIOS[0];
+    const docSubs = (game.plans && game.plans[r]) || {};
+    const subs = { ...docSubs, ...(plansByR[r] || {}) };
+    const ps = players();
+    // flip to "judging" so everyone sees the deliberation screen
+    await writeDoc({ ...game, phase: "judging", plans: { ...(game.plans || {}), [r]: subs } });
+    let result;
+    try { result = await judgePlans(scenario, subs, ps); }
+    catch (e) { result = fallbackJudgment(scenario, subs, ps); }
+    finally { judging = false; }
+
+    const survivors = result.verdicts.filter((v) => v.survived).length;
+    const deaths = result.verdicts.length - survivors;
+    const styleGain = result.verdicts.reduce((s, v) => s + (v.style || 0), 0);
+    const nextLives = (game.teamLives || 0) - deaths;
+    const results = { ...(game.results || {}), [r]: { ...result, survivors, deaths } };
+    await writeDoc({
+      ...game, phase: "reveal", results, teamLives: nextLives,
+      score: (game.score || 0) + styleGain, revealEndsAt: Date.now() + REVEAL_MS
+    });
+    if (isHost()) { clearTimeout(advanceTimer); advanceTimer = setTimeout(() => hostAdvance(), REVEAL_MS + 100); }
+  }
+
+  async function hostAdvance() {
+    if (!isHost() || !game || game.phase !== "reveal") return;
+    clearTimeout(advanceTimer);
+    if ((game.teamLives || 0) <= 0) {
+      await endGame("wipe");
+      return;
+    }
+    const next = game.round + 1;
+    if (next >= game.scenarios.length) {
+      await endGame("victory");
+      return;
+    }
+    plansByR[next] = plansByR[next] || {};
+    const ok = await writeDoc({ ...game, phase: "plan", round: next, planEndsAt: Date.now() + PLAN_MS, revealEndsAt: 0 });
+    if (ok) scheduleJudge();
+  }
+
+  async function endGame(outcome) {
+    const pool = outcome === "victory" ? EPILOGUE_WIN : EPILOGUE_WIPE;
+    const epilogue = pool[Math.floor(Math.random() * pool.length)];
+    await writeDoc({ ...game, phase: "over", outcome, epilogue, revealEndsAt: 0 });
+  }
+
+  // ── Host adopts a plan from ws into the doc ──────────────
+  async function ingestPlan(p) {
+    if (!isHost() || !game || game.phase !== "plan") return;
+    if (typeof p.round !== "number" || p.round !== game.round) return;
+    if (!p.handle) return;
+    plansByR[game.round] = plansByR[game.round] || {};
+    const cur = plansByR[game.round];
+    if (cur[p.handle]) return;            // first lock counts
+    cur[p.handle] = { text: String(p.text || "").slice(0, PLAN_MAX), at: typeof p.at === "number" ? p.at : Date.now() };
+    renderPips();
+    const plans = { ...(game.plans || {}) };
+    plans[game.round] = { ...cur };
+    await patchDoc({ plans });
+    maybeJudgeEarly();
+  }
+
+  // ── Player: lock in plan ─────────────────────────────────
+  function lockPlan() {
+    if (!game || game.phase !== "plan") return;
+    if (myPlan !== null) return;
+    if (Date.now() > game.planEndsAt) return;
+    const text = ($("planInput").value || "").trim();
+    if (!text) { toast("Write a plan first."); $("planInput").focus(); return; }
+    myPlan = text.slice(0, PLAN_MAX);
+    audioResume(); SFX.lock();
+    const at = Date.now();
+    renderPlan();
+    const payload = { round: game.round, handle: me.handle, name: me.name, text: myPlan, at };
+    if (chan) chan.publish({ cid: clientId, t: "plan", ...payload });
+    if (isHost()) ingestPlan(payload);
+    else {
+      plansByR[game.round] = plansByR[game.round] || {};
+      plansByR[game.round][me.handle] = { text: myPlan, at };
+      renderPips();
+    }
+  }
+
+  // ── Team chat (ephemeral) ────────────────────────────────
+  function sendChat() {
+    const input = $("chatInput");
+    const text = (input.value || "").trim();
+    if (!text) return;
+    input.value = "";
+    const msg = { handle: me.handle, name: me.name, text: text.slice(0, 120), self: true };
+    chatMsgs.push(msg); if (chatMsgs.length > 40) chatMsgs.shift();
+    renderChat();
+    if (chan) chan.publish({ cid: clientId, t: "chat", handle: me.handle, name: me.name, text: msg.text });
+  }
+  function renderChat() {
+    const log = $("chatLog");
+    if (!chatMsgs.length) { log.innerHTML = '<div class="empty">No messages yet — say hi, divide the labor.</div>'; return; }
+    log.innerHTML = "";
+    chatMsgs.forEach((m) => {
+      const d = document.createElement("div");
+      d.className = "msg";
+      d.innerHTML = `<b class="${m.self ? "self" : ""}">${esc(m.name)}:</b> ${esc(m.text)}`;
+      log.appendChild(d);
+    });
+    log.scrollTop = log.scrollHeight;
+  }
+
+  // ── Phase change orchestration ───────────────────────────
+  function onGameChange(prevPhase, prevRound) {
+    if (!game) return;
+    if (game.phase === "lobby" && prevPhase && prevPhase !== "lobby" && ROOM) ROOM.setReady(false);
+    // a fresh game starting → reset local trackers + chat
+    if ((game.phase === "loading" || game.phase === "lobby") && prevPhase !== game.phase) {
+      myPlan = null; plansByR = {}; revealTypedFor = -1; overSfxDone = false; chatMsgs = []; renderChat();
+    }
+    // entering a new round → reset local plan + sync any plans already in the doc
+    if (game.phase === "plan" && (prevPhase !== "plan" || prevRound !== game.round)) {
+      myPlan = null;
+      const sub = game.plans && game.plans[game.round];
+      if (sub && sub[me.handle]) myPlan = sub[me.handle].text;
+      if (sub) plansByR[game.round] = { ...sub };
+    }
+    render();
+    // host (re)schedules timers when it lands on a live phase (covers host handoff)
+    if (isHost()) {
+      if (game.phase === "plan") scheduleJudge();
+      else if (game.phase === "reveal" && game.revealEndsAt) {
+        clearTimeout(advanceTimer);
+        advanceTimer = setTimeout(() => hostAdvance(), Math.max(0, game.revealEndsAt - Date.now()) + 100);
+      } else if (game.phase === "judging" && !judging) {
+        // host crashed/handed off mid-judge → re-run judgment
+        hostJudge();
+      }
+    }
+  }
+
+  // ── Render dispatch ──────────────────────────────────────
+  function render() {
+    if (!game) return;
+    stopTick();
+    if (game.phase === "loading") renderLoading();
+    else if (game.phase === "plan") { renderPlan(); startTick(); }
+    else if (game.phase === "judging") renderJudging();
+    else if (game.phase === "reveal") { renderReveal(); startTick(); }
+    else if (game.phase === "over") renderOver();
+    else renderLobby();
+  }
+
+  // ── Lobby render ─────────────────────────────────────────
+  function buildRoundSeg() {
+    const seg = $("roundSeg"); seg.innerHTML = "";
+    ROUND_OPTIONS.forEach((n) => {
+      const b = document.createElement("button");
+      b.textContent = `${n}`;
+      b.className = n === nRounds ? "on" : "";
+      b.addEventListener("click", () => { nRounds = n; buildRoundSeg(); });
+      seg.appendChild(b);
+    });
+  }
+  function buildThemeChips() {
+    const wrap = $("themeChips"); wrap.innerHTML = "";
+    THEME_SUGGEST.forEach((t) => {
+      const b = document.createElement("button");
+      b.className = "chip-suggest"; b.type = "button"; b.textContent = t;
+      b.addEventListener("click", () => { $("themeInput").value = t; theme = t; });
+      wrap.appendChild(b);
+    });
+  }
+
+  function renderLobby() {
+    showScreen("lobby");
+    const members = snap ? snap.members : (me ? [{ handle: me.handle, name: me.name, ready: false, isMe: true, isHost: true }] : []);
+    $("lobbyCount").textContent = `${members.length} here`;
+    const el = $("lobbyRoster"); el.innerHTML = "";
+    if (!members.length) { el.innerHTML = '<li class="muted" style="border:none;background:transparent">No one here yet…</li>'; }
+    for (const p of members) {
+      const li = document.createElement("li");
+      if (p.isMe) li.classList.add("me-row");
+      if (p.ready) li.classList.add("ready");
+      const tags = [];
+      if (p.isHost) tags.push('<span class="tag host">host</span>');
+      if (p.isMe) tags.push('<span class="tag you">you</span>');
+      tags.push(p.ready ? '<span class="tag ready">ready</span>' : '<span class="tag wait">waiting</span>');
+      li.innerHTML = `<span class="pdot"></span><span class="names"><span>${esc(p.name)}</span><span class="h">@${esc(p.handle)}</span></span>${tags.join("")}`;
+      el.appendChild(li);
+    }
+    const mineReady = myReady();
+    const rb = $("btnReady");
+    rb.textContent = mineReady ? "✓ Ready — tap to unready" : "I'm ready";
+    rb.className = mineReady ? "btn-ghost btn-block" : "btn-primary btn-block";
+
+    const host_ = isHost();
+    $("hostSetup").classList.toggle("hidden", !host_);
+    $("guestWait").classList.toggle("hidden", host_);
+    $("setupLabel").textContent = host_ ? "Host setup" : "Lobby";
+    if (host_) {
+      $("btnStart").disabled = starting || generating;
+      $("btnStart").textContent = `Start the doom · ${readyCount()}/${members.length} ready`;
+    }
+  }
+
+  function renderLoading() {
+    showScreen("loading");
+    $("loadingSub").textContent = game.theme ? `Theme: ${game.theme}` : "Brewing absurd ways to die";
+  }
+  function renderJudging() { showScreen("judging"); }
+
+  // ── Plan render ──────────────────────────────────────────
+  function renderPlan() {
+    showScreen("plan");
+    const r = game.round;
+    $("pIndex").textContent = r + 1;
+    $("pTotal").textContent = game.scenarios.length;
+    $("pScenario").textContent = game.scenarios[r] || "—";
+
+    const locked = myPlan !== null;
+    $("planBox").classList.toggle("hidden", locked);
+    $("lockedNote").classList.toggle("hidden", !locked);
+    const input = $("planInput");
+    if (!locked) {
+      input.disabled = false;
+      $("planCC").textContent = `${(input.value || "").length} / ${PLAN_MAX}`;
+    }
+    renderPips();
+    renderChat();
+    updatePlanClock();
+  }
+
+  function renderPips() {
+    const wrap = $("pPips"); wrap.innerHTML = "";
+    const lab = document.createElement("span"); lab.className = "lab"; lab.textContent = "Locked in";
+    wrap.appendChild(lab);
+    const locked = lockedSet(game.round);
+    const ps = players();
+    ps.forEach((p) => {
+      const d = document.createElement("span");
+      d.className = "pip" + (locked.has(p.handle) ? " on" : "");
+      d.title = nameFor(p.handle);
+      wrap.appendChild(d);
+    });
+    const cnt = document.createElement("span");
+    cnt.className = "lab"; cnt.style.marginLeft = ".4rem";
+    cnt.textContent = `${locked.size}/${ps.length}`;
+    wrap.appendChild(cnt);
+  }
+
+  function updatePlanClock() {
+    if (!game || game.phase !== "plan") return;
+    const remaining = Math.max(0, game.planEndsAt - Date.now());
+    const secs = Math.ceil(remaining / 1000);
+    $("pNum").textContent = secs;
+    $("pBar").style.width = `${Math.max(0, (remaining / PLAN_MS) * 100)}%`;
+    $("pTimer").classList.toggle("warn", remaining <= 10000);
+    if (remaining <= 0 && isHost()) hostJudge();
+  }
+
+  // ── Reveal render ────────────────────────────────────────
+  function livesString() {
+    const max = game.teamLivesMax || players().length || 1;
+    const cur = Math.max(0, game.teamLives || 0);
+    let s = "";
+    for (let i = 0; i < max; i++) s += i < cur ? "❤️" : "🖤";
+    return s;
+  }
+
+  function typeStory(text) {
+    const el = $("rStory");
+    clearInterval(typeTimer);
+    el.classList.remove("done");
+    const full = text || "";
+    let i = 0; el.textContent = "";
+    typeTimer = setInterval(() => {
+      i += 2;
+      el.textContent = full.slice(0, i);
+      if (i >= full.length) { clearInterval(typeTimer); el.textContent = full; el.classList.add("done"); }
+    }, 22);
+    el.onclick = () => { clearInterval(typeTimer); el.textContent = full; el.classList.add("done"); };
+  }
+
+  function renderReveal() {
+    showScreen("reveal");
+    const r = game.round;
+    const res = (game.results && game.results[r]) || { story: "", verdicts: [], teamNote: "" };
+    $("rIndex").textContent = r + 1;
+    $("rTotal").textContent = game.scenarios.length;
+    $("rLives").textContent = livesString();
+    $("rScore").textContent = game.score || 0;
+
+    if (revealTypedFor !== r) {
+      revealTypedFor = r;
+      typeStory(res.story);
+      // fate fanfare (once)
+      const mine = res.verdicts.find((v) => v.handle === me.handle);
+      if (mine) { if (mine.survived) SFX.survive(); else SFX.death(); }
+    } else {
+      const el = $("rStory"); el.textContent = res.story || ""; el.classList.add("done");
+    }
+
+    const vEl = $("rVerdicts"); vEl.innerHTML = "";
+    res.verdicts.forEach((v) => {
+      const div = document.createElement("div");
+      div.className = "verdict " + (v.survived ? "alive" : "dead");
+      const stars = v.style ? `★ ${v.style}` : "";
+      div.innerHTML =
+        `<span class="icon">${v.survived ? "🏆" : "☠️"}</span>` +
+        `<span class="body"><span class="who">${esc(nameFor(v.handle))} <span class="h">@${esc(v.handle)}</span></span> ` +
+        `<span class="fate">${esc(v.fate)}</span></span>` +
+        (stars ? `<span class="style">${stars}</span>` : "");
+      vEl.appendChild(div);
+    });
+    $("rTeamNote").textContent = res.teamNote || "";
+
+    const nb = $("btnNext");
+    nb.classList.toggle("hidden", !isHost());
+    const wiped = (game.teamLives || 0) <= 0;
+    const last = (r + 1) >= game.scenarios.length;
+    nb.textContent = wiped ? "See the aftermath" : (last ? "See how you did" : "Next round");
+
+    updateRevealClock();
+  }
+
+  function updateRevealClock() {
+    if (!game || game.phase !== "reveal") return;
+    if (!game.revealEndsAt) { $("rNextIn").textContent = ""; return; }
+    const remaining = Math.max(0, game.revealEndsAt - Date.now());
+    $("rNextIn").textContent = `Next in ${Math.ceil(remaining / 1000)}s`;
+  }
+
+  // ── Over render ──────────────────────────────────────────
+  function gradeFor() {
+    const results = game.results || {};
+    let totalStyle = 0, count = 0;
+    for (const k of Object.keys(results)) {
+      (results[k].verdicts || []).forEach((v) => { totalStyle += (v.style || 0); count++; });
+    }
+    const avg = count ? totalStyle / count : 0;
+    if (avg >= 8.5) return { g: "S", sub: "Legendary survival instincts." };
+    if (avg >= 7) return { g: "A", sub: "Genuinely impressive teamwork." };
+    if (avg >= 5.5) return { g: "B", sub: "Solid. A little singed." };
+    if (avg >= 4) return { g: "C", sub: "You'll live. Barely." };
+    if (avg >= 2.5) return { g: "D", sub: "Questionable decisions all round." };
+    return { g: "F", sub: "Catastrophic, but memorable." };
+  }
+
+  function bestPlanOfRun() {
+    const results = game.results || {};
+    let best = null;
+    for (const k of Object.keys(results)) {
+      const rIdx = Number(k);
+      (results[k].verdicts || []).forEach((v) => {
+        if (!best || (v.style || 0) > best.style) {
+          const planTxt = game.plans && game.plans[rIdx] && game.plans[rIdx][v.handle] && game.plans[rIdx][v.handle].text;
+          if (planTxt) best = { handle: v.handle, style: v.style || 0, text: planTxt, survived: v.survived };
+        }
+      });
+    }
+    return best;
+  }
+
+  function renderOver() {
+    showScreen("over");
+    const win = game.outcome === "victory";
+    const big = $("overBig");
+    big.textContent = win ? "YOUR PARTY SURVIVED" : "WIPED OUT";
+    big.className = "big " + (win ? "win" : "lose");
+    const gr = gradeFor();
+    $("overGrade").textContent = gr.g;
+    $("overGradeSub").textContent = gr.sub;
+    $("overEpilogue").textContent = game.epilogue || "";
+
+    // stats
+    const results = game.results || {};
+    let cleared = 0, survived = 0, deaths = 0;
+    for (const k of Object.keys(results)) {
+      const res = results[k];
+      if ((res.deaths || 0) === 0) cleared++;
+      survived += (res.survivors || 0);
+      deaths += (res.deaths || 0);
+    }
+    $("statRounds").textContent = `${cleared}/${game.scenarios.length}`;
+    $("statSurvived").textContent = survived;
+    $("statDeaths").textContent = deaths;
+
+    const best = bestPlanOfRun();
+    const bp = $("bestPlan");
+    if (best) {
+      bp.classList.remove("hidden");
+      $("bestWho").textContent = `${nameFor(best.handle)} · ★ ${best.style}`;
+      $("bestTxt").textContent = `"${best.text}"`;
+    } else bp.classList.add("hidden");
+
+    const host_ = isHost();
+    $("btnPlayAgain").classList.toggle("hidden", !host_);
+    $("overHint").textContent = host_ ? "Same crew, fresh doom — head back to the lobby to run it again." : "Waiting for the host to start a new run.";
+
+    if (!overSfxDone) { overSfxDone = true; if (win) SFX.win(); else SFX.wipe(); }
+  }
+
+  // ── Ticker ───────────────────────────────────────────────
+  function startTick() { stopTick(); tickHandle = setInterval(tick, 250); tick(); }
+  function stopTick() { if (tickHandle) { clearInterval(tickHandle); tickHandle = null; } }
+  function tick() {
+    if (!game) { stopTick(); return; }
+    if (game.phase === "plan") updatePlanClock();
+    else if (game.phase === "reveal") updateRevealClock();
+    else stopTick();
+  }
+
+  // ── Buttons ──────────────────────────────────────────────
+  $("btnReady").addEventListener("click", () => ROOM && ROOM.toggleReady());
+  $("themeInput").addEventListener("input", (e) => { theme = e.target.value; });
+  $("planInput").addEventListener("input", (e) => { $("planCC").textContent = `${(e.target.value || "").length} / ${PLAN_MAX}`; });
+  $("planInput").addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) lockPlan(); });
+  $("btnLock").addEventListener("click", lockPlan);
+  $("chatSend").addEventListener("click", sendChat);
+  $("chatInput").addEventListener("keydown", (e) => { if (e.key === "Enter") sendChat(); });
+  $("btnStart").addEventListener("click", () => {
+    if (!ROOM) { toast("Join or create a party first."); return; }
+    if (!isHost()) { toast("Only the host can start the game."); return; }
+    theme = ($("themeInput").value || "").trim();
+    ROOM.start();
+  });
+  $("btnNext").addEventListener("click", () => { if (game && game.phase === "reveal") hostAdvance(); });
+  $("btnPlayAgain").addEventListener("click", backToLobby);
+  $("btnBackLobby").addEventListener("click", backToLobby);
+
+  async function backToLobby() {
+    clearTimeout(advanceTimer);
+    if (isHost()) {
+      await writeDoc({ ...blankGame(), gameNum: (game && game.gameNum) || 0, players: roster() });
+      if (ROOM) ROOM.returnToLobby();
+    } else {
+      if (ROOM) ROOM.setReady(false);
+      renderLobby();
+    }
+  }
+
+  // ── Room callbacks ───────────────────────────────────────
+  function onRoomChange(s) {
+    snap = s;
+    const prevPhase = game ? game.phase : null;
+    const prevRound = game ? game.round : -1;
+    game = s.state || blankGame();
+    onGameChange(prevPhase, prevRound);
+  }
+  function onRoomStart() {
+    if (!isHost()) return;
+    startGame((theme || "").trim(), nRounds);
+  }
+  function onRoomReturn() {
+    clearTimeout(advanceTimer);
+    myPlan = null; plansByR = {}; revealTypedFor = -1; chatMsgs = [];
+    if (!game || game.phase !== "lobby") game = { ...blankGame(), players: roster() };
+    render();
+  }
+
+  // ── Tables browser ───────────────────────────────────────
+  function renderTables(list) {
+    const ul = $("tableList"); ul.innerHTML = "";
+    if (!list.length) { ul.innerHTML = '<li class="empty-note">No open parties yet — start one!</li>'; return; }
+    for (const t of list) {
+      const li = document.createElement("li");
+      li.className = "tablerow";
+      const who = t.count === 1 ? "1 here" : `${t.count} here`;
+      const status = t.status === "playing" ? ' · <span class="playing">in run</span>' : "";
+      li.innerHTML =
+        `<div class="meta"><div class="nm">${esc(t.name)}</div>` +
+        `<div class="sub">${who}${status} · <span class="code">${esc(t.code)}</span></div></div>`;
+      const btn = document.createElement("button");
+      btn.className = "btn-primary";
+      btn.textContent = t.status === "playing" ? "Watch" : "Join";
+      btn.addEventListener("click", () => joinTable(() => hall.join(t.id)));
+      li.appendChild(btn);
+      ul.appendChild(li);
+    }
+  }
+
+  function mountRoom(room) {
+    if (unsubRoom) { try { unsubRoom(); } catch (_) {} unsubRoom = null; }
+    if (unsubChan) { try { unsubChan(); } catch (_) {} unsubChan = null; }
+    clearTimeout(advanceTimer);
+    ROOM = room;
+    snap = null; game = null;
+    myPlan = null; plansByR = {}; chatMsgs = []; starting = false; generating = false; judging = false; revealTypedFor = -1;
+
+    chan = worlds.ws.channel("survive:" + room.id);
+    unsubChan = chan.subscribe((msg) => {
+      const p = msg && msg.payload;
+      if (!p || p.cid === clientId) return;        // ignore our own echo
+      if (p.t === "plan") {
+        if (game && game.phase === "plan" && p.round === game.round && p.handle) {
+          if (isHost()) {
+            ingestPlan(p);                   // host owns the accumulator (adds + persists + early-judge)
+          } else {
+            plansByR[game.round] = plansByR[game.round] || {};
+            if (!plansByR[game.round][p.handle]) {
+              plansByR[game.round][p.handle] = { text: String(p.text || ""), at: typeof p.at === "number" ? p.at : Date.now() };
+              renderPips();
+            }
+          }
+        }
+      } else if (p.t === "chat") {
+        chatMsgs.push({ handle: p.handle, name: p.name || p.handle, text: String(p.text || "").slice(0, 120), self: false });
+        if (chatMsgs.length > 40) chatMsgs.shift();
+        if (game && game.phase === "plan") renderChat();
+      }
+    });
+
+    location.hash = room.code;
+    const codeStr = "code " + room.code;
+    ["tableCodeLobby", "tableCodeLoading", "tableCodePlan", "tableCodeJudging", "tableCodeReveal", "tableCodeOver"]
+      .forEach((id) => { const el = $(id); if (el) el.textContent = codeStr; });
+    showScreen("lobby");
+    unsubRoom = room.onChange(onRoomChange);
+  }
+
+  async function joinTable(fn) {
+    try { mountRoom(await fn()); }
+    catch (e) {
+      toast(e && e.code === "conflict" ? "That party is full." : "Couldn't join that party.");
+      console.error("[survive] join failed", e);
+    }
+  }
+
+  function leaveTable() {
+    if (unsubRoom) { try { unsubRoom(); } catch (_) {} unsubRoom = null; }
+    if (unsubChan) { try { unsubChan(); } catch (_) {} unsubChan = null; }
+    clearTimeout(advanceTimer); clearInterval(typeTimer); stopTick();
+    chan = null;
+    hall.leave().catch(() => {});
+    ROOM = null; snap = null; game = null;
+    history.replaceState(null, "", location.pathname);
+    showScreen("tables");
+  }
+
+  ["btnLeaveLobby", "btnLeaveLoading", "btnLeavePlan", "btnLeaveJudging", "btnLeaveReveal", "btnLeaveOver"]
+    .forEach((id) => { const el = $(id); if (el) el.addEventListener("click", leaveTable); });
+  $("btnNewTable").addEventListener("click", () => joinTable(() => hall.create({ name: `${me.name || me.handle}'s party` })));
+  $("btnNewPrivate").addEventListener("click", () => joinTable(() => hall.create({ name: `${me.name || me.handle}'s party`, private: true })));
+  $("btnJoinCode").addEventListener("click", () => {
+    const code = $("codeInput").value.trim().toUpperCase();
+    if (code.length < 4) { toast("Enter the 4-letter code."); return; }
+    joinTable(() => hall.joinByCode(code));
+  });
+  $("codeInput").addEventListener("keydown", (e) => { if (e.key === "Enter") $("btnJoinCode").click(); });
+
+  // ── Boot ─────────────────────────────────────────────────
+  (async () => {
+    try {
+      await worlds.ready;
+      me = await worlds.me();
+      $("meName").textContent = me.name || me.handle;
+      buildRoundSeg();
+      buildThemeChips();
+      hall.onList(renderTables);
+      const code = (location.hash || "").replace(/^#/, "").trim().toUpperCase();
+      if (code.length >= 4) {
+        await joinTable(() => hall.joinByCode(code));
+        if (!ROOM) showScreen("tables");
+      } else {
+        showScreen("tables");
+      }
+    } catch (e) {
+      boot.textContent = "Couldn't connect to Worlds. Refresh to retry.";
+      console.error("[survive] boot failed", e);
+    }
+  })();
+})();
+</script>
+</body>
+</html>
