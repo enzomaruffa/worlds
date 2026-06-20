@@ -266,6 +266,13 @@ const server = Bun.serve<SocketData, never>({
         if (uSite && rest.length) return await uploads.serveUpload(uSite, rest.join("/"));
       }
 
+      // A creator's public profile + the worlds they've shipped. The handle is
+      // read client-side from the path; the page calls GET /api/v1/creators/<h>.
+      // (This is the "/@<handle>" URL the homepage profile dialog promises.)
+      if (url.pathname.startsWith("/@")) {
+        return (await serveBundled(HOMEPAGE_DIR, "/profile.html")) ?? siteNotFound(site);
+      }
+
       // Path-routing mode: /app/<site>/… serves that site off the apex origin
       // (no wildcard DNS/cert). Sites must use relative asset paths.
       if (config.routing === "path" && url.pathname.startsWith("/app/")) {

@@ -66,6 +66,9 @@
   .meta .by { color:var(--soft); }
   .meta .spacer { margin-left:auto; }
   .meta .visits { color:var(--soft); }
+  .meta .prof { cursor:pointer; }
+  .meta .by.prof:hover { color:var(--gold); }
+  .meta img.prof:hover { border-color:var(--gold); }
   .empty { color:var(--mute); text-align:center; padding:80px 0; }
   .empty code { color:var(--gold); }
 
@@ -224,6 +227,15 @@
   q.addEventListener("input", render);
   sortSel.addEventListener("change", render);
 
+  // clicking a creator's avatar/handle on a card opens their profile, not the site.
+  document.getElementById("grid").addEventListener("click", (e) => {
+    const pf = e.target.closest(".prof");
+    if (!pf) return;
+    e.preventDefault();
+    e.stopPropagation();
+    location.href = "/@" + pf.dataset.h;
+  });
+
   function card(s) {
     const color = CAT_COLORS[s.category] || CAT_COLORS.misc;
     const recent = s.updated_at && Date.now() - new Date(s.updated_at).getTime() < 7 * 864e5;
@@ -241,8 +253,8 @@
         <div class="name">${esc(s.name)}</div>
         <div class="desc">${esc(s.description || "no description yet")}</div>
         <div class="meta">
-          <img src="${esc(s.creator.avatar_url || "")}" alt="" />
-          <span class="by">@${esc(s.creator.handle)}</span>
+          <img class="prof" data-h="${esc(s.creator.handle)}" src="${esc(s.creator.avatar_url || "")}" alt="" />
+          <span class="by prof" data-h="${esc(s.creator.handle)}">@${esc(s.creator.handle)}</span>
           <span class="spacer"></span>
           <span class="visits">▲ ${s.visits_30d ?? 0}</span>
         </div>

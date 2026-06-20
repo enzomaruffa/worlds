@@ -612,6 +612,14 @@ describe("profiles", () => {
     expect((await (await req("PUT", "/api/v1/me", { body: { handle: "api" }, headers: as(ACE) })).json()).error.code).toBe("invalid_request");
     expect((await (await req("PUT", "/api/v1/me", { body: { handle: "Nope!" }, headers: as(ACE) })).json()).error.code).toBe("invalid_request");
   });
+
+  test("/@<handle> serves the profile page shell", async () => {
+    const res = await req("GET", `/@${NEW_HANDLE}`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type") || "").toContain("text/html");
+    const html = await res.text();
+    expect(html).toContain("/api/v1/creators/"); // the client fetches the creator API
+  });
 });
 
 describe("auth (google mode)", () => {
