@@ -139,6 +139,7 @@ export function rooms<T extends Record<string, any> = any>(name: string, opts: R
   // races another client just returns deleted:false.
   async function sweep(): Promise<void> {
     for (const [dbId, doc] of [...docs.entries()]) {
+      if (dbId === currentDbId) continue; // never GC the room we're in (host migration handles a dead host)
       if (doc.data && doc.data._dir && !fresh(doc)) {
         docs.delete(dbId);
         try {
@@ -241,7 +242,11 @@ export function rooms<T extends Record<string, any> = any>(name: string, opts: R
     stopMirror = r.onChange(mirror);
     heartbeat = setInterval(() => {
       const s = r.snapshot();
-      if (s.isHost && currentDbId === dbId) dir.update(dbId, { count: s.total }).catch(() => {});
+      if (s.isHost && currentDbId === dbId) {
+        // bump updated_at so the room stays "alive" for browsers, and refresh our
+        // own cache from the result so list freshness reflects the heartbeat.
+        dir.update(dbId, { count: s.total }).then((updated) => { if (updated) docs.set(dbId, updated); pushList(); }).catch(() => {});
+      }
     }, 15000);
     return r;
   }

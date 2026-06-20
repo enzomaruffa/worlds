@@ -646,6 +646,8 @@
     }
     async function sweep() {
       for (const [dbId, doc] of [...docs.entries()]) {
+        if (dbId === currentDbId)
+          continue;
         if (doc.data && doc.data._dir && !fresh(doc)) {
           docs.delete(dbId);
           try {
@@ -747,8 +749,13 @@
       stopMirror = r.onChange(mirror);
       heartbeat = setInterval(() => {
         const s = r.snapshot();
-        if (s.isHost && currentDbId === dbId)
-          dir.update(dbId, { count: s.total }).catch(() => {});
+        if (s.isHost && currentDbId === dbId) {
+          dir.update(dbId, { count: s.total }).then((updated) => {
+            if (updated)
+              docs.set(dbId, updated);
+            pushList();
+          }).catch(() => {});
+        }
       }, 15000);
       return r;
     }
