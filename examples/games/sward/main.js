@@ -97,7 +97,7 @@ function buildPalette() {
   const div = document.createElement("div"); div.style = "width:1px;background:var(--border-soft);margin:.1rem .15rem;flex:none"; dom.paletteRow.appendChild(div);
   for (const k of El.FEATURE_KEYS) {
     const f = El.FEATURES[k], locked = !Sim.isUnlocked(k);
-    tile("feat:" + k, f.icon, f.name, locked ? Sim.unlockCost(k) : f.cost, locked);
+    tile("feat:" + k, f.icon, f.name, locked ? Sim.unlockCost(k) : Sim.placeCost(k), locked);
   }
   refreshPaletteAfford();
 }
@@ -117,6 +117,11 @@ function selectTool(key) {
 function refreshPaletteAfford() {
   for (const el of dom.paletteRow.children) {
     const c = el.querySelector(".cost"); if (!c) continue;
+    // each placed feature raises the next one's price — keep the label live
+    if (el.dataset.tool && el.dataset.tool.startsWith("feat:") && !el.dataset.locked) {
+      const pc = Sim.placeCost(el.dataset.tool.slice(5));
+      el.dataset.cost = pc; c.textContent = pc + " 💧";
+    }
     const cost = +el.dataset.cost || 0;
     if (cost) c.classList.toggle("cant", G.dew < cost);
   }
@@ -248,11 +253,11 @@ function applyAt(cx, cy) {
     if (G.dew < WATER_COST) return toast("need " + WATER_COST + " 💧");
     Sim.waterPatch(g.x, g.z, 2.4); G.dew -= WATER_COST; Audio.sfx.water(); updateWallet();
   } else if (tool.startsWith("feat:")) {
-    const kind = tool.slice(5), cost = El.FEATURES[kind].cost;
+    const kind = tool.slice(5), cost = Sim.placeCost(kind);
     if (!onLand) return toast("expand your plot to build here 🌱");
     if (G.dew < cost) return toast("need " + fmt(cost) + " 💧");
     const f = Sim.placeFeature(kind, g.x, g.z);
-    if (f) { Life.sync(); updateWallet(); flash(El.FEATURES[kind].icon); Audio.sfx.place(); showInspect(f.id); }
+    if (f) { Life.sync(); updateWallet(); refreshPaletteAfford(); flash(El.FEATURES[kind].icon); Audio.sfx.place(); showInspect(f.id); }
   }
 }
 
@@ -352,7 +357,7 @@ function frame(now) {
   if (pointer.on && G.tool && !G.visiting) {
     const t = TOOLS.find((x) => x.key === G.tool);
     const isFeat = G.tool.startsWith("feat:");
-    const cost = isFeat ? El.FEATURES[G.tool.slice(5)].cost : (t ? t.cost : 0);
+    const cost = isFeat ? Sim.placeCost(G.tool.slice(5)) : (t ? t.cost : 0);
     const radius = isFeat ? 1.6 : (t ? t.r : 1);
     const needsLand = isFeat || G.tool === "seed";
     const g = W.pickGround(pointer.x, pointer.y);

@@ -33,8 +33,8 @@ export const hemi = new THREE.HemisphereLight(0xbfe3ff, 0x4a5b3a, 0.85);
 export const sun = new THREE.DirectionalLight(0xfff1d0, 1.5);
 export const ambient = new THREE.AmbientLight(0xffffff, 0.12);
 
-let renderer = null, controls = null, groundMesh = null, cursor = null, composer = null, bloomPass = null;
-let plotSeed = 1;
+let renderer = null, controls = null, groundMesh = null, skirtMesh = null, cursor = null, composer = null, bloomPass = null;
+let plotSeed = 1, _revealHalf = HALF, soilTex = null;
 
 // ── deterministic 2D value noise (terrain shape; stable per seed) ─────────────
 function hash2(ix, iz, seed) {
@@ -79,36 +79,42 @@ function soilTexture() {
   return tex;
 }
 
-function buildGround() {
-  const geo = new THREE.PlaneGeometry(PLOT, PLOT, SEG, SEG);
+const EDGE_FLOOR = -1.7;      // visible plateau edge drops to here; the skirt seals below it
+const REVEAL_MARGIN = 2.5;    // ground extends a little past the unlocked fence
+const DEFAULT_REVEAL = 9;     // matches sim's START_HALF — the plot you begin with
+function getSoil() { if (!soilTex) soilTex = soilTexture(); return soilTex; }
+
+// Build (or rebuild) the *visible* plot, sized to the unlocked half-extent `h`.
+// Terrain shape (heightAt) is absolute & stable — only the rendered patch grows,
+// so un-unlocked land (and anything on it) simply isn't there until you expand.
+export function revealPlot(h) {
+  _revealHalf = h;
+  const half = h + REVEAL_MARGIN;
+  for (const o of [groundMesh, skirtMesh]) { if (o) { scene.remove(o); o.geometry.dispose(); } }
+
+  // ground — eased down near the rim so the dark skirt seals the cut edge
+  const seg = THREE.MathUtils.clamp(Math.round(half * 3.4), 28, 160);
+  const geo = new THREE.PlaneGeometry(half * 2, half * 2, seg, seg);
   geo.rotateX(-Math.PI / 2);
   const pos = geo.attributes.position;
-  for (let i = 0; i < pos.count; i++) pos.setY(i, heightAt(pos.getX(i), pos.getZ(i)));
-  geo.computeVertexNormals();
-  const mat = new THREE.MeshStandardMaterial({ map: soilTexture(), roughness: 1, metalness: 0, color: 0xb89878 });
-  groundMesh = new THREE.Mesh(geo, mat);
-  groundMesh.receiveShadow = true;
-  groundMesh.name = "ground";
-  scene.add(groundMesh);
-
-  // a low earthen rim + corner posts so the plot reads as "owned"
-  const rim = new THREE.Group();
-  const postGeo = new THREE.CylinderGeometry(0.34, 0.4, 2.0, 7);
-  const postMat = new THREE.MeshStandardMaterial({ color: 0x8a6a48, roughness: 0.95 });
-  const corners = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
-  for (const [sx, sz] of corners) {
-    const x = sx * (HALF - 0.6), z = sz * (HALF - 0.6);
-    const p = new THREE.Mesh(postGeo, postMat);
-    p.position.set(x, heightAt(x, z) + 0.7, z); p.castShadow = true; p.receiveShadow = true;
-    rim.add(p);
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), z = pos.getZ(i);
+    const e = Math.max(Math.abs(x), Math.abs(z)) / half;          // 0 centre … 1 rim
+    let k = THREE.MathUtils.clamp(1 - Math.max(0, e - 0.8) / 0.2, 0, 1);
+    k = k * k * (3 - 2 * k);
+    pos.setY(i, THREE.MathUtils.lerp(EDGE_FLOOR, heightAt(x, z), k));
   }
-  scene.add(rim);
+  geo.computeVertexNormals();
+  const tex = getSoil(); tex.repeat.set(half * 0.2, half * 0.2);
+  groundMesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ map: tex, roughness: 1, metalness: 0, color: 0xb89878 }));
+  groundMesh.receiveShadow = true; groundMesh.name = "ground"; scene.add(groundMesh);
 
-  // skirt: dark sides so the raised plot doesn't look like a floating sheet
-  const skirtMat = new THREE.MeshStandardMaterial({ color: 0x3c2c1e, roughness: 1 });
-  const skirt = new THREE.Mesh(new THREE.BoxGeometry(PLOT, 8, PLOT), skirtMat);
-  skirt.position.y = -4 - 1.2; scene.add(skirt);
+  // dark earthen sides so the raised patch doesn't look like a floating sheet
+  // (shallower than the old full plot so a small early plot isn't a tall pedestal)
+  skirtMesh = new THREE.Mesh(new THREE.BoxGeometry(half * 2, 6, half * 2), new THREE.MeshStandardMaterial({ color: 0x3c2c1e, roughness: 1 }));
+  skirtMesh.position.y = -3.6; scene.add(skirtMesh);
 }
+export const revealHalf = () => _revealHalf;
 
 // ── placement cursor (a soft ring on the ground) ────────────────────────────
 function buildCursor() {
@@ -153,6 +159,7 @@ let boundary = null;
 const postGeoB = new THREE.CylinderGeometry(0.13, 0.17, 1.1, 6);
 const postMatB = new THREE.MeshStandardMaterial({ color: 0x6f4a28, roughness: 0.9 });
 export function setBoundary(h) {
+  revealPlot(h);   // the visible plot grows with the unlocked boundary
   if (!boundary) { boundary = new THREE.Group(); scene.add(boundary); }
   while (boundary.children.length) boundary.remove(boundary.children[0]);
   const perSide = 14;
@@ -236,7 +243,7 @@ export function initWorld(canvas, seed = 1) {
   sun.shadow.bias = -0.0005;
   scene.add(sun, sun.target, hemi, ambient);
 
-  buildGround();
+  revealPlot(DEFAULT_REVEAL);
   buildSkyDome();
   buildCursor();
 

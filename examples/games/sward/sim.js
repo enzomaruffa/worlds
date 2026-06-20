@@ -153,6 +153,7 @@ export function clearDebris(pickId) {
   const i = S.debris.findIndex((d) => d.id === pickId);
   if (i < 0) return 0;
   const d = S.debris[i];
+  if (!insideGrowable(d.x, d.z)) return 0;   // can't clear debris on land you haven't unlocked yet
   W.scene.remove(d.mesh);
   const ri = debrisRoots.indexOf(d.mesh); if (ri >= 0) debrisRoots.splice(ri, 1);
   unblockAround(d.x, d.z, 1.8);
@@ -271,10 +272,18 @@ function placeMesh(f) {
   featureRoots.push(g);
 }
 
+// each additional feature of a kind costs more — placement is a real Dew sink
+export const PLACE_MULT = 1.55;
+export const placeCost = (kind) => {
+  const def = El.FEATURES[kind]; if (!def) return 0;
+  let have = 0; for (const f of S.features) if (f.kind === kind) have++;
+  return Math.round(def.cost * Math.pow(PLACE_MULT, have));
+};
 export function placeFeature(kind, x, z, free) {
   const def = El.FEATURES[kind]; if (!def) return null;
-  if (!free && (!insideGrowable(x, z) || !isUnlocked(kind) || G.dew < def.cost)) return null;
-  if (!free) G.dew -= def.cost;
+  const cost = placeCost(kind);
+  if (!free && (!insideGrowable(x, z) || !isUnlocked(kind) || G.dew < cost)) return null;
+  if (!free) G.dew -= cost;
   const start = perkLvl("earlyBloom") ? Math.min(1, El.maxStage(kind)) : 0;
   const f = { id: "ft-" + Date.now().toString(36) + "-" + ((Math.random() * 1e6) | 0), kind, x, z, stage: start, stageT: 0 };
   S.features.push(f); placeMesh(f); fieldsDirty = true;
@@ -465,6 +474,7 @@ export function init(g, saved) {
     S.plotLevel = saved.plotLevel || 0; S.unlocked = { ...(saved.unlocked || {}) };
     for (const fs of saved.features || []) { const f = placeFeature(fs.kind, fs.x, fs.z, true); if (f) { f.stage = fs.stage | 0; f.stageT = fs.stageT || 0; placeMesh(f); } }
     for (const d of saved.debris) {
+      if (!insideGrowable(d.x, d.z)) continue;   // never render debris on land that isn't unlocked
       const id = d.id || ("deb-" + Math.random().toString(36).slice(2));
       const m = W.cloneModel(d.kind, 2.0, { receive: true });
       if (m) { m.position.set(d.x, W.heightAt(d.x, d.z), d.z); m.rotation.y = Math.random() * 6.28; m.userData.pickId = id; m.userData.kind = "debris"; W.scene.add(m); debrisRoots.push(m); }
