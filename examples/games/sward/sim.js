@@ -22,11 +22,13 @@ const clamp = THREE.MathUtils.clamp;
 const SEASON_GROW = [1.3, 1.0, 0.6, 0.22];
 const SEASON_DEW = [1.15, 1.25, 0.9, 0.45];
 
+// mult = per-level cost growth: each level of an upgrade costs more than the last
+// (steepened for the ~30-day pacing — repeated buys of the same thing bite harder)
 export const UPGRADES = {
-  rake:        { name: "Auto-rake",   icon: "🧹",   base: 50,   mult: 2.6, max: 8,  desc: "Clears stray debris on its own (faster per level)." },
-  sprinkler:   { name: "Sprinkler",   icon: "💦",   base: 120,  mult: 2.8, max: 10, desc: "Keeps the soil watered — faster, lusher growth." },
-  fertilizer:  { name: "Fertilizer",  icon: "🌟",   base: 220,  mult: 3.1, max: 12, desc: "Richer soil multiplies grass growth." },
-  greenkeeper: { name: "Greenkeeper", icon: "🧑‍🌾", base: 900,  mult: 3.0, max: 8,  desc: "Auto-seeds grass into open ground." },
+  rake:        { name: "Auto-rake",   icon: "🧹",   base: 50,   mult: 2.8, max: 8,  desc: "Clears stray debris on its own (faster per level)." },
+  sprinkler:   { name: "Sprinkler",   icon: "💦",   base: 120,  mult: 3.3, max: 10, desc: "Keeps the soil watered — faster, lusher growth." },
+  fertilizer:  { name: "Fertilizer",  icon: "🌟",   base: 220,  mult: 3.6, max: 12, desc: "Richer soil multiplies grass growth." },
+  greenkeeper: { name: "Greenkeeper", icon: "🧑‍🌾", base: 900,  mult: 3.6, max: 8,  desc: "Auto-seeds grass into open ground." },
 };
 
 // gameplay state (net.js persists this; localStorage is the C4 stand-in)
@@ -204,7 +206,7 @@ export const growHalf = () => Math.min(W.HALF - 1, START_HALF + (S.plotLevel || 
 export const insideGrowable = (x, z) => { const h = growHalf(); return Math.abs(x) <= h && Math.abs(z) <= h; };
 const growableCell = (ix, iz) => { const c = Grass.cellCenter(ix, iz); return insideGrowable(c.x, c.z); };
 export const plotMaxed = () => (S.plotLevel || 0) >= MAX_PLOT_LEVEL;
-export const expandCost = () => Math.round(400 * Math.pow(3.5, S.plotLevel || 0));
+export const expandCost = () => Math.round(450 * Math.pow(4.0, S.plotLevel || 0));
 export function expandPlot() {
   if (plotMaxed() || G.dew < expandCost()) return false;
   G.dew -= expandCost(); S.plotLevel = (S.plotLevel || 0) + 1;
@@ -214,7 +216,7 @@ export function expandPlot() {
 }
 
 // ── progressive feature unlocks (gate content over the long game) ─────────────
-export const UNLOCK_COST = { clover: 120, flowers: 500, shrub: 1500, mushrooms: 4000, pond: 9000, tree: 22000, hive: 55000 };
+export const UNLOCK_COST = { clover: 150, flowers: 800, shrub: 3200, mushrooms: 10000, pond: 26000, tree: 80000, hive: 220000 };
 export const isUnlocked = (kind) => !UNLOCK_COST[kind] || !!(S.unlocked && S.unlocked[kind]);
 export const unlockCost = (kind) => UNLOCK_COST[kind] || 0;
 export function unlockFeature(kind) {
@@ -273,7 +275,7 @@ function placeMesh(f) {
 }
 
 // each additional feature of a kind costs more — placement is a real Dew sink
-export const PLACE_MULT = 1.55;
+export const PLACE_MULT = 1.9;
 export const placeCost = (kind) => {
   const def = El.FEATURES[kind]; if (!def) return 0;
   let have = 0; for (const f of S.features) if (f.kind === kind) have++;
@@ -392,8 +394,10 @@ export function step(dt, env) {
   evolve(dt, season);
   ecosystem();
 
-  // Dew (ecosystem multiplies it — the GROW payoff)
-  const dewRate = green * 0.016 * SEASON_DEW[season] * (0.3 + 0.7 * sun) * (1 + G.ecoLevel * 0.28) * (1 + 0.25 * perkLvl("goldenDew"));
+  // Dew (ecosystem multiplies it — the GROW payoff). Coefficient tuned so a full
+  // build (max plot + all unlocks + key upgrades) paces to ~30 days of somewhat
+  // active play (~10 effective h/day incl. the 8h idle cap) — see econ model.
+  const dewRate = green * 0.0055 * SEASON_DEW[season] * (0.3 + 0.7 * sun) * (1 + G.ecoLevel * 0.28) * (1 + 0.25 * perkLvl("goldenDew"));
   G.dew += dewRate * dt;
   S._dewRate = dewRate;
 
