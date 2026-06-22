@@ -43,7 +43,8 @@ const SEASONS = [
   { name: "Autumn", sky: 0xbfae8a, lush: 0x9a8f3c, dry: 0xc97a38, tip: 0xe6ab58, hemiG: 0x6e5a2e, sun: 0xffd79a, part: "leaves", wind: 0.18 },
   { name: "Winter", sky: 0xbcd0e2, lush: 0x86a17e, dry: 0xaab8a6, tip: 0xd2e6da, hemiG: 0x5c6c66, sun: 0xeaf2ff, part: "snow",   wind: 0.16 },
 ];
-const NIGHT_SKY = new THREE.Color(0x1a2348);   // moonlit, not pitch black
+const NIGHT_SKY = new THREE.Color(0x2c3c72);   // brighter moonlit indigo — readable, not muddy
+const MOONLIT = new THREE.Color(0xaebfe8);     // cool moonlight tint for fills
 const DAWN = new THREE.Color(0xffb784), DUSK = new THREE.Color(0xff7e52);
 
 const _a = new THREE.Color(), _b = new THREE.Color(), _sky = new THREE.Color(), _sun = new THREE.Color(), _zen = new THREE.Color();
@@ -177,14 +178,15 @@ export function update(dt) {
   sun.target.position.set(0, 0, 0); sun.target.updateMatrixWorld();
   // sun: warm by altitude; after dark the directional turns to soft cool moonlight
   _sun.set(0xff8a3c).lerp(_a.set(SEASONS[seasonIndex()].sun), clamp(sh, 0, 1));
-  _sun.lerp(_a.set(0x9fb4ff), night * 0.8);
+  _sun.lerp(_a.set(0xb8c8ff), night * 0.85);
   sun.color.copy(_sun);
-  sun.intensity = 0.4 + 1.4 * dl;              // moonlit floor — the plot stays readable at night
+  sun.intensity = 0.62 + 1.18 * dl;            // higher moonlit floor — the plot reads clearly at night
   sun.castShadow = dl > 0.05;
 
-  hemi.color.copy(blendSeason("sky")); hemi.groundColor.copy(blendSeason("hemiG"));
-  hemi.intensity = 0.55 + 0.4 * dl;
-  ambient.intensity = 0.18 + 0.09 * dl;
+  // fills: cool the hemisphere toward moonlight at night so it isn't a muddy day-blue
+  hemi.color.copy(blendSeason("sky")).lerp(MOONLIT, night * 0.55); hemi.groundColor.copy(blendSeason("hemiG"));
+  hemi.intensity = 0.72 + 0.33 * dl;           // brighter ambient sky fill after dark
+  ambient.intensity = 0.30 + 0.07 * dl;
 
   // particles
   if (stars) stars.material.opacity = night * 0.9;
