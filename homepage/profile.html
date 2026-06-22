@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>profile · worlds</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg:#0b0b0d; --elev:#161618; --elev2:#1d1d20; --ink:#e7e7ea; --soft:#a1a1aa; --mute:#71717a;
+    --gold:#e5a00d; --rule:#26262a; --disp:"Space Grotesk", system-ui, sans-serif;
+    --games:#f0abfc; --work:#93c5fd; --tools:#fcd34d; --experiments:#5eead4; --misc:#cbd5e1;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.6 system-ui, sans-serif; min-height:100vh; }
+  a { color:inherit; text-decoration:none; }
+
+  header { display:flex; align-items:center; gap:14px; padding:14px 22px; border-bottom:1px solid var(--rule);
+    position:sticky; top:0; background:rgba(11,11,13,.82); backdrop-filter:blur(10px); z-index:5; }
+  .brand { font:700 19px var(--disp); letter-spacing:.02em; display:flex; align-items:baseline; gap:10px; }
+  .brand b { color:var(--gold); }
+  .brand .crumb { font:400 13px ui-monospace,monospace; color:var(--mute); }
+  .brand .crumb::before { content:"/"; margin-right:8px; color:var(--rule); }
+  header nav { margin-left:auto; display:flex; gap:8px; align-items:center; }
+  header a.btn, header button { font:600 12.5px var(--disp); color:var(--soft); background:var(--elev); border:1px solid var(--rule);
+    border-radius:999px; padding:7px 15px; cursor:pointer; transition:.15s; display:inline-flex; align-items:center; gap:6px; }
+  header a.btn:hover, header button:hover { color:var(--ink); border-color:#3f3f46; }
+  header a.pilot { color:#101012; background:var(--gold); border-color:var(--gold); }
+  header a.pilot:hover { color:#101012; filter:brightness(1.08); }
+
+  main { max-width:1180px; margin:0 auto; padding:30px 22px 80px; }
+
+  /* profile hero */
+  .hero { display:flex; gap:22px; align-items:center; margin:6px 0 30px; }
+  .hero .avatar { width:96px; height:96px; border-radius:50%; border:1px solid var(--rule); object-fit:cover; flex:none;
+    box-shadow:0 8px 28px rgba(0,0,0,.35); background:var(--elev); }
+  .hero .who { min-width:0; flex:1; }
+  .hero h1 { font:700 30px/1.1 var(--disp); margin:0 0 4px; letter-spacing:-.01em; word-break:break-word; }
+  .hero .handle { font:600 14px ui-monospace,monospace; color:var(--gold); }
+  .hero .stats { display:flex; flex-wrap:wrap; gap:8px 18px; margin-top:14px; color:var(--soft); font-size:13px; }
+  .hero .stats b { color:var(--ink); font:700 14px var(--disp); }
+  .hero .stats .dot { color:var(--rule); }
+  .hero .edit { margin-left:auto; flex:none; }
+
+  .section { display:flex; align-items:baseline; gap:10px; margin:0 0 16px; }
+  .section h2 { font:700 18px var(--disp); margin:0; }
+  .section .n { color:var(--mute); font:600 13px var(--disp); }
+
+  .grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(280px,1fr)); gap:16px; }
+  .card { background:var(--elev); border:1px solid var(--rule); border-radius:14px; overflow:hidden; display:flex; flex-direction:column;
+    transition:transform .14s, border-color .14s, box-shadow .14s; }
+  .card:hover { transform:translateY(-3px); border-color:#3f3f46; box-shadow:0 12px 30px rgba(0,0,0,.35); }
+  .thumb { height:128px; position:relative; display:flex; align-items:center; justify-content:center; overflow:hidden; }
+  .thumb img { width:100%; height:100%; object-fit:cover; }
+  .thumb .mono { font:700 40px var(--disp); color:rgba(255,255,255,.92); text-shadow:0 2px 14px rgba(0,0,0,.35); }
+  .thumb .cat { position:absolute; top:10px; left:10px; font:600 10px var(--disp); letter-spacing:.08em; text-transform:uppercase;
+    padding:3px 9px; border-radius:999px; background:rgba(0,0,0,.45); backdrop-filter:blur(4px); }
+  .thumb .role { position:absolute; top:10px; right:10px; font:600 10px var(--disp); letter-spacing:.04em; text-transform:uppercase;
+    color:var(--ink); background:rgba(0,0,0,.5); backdrop-filter:blur(4px); padding:3px 9px; border-radius:999px; }
+  .body { padding:13px 15px 15px; display:flex; flex-direction:column; gap:8px; flex:1; }
+  .body .name { font:700 16px var(--disp); letter-spacing:-.01em; }
+  .body .desc { color:var(--soft); font-size:13px; line-height:1.5; flex:1;
+    display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  .meta { display:flex; align-items:center; gap:8px; color:var(--mute); font-size:12px; border-top:1px solid var(--rule); padding-top:10px; }
+  .meta .spacer { margin-left:auto; }
+  .meta .visits, .meta .when { color:var(--soft); }
+
+  .state { color:var(--mute); text-align:center; padding:90px 0; }
+  .state .big { font:700 22px var(--disp); color:var(--soft); margin-bottom:8px; }
+  .state code { color:var(--gold); }
+  .skl { background:var(--elev); border:1px solid var(--rule); border-radius:14px; height:236px; animation:pulse 1.3s ease-in-out infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.55} }
+
+  /* edit modal (own profile only) — mirrors the homepage settings dialog */
+  #scrim { position:fixed; inset:0; background:rgba(0,0,0,.6); display:none; align-items:center; justify-content:center; z-index:20; }
+  #scrim.on { display:flex; }
+  #settings { width:min(420px,92vw); background:var(--elev); border:1px solid var(--rule); border-radius:16px; padding:24px; }
+  #settings h2 { margin:0 0 4px; font:700 17px var(--disp); }
+  #settings .sub { color:var(--mute); font-size:12px; margin-bottom:16px; }
+  #settings label { display:block; font:600 11px var(--disp); color:var(--mute); text-transform:uppercase; letter-spacing:.08em; margin:14px 0 5px; }
+  #settings input[type=text] { width:100%; background:var(--bg); border:1px solid var(--rule); border-radius:9px; color:var(--ink); padding:10px 13px; font-size:14px; outline:none; }
+  #settings input:focus { border-color:var(--gold); }
+  #settings code { font:13px ui-monospace,monospace; background:var(--bg); border:1px solid var(--rule); border-radius:6px; padding:1px 6px; color:var(--gold); }
+  #settings .avatarRow { display:flex; gap:12px; align-items:center; }
+  #settings .avatarRow img { width:52px; height:52px; border-radius:50%; border:1px solid var(--rule); object-fit:cover; }
+  #settings .hint { color:var(--mute); font-size:11px; margin-top:4px; }
+  #settings .err { color:#f87171; font-size:12px; min-height:1em; margin-top:10px; }
+  #settings .actions { display:flex; gap:8px; justify-content:flex-end; margin-top:18px; }
+  #settings button { font:600 13px var(--disp); border-radius:9px; padding:9px 17px; cursor:pointer; border:1px solid var(--rule); background:var(--bg); color:var(--soft); }
+  #settings button.save { background:var(--gold); color:#101012; border-color:var(--gold); }
+
+  @media (max-width:560px) {
+    .hero { gap:16px; }
+    .hero .avatar { width:72px; height:72px; }
+    .hero h1 { font-size:24px; }
+    .hero .edit { margin-left:0; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><a href="/"><b>worlds</b></a> <span class="crumb" id="crumb">profile</span></div>
+  <nav>
+    <a class="btn pilot" id="pilot" href="/">🚀 explore the universe</a>
+    <button id="bEdit" hidden>✎ edit profile</button>
+  </nav>
+</header>
+
+<main>
+  <div id="view"></div>
+</main>
+
+<div id="scrim">
+  <div id="settings">
+    <h2>your profile</h2>
+    <div class="sub">visible across Worlds — on your worlds and the universe.</div>
+    <label>handle</label>
+    <input type="text" id="sHandle" placeholder="your-handle" autocomplete="off" />
+    <div class="hint">your URL: <code>/@<span id="sHandlePreview">handle</span></code> · a–z, 0–9, dashes. Your email handle keeps redirecting here.</div>
+    <label>display name</label>
+    <input type="text" id="sName" placeholder="Your Name" autocomplete="off" />
+    <label>avatar</label>
+    <div class="avatarRow">
+      <img id="sAvatar" alt="" />
+      <div>
+        <input type="file" id="sFile" accept="image/*" />
+        <div class="hint">upload an image, or it stays your identicon.</div>
+      </div>
+    </div>
+    <div class="err" id="sErr"></div>
+    <div class="actions">
+      <button id="sCancel">cancel</button>
+      <button class="save" id="sSave">save</button>
+    </div>
+  </div>
+</div>
+
+<script src="/worlds.js"></script>
+<script>
+(async () => {
+  const CAT_COLORS = { games:"#f0abfc", work:"#93c5fd", tools:"#fcd34d", experiments:"#5eead4", misc:"#cbd5e1" };
+  const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c]));
+  const view = document.getElementById("view");
+
+  // /@<handle> — the handle is the first path segment (minus the @). /@ alone → your own.
+  const seg = decodeURIComponent(location.pathname.split("/")[1] || "");
+  let handle = seg.replace(/^@/, "").toLowerCase();
+  let me = null;
+  try { me = await worlds.me(); } catch {}
+  if (!handle) {
+    if (me && me.handle) { location.replace("/@" + me.handle); return; }
+    handle = "";
+  }
+
+  const fmt = (n) => n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1) + "k" : String(n);
+  const sinceLabel = (sites) => {
+    const ts = sites.map((s) => s.created_at && new Date(s.created_at).getTime()).filter(Boolean);
+    if (!ts.length) return null;
+    const d = new Date(Math.min(...ts));
+    return d.toLocaleString("en", { month: "short", year: "numeric" });
+  };
+  const rel = (iso) => {
+    if (!iso) return "";
+    const days = Math.floor((Date.now() - new Date(iso).getTime()) / 864e5);
+    if (days <= 0) return "today";
+    if (days === 1) return "yesterday";
+    if (days < 30) return days + "d ago";
+    if (days < 365) return Math.floor(days / 30) + "mo ago";
+    return Math.floor(days / 365) + "y ago";
+  };
+
+  function card(s, profileHandle) {
+    const color = CAT_COLORS[s.category] || CAT_COLORS.misc;
+    const contributed = s.creator && s.creator.handle && s.creator.handle !== profileHandle;
+    const thumb = s.screenshot_url
+      ? `<img src="${esc(s.screenshot_url)}" alt="" loading="lazy" />`
+      : `<span class="mono">${esc((s.name[0] || "?").toUpperCase())}</span>`;
+    const grad = `radial-gradient(120% 120% at 30% 20%, ${color}33, transparent 60%), linear-gradient(135deg, #1d1d20, #101012)`;
+    return `<a class="card" href="${esc(s.url)}">
+      <div class="thumb" style="background:${grad}">
+        ${thumb}
+        <span class="cat" style="color:${color}">${esc(s.category || "misc")}</span>
+        ${contributed ? '<span class="role">contributor</span>' : ""}
+      </div>
+      <div class="body">
+        <div class="name">${esc(s.name)}</div>
+        <div class="desc">${esc(s.description || "no description yet")}</div>
+        <div class="meta">
+          <span class="when">updated ${esc(rel(s.updated_at))}</span>
+          <span class="spacer"></span>
+          <span class="visits">▲ ${fmt(s.visits_30d ?? 0)}</span>
+        </div>
+      </div>
+    </a>`;
+  }
+
+  function renderLoading() {
+    view.innerHTML = `<div class="hero">
+        <div class="avatar skl" style="border-radius:50%"></div>
+        <div class="who"><div class="skl" style="height:30px;width:220px;max-width:60%"></div></div>
+      </div>
+      <div class="grid">${Array.from({ length: 3 }).map(() => '<div class="skl"></div>').join("")}</div>`;
+  }
+
+  function renderNotFound() {
+    document.getElementById("crumb").textContent = "not found";
+    view.innerHTML = `<div class="state">
+      <div class="big">no creator @${esc(handle)}</div>
+      <div>Nobody by that handle has shipped a world yet. <a href="/" style="color:var(--gold)">browse the universe →</a></div>
+    </div>`;
+  }
+
+  function render(p) {
+    const isMe = me && me.handle && me.handle === p.handle;
+    document.title = "@" + p.handle + " · worlds";
+    document.getElementById("crumb").textContent = "@" + p.handle;
+
+    const totalVisits = p.sites.reduce((n, s) => n + (s.visits_30d || 0), 0);
+    const since = sinceLabel(p.sites);
+    const stats = [
+      `<span><b>${p.sites.length}</b> world${p.sites.length === 1 ? "" : "s"}</span>`,
+      `<span><b>${fmt(totalVisits)}</b> visits</span>`,
+      p.deploys_90d ? `<span><b>${fmt(p.deploys_90d)}</b> deploys · 90d</span>` : "",
+      since ? `<span class="when">shipping since ${esc(since)}</span>` : "",
+    ].filter(Boolean).join('<span class="dot">·</span>');
+
+    view.innerHTML = `
+      <div class="hero">
+        <img class="avatar" src="${esc(p.avatar_url || "")}" alt="" />
+        <div class="who">
+          <h1>${esc(p.name || p.handle)}</h1>
+          <span class="handle">@${esc(p.handle)}</span>
+          <div class="stats">${stats}</div>
+        </div>
+      </div>
+      <div class="section"><h2>worlds</h2><span class="n">${p.sites.length}</span></div>
+      ${p.sites.length
+        ? `<div class="grid">${p.sites.map((s) => card(s, p.handle)).join("")}</div>`
+        : `<div class="state"><div class="big">no worlds yet</div><div>${isMe ? 'drop a folder on the <a href="/" style="color:var(--gold)">home page</a> to ship your first.' : "this creator hasn't shipped a world yet."}</div></div>`}
+    `;
+
+    const bEdit = document.getElementById("bEdit");
+    bEdit.hidden = !isMe;
+    if (isMe) bEdit.onclick = openEdit;
+  }
+
+  async function load() {
+    renderLoading();
+    let res;
+    try { res = await fetch("/api/v1/creators/" + encodeURIComponent(handle), { headers: { "x-worlds-csrf": "1" } }); }
+    catch { renderNotFound(); return; }
+    if (res.status === 404) { renderNotFound(); return; }
+    if (!res.ok) { view.innerHTML = `<div class="state"><div class="big">couldn't load this profile</div><div>try again in a moment.</div></div>`; return; }
+    const p = await res.json();
+    // canonical/old handle requested → bounce to the creator's current handle URL.
+    if (p.redirect_to && p.redirect_to !== handle) { location.replace("/@" + p.redirect_to); return; }
+    render(p);
+  }
+
+  // ---------- edit profile (own profile only) ----------
+  const scrim = document.getElementById("scrim");
+  const sHandle = document.getElementById("sHandle"), sName = document.getElementById("sName");
+  const sAvatar = document.getElementById("sAvatar"), sErr = document.getElementById("sErr");
+  let pickedAvatar = "";
+  sHandle.addEventListener("input", () => { document.getElementById("sHandlePreview").textContent = sHandle.value.trim() || "handle"; });
+  async function openEdit() {
+    sErr.textContent = ""; pickedAvatar = "";
+    const m = await worlds.me();
+    sHandle.value = m.handle; document.getElementById("sHandlePreview").textContent = m.handle;
+    sName.value = m.name; sAvatar.src = m.avatar_url;
+    scrim.classList.add("on");
+  }
+  document.getElementById("sCancel").onclick = () => scrim.classList.remove("on");
+  scrim.addEventListener("click", (e) => { if (e.target === scrim) scrim.classList.remove("on"); });
+  document.getElementById("sFile").onchange = async (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    sErr.textContent = "uploading…";
+    try { const up = await worlds.uploads.put(f, { name: `avatar-${Date.now()}.${f.name.split(".").pop() || "png"}` }); pickedAvatar = up.url; sAvatar.src = up.url; sErr.textContent = ""; }
+    catch (err) { sErr.textContent = err.message; }
+  };
+  document.getElementById("sSave").onclick = async () => {
+    sErr.textContent = "";
+    const body = { handle: sHandle.value.trim(), name: sName.value.trim() };
+    if (pickedAvatar) body.avatar_url = pickedAvatar;
+    const res = await fetch("/api/v1/me", { method: "PUT", headers: { "x-worlds-csrf": "1", "content-type": "application/json" }, body: JSON.stringify(body) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { sErr.textContent = (data.error && data.error.message) || "could not save"; return; }
+    scrim.classList.remove("on");
+    me = data;
+    // handle change moves your URL — land on the new one.
+    if (data.handle && data.handle !== handle) { location.replace("/@" + data.handle); return; }
+    load();
+  };
+
+  await load();
+})();
+</script>
+</body>
+</html>
