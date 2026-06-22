@@ -303,9 +303,9 @@
     const FX_MS = 7000;            // speed/fat effect duration
     const SPEED_MULT = 1.7, FAT_MULT = 2.3, BOMB_R = 150;
     // encircle (loop a region to flood-fill it your colour)
-    const LOOP_MIN_PTS = 6;        // trail points before a loop can close
-    const LOOP_SNAP = 95;          // dist back to an old trail point that closes a loop
-    const LOOP_MIN_CELLS = 20;     // only deliberate, sizeable loops capture (was 4 — encircle was OP/spammable)
+    const LOOP_MIN_PTS = 12;       // a longer trail before a loop can close (avoids tiny accidental loops)
+    const LOOP_SNAP = 60;          // must return CLOSER to an old point to close — deliberate loops only (was 95 ≈ 3 cells, over-eager)
+    const LOOP_MIN_CELLS = 44;     // only a real, sizeable enclosed area captures (was 20 — still too easy to trip)
     const LOOP_COOLDOWN = 1200;    // ms between captures, so you can't machine-gun loops
 
     // Vivid paint palette — hashed handle picks an index.
@@ -631,7 +631,10 @@
       const byColor = new Map();
       for (const [color, cells] of coverage) if (cells > 0) byColor.set(color, cells);
       const players = playerList();           // self + remotes (+ roster names)
-      const total = GRID * GRID;
+      // % = share of all PAINTED territory (adds up to ~100% across players) — not a
+      // share of the whole arena, most of which is bare and would make the numbers
+      // look like they "don't add up".
+      const total = [...byColor.values()].reduce((a, c) => a + c, 0);
       const seen = new Set();
       const rows = [];
       for (const p of players) {
@@ -660,8 +663,9 @@
       enterResults();
     }
     function renderResults() {
-      const total = GRID * GRID;
-      const rows = [...roundScores.entries()].map(([h, r]) => ({ handle: h, name: r.name, color: r.color, cells: r.cells, pct: total ? r.cells / total * 100 : 0 }));
+      const rows = [...roundScores.entries()].map(([h, r]) => ({ handle: h, name: r.name, color: r.color, cells: r.cells }));
+      const total = rows.reduce((a, r) => a + r.cells, 0) || 1;   // share of painted territory → adds up to 100%
+      for (const r of rows) r.pct = r.cells / total * 100;
       rows.sort((a, b) => b.cells - a.cells);
       const top = rows.length ? rows[0] : null;
       const iWon = top && top.color === me.color && top.cells > 0;
@@ -968,10 +972,17 @@
       }
     }
     const PUP_ICON = { speed: "⚡", fat: "🖌", bomb: "💥" };
+    const PUP_LABEL = {
+      speed: "Speed boost — you move faster for 7s",
+      fat: "Fat brush — paint a wider trail for 7s",
+      bomb: "Paint bomb — splattered a big blast of your colour",
+    };
     function showPup(kind) {
       cdNum.textContent = PUP_ICON[kind] || "✦";
       cdNum.className = "num go";
       void cdNum.offsetWidth; cdNum.classList.add("pop");
+      // tell the player exactly what they grabbed + how long it lasts (just an emoji was cryptic)
+      try { worlds.toast((PUP_ICON[kind] || "✦") + "  " + (PUP_LABEL[kind] || "Power-up!")); } catch (_) {}
     }
 
     function updateTimer() {

@@ -134,9 +134,16 @@ export function room<T extends Record<string, any> = any>(name: string, opts: Ro
   function roster(): Person[] {
     return uniq([...(me ? [me] : []), ...presence]);
   }
+  // Host = the FIRST player to open/join the room, stable for its whole life.
+  // The server's presence list is join-ordered and identical for every client
+  // (it's one insertion-ordered Map broadcast to all), so the earliest still-
+  // present member is the same everywhere — no clock, no races. If the host
+  // actually leaves, the next-earliest joiner takes over (sane migration); a
+  // host who leaves and rejoins lands at the back and does NOT reclaim it.
+  // Before our own presence echoes back we only know ourselves → treat us as host.
   function hostHandle(): string | null {
-    const r = roster().map((p) => p.handle).sort();
-    return r.length ? r[0]! : null;
+    if (presence.length) return presence[0]!.handle;
+    return me ? me.handle : null;
   }
   function isHost(): boolean {
     return !!me && hostHandle() === me.handle;

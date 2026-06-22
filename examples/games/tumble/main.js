@@ -31,7 +31,7 @@ const SEGMENT_LEN = 36; // interest-zone size along the track (ghosts sync withi
 const CHUNK_LEN = 26; // length of one obstacle chunk along +Z
 const TRACK_HALF = 6.5; // half-width of the standard track
 const SAFE_LEN = 4.5; // solid entry strip at the start of every chunk (checkpoint zone)
-const VOID_Y = -11; // fall below this → respawn at last checkpoint
+const VOID_Y = -8; // fall below this → respawn at last checkpoint (prompt, not a long drop)
 
 const GRAVITY = -34;
 const MOVE_SPEED = 12.5;
@@ -560,6 +560,19 @@ function buildLevel(seed, index) {
   level = { index, group, nChunks, chunks, hazards, name, finishZ: nChunks * CHUNK_LEN + 1 };
 }
 
+// Collision radius that MATCHES the rendered asset: the XZ half-extent of the
+// actual built mesh's bounding box (floored so a thin model is still hittable).
+// Replaces the old hand-picked radii that fired well outside the visible model.
+const _rbb = new THREE.Box3(), _rsz = new THREE.Vector3();
+function meshRadius(o, fallback) {
+  if (!o) return fallback;
+  o.updateWorldMatrix(true, true);
+  _rbb.setFromObject(o);
+  if (!isFinite(_rbb.min.x) || !isFinite(_rbb.max.x)) return fallback;
+  _rbb.getSize(_rsz);
+  return Math.max(0.9, Math.max(_rsz.x, _rsz.z) / 2);
+}
+
 // Build a hand-authored level from placed objects (3D editor output). Collision
 // is derived from each object's role: walkable AABBs, hazard volumes, jump pads,
 // moving platforms, a start spawn and a finish zone.
@@ -593,9 +606,9 @@ function buildObjectLevel(def, index) {
         amp: (o.p && o.p.amp) || 7, speed: (o.p && o.p.speed) || 1, w: built.w, d: built.d, h: built.h,
         prev: new THREE.Vector3(x, y, z), delta: new THREE.Vector3(), aabb: aabb(built.w, built.d, y + built.h / 2) });
     } else if (built.role === "ball") {
-      obj.hazards.push({ kind: "ball", pivot: built.pivot, ball: built.ball, amp: (o.p && o.p.amp) || 1.0, speed: (o.p && o.p.speed) || 1.3, r: 2.2, _v: new THREE.Vector3() });
+      obj.hazards.push({ kind: "ball", pivot: built.pivot, ball: built.ball, amp: (o.p && o.p.amp) || 1.0, speed: (o.p && o.p.speed) || 1.3, r: meshRadius(built.ball, 1.7), _v: new THREE.Vector3() });
     } else if (built.role === "boulder") {
-      obj.hazards.push({ kind: "boulder", group: built.group, ball: built.ball, z0: z, y, speed: (o.p && o.p.speed) || 11, span: (o.p && o.p.span) || 34, r: 2.0 });
+      obj.hazards.push({ kind: "boulder", group: built.group, ball: built.ball, z0: z, y, speed: (o.p && o.p.speed) || 11, span: (o.p && o.p.span) || 34, r: meshRadius(built.ball, 1.6) });
     } else if (built.role === "fan") {
       obj.hazards.push({ kind: "fan", disc: built.disc, x, z, dir: (o.p && o.p.dir) || "z", force: (o.p && o.p.force) || 22, range: (o.p && o.p.range) || 11 });
     } else if (built.role === "pad") {
@@ -605,9 +618,9 @@ function buildObjectLevel(def, index) {
     } else if (built.role === "sweeper") {
       obj.hazards.push({ kind: "sweeper", x, z, amp: (o.p && o.p.amp) || 5.5, speed: (o.p && o.p.speed) || 1.8, mesh: built.bar });
     } else if (built.role === "pillar") {
-      obj.hazards.push({ kind: "pillar", x, z, r: 1.5 });
+      obj.hazards.push({ kind: "pillar", x, z, r: meshRadius(built.group, 1.2) });
     } else if (built.role === "kill" || built.role === "saw") {
-      obj.hazards.push({ kind: "kill", x, z, r: built.role === "saw" ? 2.2 : 2.0 });
+      obj.hazards.push({ kind: "kill", x, z, r: meshRadius(built.model, built.role === "saw" ? 1.8 : 1.6) });
       if (built.role === "saw") obj.saws.push(built.group);
     } else if (built.role === "coin") {
       obj.coins.push(built.group);
@@ -626,6 +639,12 @@ function buildObjectLevel(def, index) {
       if (c) { obj.coins.push(c); placed++; }
     }
   }
+  // playfield X/Z extent (from walkable surfaces) — used to respawn anyone who
+  // wanders/gets flung off the side instead of letting them fall forever
+  obj.bounds = obj.walk.length ? obj.walk.reduce((b, a) => ({
+    minX: Math.min(b.minX, a.minX), maxX: Math.max(b.maxX, a.maxX),
+    minZ: Math.min(b.minZ, a.minZ), maxZ: Math.max(b.maxZ, a.maxZ),
+  }), { minX: Infinity, maxX: -Infinity, minZ: Infinity, maxZ: -Infinity }) : null;
   scene.add(group);
   level = { index, group, name: def.name || "Level " + index, obj, finishZ: obj.finish ? obj.finish.maxZ : maxZ + 6 };
 }
@@ -797,10 +816,15 @@ function hazardEffect(p, t) {
       const d = Math.hypot(dx, dz);
       if (d < h.r + 0.7 && p.pos.y < h.y + 3) knockback(p, dx, dz, 15, 7, t); // rolling boulder
     } else if (h.kind === "fan") {
-      // wind zone: steadily shove the player along the fan's direction while in range
+      // wind zone: a CAPPED steady shove. The old code added velocity every frame
+      // with no ceiling, compounding to 30-40 u/s and flinging you off the map
+      // (impossible to recover from). Now it eases your speed up to a fixed wind
+      // speed in the fan's direction — a push you can lean into, never a launch.
       const dx = p.pos.x - h.x, dz = p.pos.z - h.z;
       if (Math.hypot(dx, dz) < h.range) {
-        if (h.dir === "x") p.vel.x += h.force * 0.05; else p.vel.z += h.force * 0.05;
+        const WMAX = 6, step = h.force * 0.035;
+        if (h.dir === "x") { if (p.vel.x < WMAX) p.vel.x = Math.min(WMAX, p.vel.x + step); }
+        else { if (p.vel.z < WMAX) p.vel.z = Math.min(WMAX, p.vel.z + step); }
       }
     }
   }
@@ -963,11 +987,13 @@ function resetPlayer() {
   player.curChunk = -1;
 }
 
-function respawn() {
-  burstDust(player.pos, 16, 5, 0xff8a8a); // poof where you died
+function respawn(t) {
+  burstDust(player.pos, 12, 4, 0xff8a8a); // soft poof where you slipped off
   player.pos.copy(player.checkpoint);
+  player.pos.y += 0.4;                        // settle just above the ground, never clipped in
   player.vel.set(0, 0, 0);
-  kbFlash(); SFX.death(); addShake(0.5);
+  if (t != null) player.knockUntil = t + 0.6; // brief grace so a hazard can't instantly re-fling you
+  kbFlash(); SFX.land(); addShake(0.18);      // gentle: a soft landing + small shake (was a death sting + big shake)
 }
 
 let flashUntil = 0;
@@ -1306,8 +1332,11 @@ function stepPlayer(dt, t) {
   // footsteps while running on the ground
   if (player.grounded && Math.hypot(player.vel.x, player.vel.z) > 3) SFX.step();
 
-  if (hazardEffect(player, t)) { respawn(); return; } // touched a kill hazard
-  if (player.pos.y < VOID_Y) respawn();
+  if (hazardEffect(player, t)) { respawn(t); return; } // touched a kill hazard
+  // out of bounds → respawn promptly (no more falling forever): below the void, or
+  // off the side of the playfield (object levels know their X extent).
+  const ob = level && level.obj && level.obj.bounds;
+  if (player.pos.y < VOID_Y || (ob && (player.pos.x < ob.minX - 7 || player.pos.x > ob.maxX + 7))) respawn(t);
 
   collectCoins(); // grab any coins we touched this frame
 

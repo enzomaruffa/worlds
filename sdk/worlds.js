@@ -304,8 +304,9 @@
       return uniq([...me ? [me] : [], ...presence]);
     }
     function hostHandle() {
-      const r = roster().map((p) => p.handle).sort();
-      return r.length ? r[0] : null;
+      if (presence.length)
+        return presence[0].handle;
+      return me ? me.handle : null;
     }
     function isHost() {
       return !!me && hostHandle() === me.handle;

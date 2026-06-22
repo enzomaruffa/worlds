@@ -1150,12 +1150,15 @@ Respond with ONLY a JSON array, no prose, no markdown fences. Schema:
   $("btnReady").addEventListener("click", () => ROOM && ROOM.toggleReady());
   $("topicInput").addEventListener("input", (e) => { topic = e.target.value; });
   $("btnStart").addEventListener("click", () => {
+    // never fail silently — tell the player why nothing happened
+    if (!ROOM) { toast("Join or create a table first."); return; }
+    if (!isHost()) { toast("Only the host can start the game."); return; }
     const t = ($("topicInput").value || "").trim();
     if (!t) { toast("Pick a topic first."); $("topicInput").focus(); return; }
     topic = t;
     // ROOM.start() flips the room to "started" and fires onStart on every client;
     // the host then generates + writes the quiz in onRoomStart (below).
-    if (ROOM) ROOM.start();
+    ROOM.start();
   });
   $("btnNext").addEventListener("click", () => { if (game && game.phase === "reveal") hostAdvance(); });
   $("btnPlayAgain").addEventListener("click", () => backToLobby());
