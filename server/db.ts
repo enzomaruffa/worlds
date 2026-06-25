@@ -81,14 +81,52 @@ export async function initDb(): Promise<void> {
     await sql`CREATE INDEX IF NOT EXISTS events_scope ON events (site, collection, seq)`;
     ready = true;
     console.log("db: ready");
-    // events are only needed for the replay window — prune the rest hourly so the table stays small
-    const prune = () => sql`DELETE FROM events WHERE at < now() - make_interval(hours => ${EVENT_RETENTION_HOURS})`.catch(() => {});
-    prune();
-    setInterval(prune, 60 * 60 * 1000).unref?.();
+    startPrune();
   } catch (e) {
     ready = false;
-    console.warn(`db: unavailable (${(e as Error).message}) — db-backed APIs will 503`);
+    console.warn(`db: unavailable (${(e as Error).message}) — db-backed APIs will 503; reconnecting…`);
+  } finally {
+    startMonitor();   // self-heal across postgres restarts (and boot-before-postgres)
   }
+}
+
+// Run the hourly events prune exactly once (events are only needed for the replay
+// window, so the table stays small). Idempotent — safe to call on every reconnect.
+let pruneStarted = false;
+function startPrune(): void {
+  if (pruneStarted) return;
+  pruneStarted = true;
+  const prune = () => sql`DELETE FROM events WHERE at < now() - make_interval(hours => ${EVENT_RETENTION_HOURS})`.catch(() => {});
+  prune();
+  setInterval(prune, 60 * 60 * 1000).unref?.();
+}
+
+// Health monitor — ping postgres every few seconds and self-heal. Without this the
+// app latches `ready = false` on the first connection blip (it booted before
+// postgres was up, or postgres restarted) and serves 503s for every db-backed
+// route until the process is restarted by hand — which is exactly how the live
+// instance went dark after a postgres bounce.
+let monitorStarted = false;
+let dbChecking = false;
+function startMonitor(): void {
+  if (monitorStarted) return;
+  monitorStarted = true;
+  const tick = async () => {
+    if (dbChecking) return;
+    dbChecking = true;
+    try {
+      await sql`SELECT 1`;
+      if (!ready) await initDb();   // connection is back — re-migrate (idempotent) + flip ready
+    } catch (e) {
+      if (ready) {
+        ready = false;
+        console.warn(`db: unavailable (${(e as Error).message}) — db-backed APIs will 503; reconnecting…`);
+      }
+    } finally {
+      dbChecking = false;
+    }
+  };
+  setInterval(tick, 4000).unref?.();
 }
 
 // ---- in-process change feed (single-pod dev; PG LISTEN/NOTIFY when multi-pod) ----
