@@ -221,6 +221,19 @@ export function cloneModel(name, targetHeight, opts = {}) {
     c.receiveShadow = !!opts.receive;
     if (opts.tint) { c.material = c.material.clone(); c.material.color = new THREE.Color(opts.tint); }
   });
+  // Pin the model to its horizontal centre so a caller positioning it by (x,z) gets
+  // the visible mesh AT (x,z). Some GLBs have an off-centre pivot which, multiplied
+  // by the (large) auto-scale and a random spin, otherwise flings the mesh metres
+  // away from where it was placed — the "rocks spawning outside the plot" bug.
+  if (opts.recenter) {
+    const box = new THREE.Box3().setFromObject(m);
+    if (Number.isFinite(box.min.x)) {
+      const wrap = new THREE.Group();
+      m.position.set(-(box.min.x + box.max.x) / 2, 0, -(box.min.z + box.max.z) / 2);
+      wrap.add(m);
+      return wrap;
+    }
+  }
   return m;
 }
 

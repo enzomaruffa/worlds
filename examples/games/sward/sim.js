@@ -51,7 +51,9 @@ let fieldsDirty = true;
 export const featureRoots = [];
 
 let G = null, debrisRoots = [];
-const DEBRIS_KINDS = ["rocks", "rocks_smallA", "rocks_smallB", "stump_round", "log"];
+// rocks_smallA/B are flat, off-centre-pivot GLBs — height-scaling balloons them and
+// the off-centre pivot flings them off the plot, so debris uses only the clean models.
+const DEBRIS_KINDS = ["rocks", "stump_round", "log"];
 
 export const upgradeCost = (key) => {
   const u = UPGRADES[key]; const lvl = S.upgrades[key] || 0;
@@ -117,7 +119,7 @@ function unblockAround(x, z, r) {
 }
 
 function spawnDebris(x, z, kind, id) {
-  const m = W.cloneModel(kind, 1.7 + Math.random() * 1.3, { receive: true });
+  const m = W.cloneModel(kind, 1.7 + Math.random() * 1.3, { receive: true, recenter: true });
   if (!m) return null;
   m.position.set(x, W.heightAt(x, z), z);
   m.rotation.y = Math.random() * Math.PI * 2;
@@ -480,7 +482,7 @@ export function init(g, saved) {
     for (const d of saved.debris) {
       if (!insideGrowable(d.x, d.z)) continue;   // never render debris on land that isn't unlocked
       const id = d.id || ("deb-" + Math.random().toString(36).slice(2));
-      const m = W.cloneModel(d.kind, 2.0, { receive: true });
+      const m = W.cloneModel(d.kind, 2.0, { receive: true, recenter: true });
       if (m) { m.position.set(d.x, W.heightAt(d.x, d.z), d.z); m.rotation.y = Math.random() * 6.28; m.userData.pickId = id; m.userData.kind = "debris"; W.scene.add(m); debrisRoots.push(m); }
       S.debris.push({ id, x: d.x, z: d.z, kind: d.kind, mesh: m, reward: d.reward || 8 });
       blockAround(d.x, d.z, 1.6);
