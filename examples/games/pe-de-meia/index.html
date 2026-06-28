@@ -1,0 +1,1065 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Pé de Meia — Worlds</title>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0a0e0c;
+    --surface: #111714;
+    --surface-2: #18211c;
+    --surface-3: #1f2a23;
+    --border: #25332b;
+    --border-soft: #1c2620;
+    --accent: #34d399;
+    --accent-bright: #6ee7b7;
+    --accent-dim: rgba(52,211,153,.12);
+    --cyan: #22d3ee;
+    --gold: #fbbf24;
+    --red: #f87171;
+    --violet: #a78bfa;
+    --text: #e8f1ec;
+    --muted: #9fb3a8;
+    --muted-2: #6f857a;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background:
+      radial-gradient(1100px 560px at 50% -10%, rgba(52,211,153,.08), transparent 60%),
+      radial-gradient(900px 500px at 85% 115%, rgba(34,211,238,.05), transparent 60%),
+      var(--bg);
+    color: var(--text);
+    font-family: "Space Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, ui-sans-serif, sans-serif;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+  a { color: var(--accent-bright); }
+  .wrap { width: min(1180px, 95vw); margin: 0 auto; padding: 1.1rem 0 5rem; }
+
+  /* ── Header ─────────────────────────── */
+  header.top { display: flex; align-items: center; gap: .85rem; padding: .2rem 0 1rem; border-bottom: 1px solid var(--border-soft); margin-bottom: 1.1rem; }
+  .badge { width: 44px; height: 44px; border-radius: 12px; flex: none; display: grid; place-items: center; background: linear-gradient(160deg, #1c2c22, #0c120e); border: 1px solid var(--border); box-shadow: 0 0 0 1px rgba(52,211,153,.10) inset; }
+  .badge svg { width: 22px; height: 22px; }
+  .titles h1 { margin: 0; font-size: 1.2rem; letter-spacing: -.01em; font-weight: 700; }
+  .titles h1 .accent { color: var(--accent); }
+  .titles p { margin: .14rem 0 0; font-size: .76rem; color: var(--muted-2); }
+  .who { margin-left: auto; display: flex; align-items: center; gap: .55rem; }
+  .avatars { display: flex; }
+  .avatars .av { width: 28px; height: 28px; border-radius: 50%; margin-left: -8px; border: 2px solid var(--bg); display: grid; place-items: center; font-size: .7rem; font-weight: 700; color: #06281c; background: var(--accent); object-fit: cover; }
+  .who .lbl { font-size: .72rem; color: var(--muted-2); white-space: nowrap; }
+
+  /* ── Tabs ───────────────────────────── */
+  .tabs { display: flex; gap: .4rem; margin-bottom: 1.2rem; flex-wrap: wrap; }
+  .tab { padding: .52rem 1.05rem; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); color: var(--muted); cursor: pointer; font-size: .88rem; font-weight: 600; font-family: inherit; transition: .15s; }
+  .tab:hover { border-color: var(--muted-2); color: var(--text); }
+  .tab.active { background: var(--accent-dim); border-color: var(--accent); color: var(--accent-bright); }
+  .view { display: none; }
+  .view.active { display: block; }
+
+  /* ── Cards / layout ─────────────────── */
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 18px; margin-bottom: 16px; }
+  .card h2 { font-size: .72rem; font-weight: 600; color: var(--muted); margin: 0 0 14px; text-transform: uppercase; letter-spacing: .08em; }
+  .card h2 .sub { text-transform: none; letter-spacing: 0; color: var(--muted-2); font-weight: 400; }
+  .grid-2 { display: grid; grid-template-columns: 360px 1fr; gap: 16px; align-items: start; }
+  @media (max-width: 920px) { .grid-2 { grid-template-columns: 1fr; } }
+
+  /* ── Inputs ─────────────────────────── */
+  label.fld { display: block; font-size: .72rem; color: var(--muted); margin-bottom: 5px; }
+  input[type=number], input[type=text], select { width: 100%; padding: 9px 11px; border: 1px solid var(--border); border-radius: 9px; background: var(--bg); color: var(--text); font-size: .88rem; font-family: inherit; }
+  input:focus, select:focus { outline: none; border-color: var(--accent); }
+  .row { display: grid; gap: 10px; }
+  .row.c2 { grid-template-columns: 1fr 1fr; }
+  .row.c3 { grid-template-columns: 1fr 1fr 1fr; }
+  .fldwrap { margin-bottom: 12px; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  .rangehead { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 2px; }
+  .rangehead .val { font-size: .92rem; font-weight: 700; color: var(--accent-bright); }
+
+  button.btn { padding: 9px 14px; border-radius: 10px; border: 1px solid var(--accent); background: var(--accent); color: #06281c; cursor: pointer; font-size: .88rem; font-weight: 700; font-family: inherit; transition: .15s; }
+  button.btn:hover { background: var(--accent-bright); }
+  button.btn.ghost { background: transparent; color: var(--accent-bright); }
+  button.btn.ghost:hover { background: var(--accent-dim); }
+  button.btn.wide { width: 100%; }
+  button.mini { padding: 4px 9px; border-radius: 7px; border: 1px solid var(--border); background: transparent; color: var(--muted); cursor: pointer; font-size: .76rem; font-family: inherit; }
+  button.mini:hover { border-color: var(--muted-2); color: var(--text); }
+
+  /* ── tooltip ────────────────────────── */
+  .tip { display: inline-grid; place-items: center; width: 15px; height: 15px; border-radius: 50%; border: 1px solid var(--muted-2); color: var(--muted); font-size: .62rem; font-weight: 700; cursor: help; position: relative; margin-left: 4px; vertical-align: middle; }
+  .tip:hover { border-color: var(--accent); color: var(--accent-bright); }
+  .tip .box { display: none; position: absolute; bottom: 130%; left: 50%; transform: translateX(-50%); width: 240px; padding: 10px 12px; background: #0a100d; border: 1px solid var(--accent); border-radius: 10px; font-size: .76rem; font-weight: 400; line-height: 1.45; color: var(--text); text-transform: none; letter-spacing: 0; z-index: 50; box-shadow: 0 10px 30px rgba(0,0,0,.5); text-align: left; }
+  .tip:hover .box { display: block; }
+
+  /* ── Summary cards ──────────────────── */
+  .summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+  .stat { background: var(--surface-2); border: 1px solid var(--border-soft); border-radius: 12px; padding: 13px 14px; }
+  .stat .v { font-size: 1.3rem; font-weight: 700; color: var(--text); letter-spacing: -.01em; }
+  .stat .v.green { color: var(--accent-bright); }
+  .stat .v.red { color: var(--red); }
+  .stat .v.gold { color: var(--gold); }
+  .stat .k { font-size: .68rem; color: var(--muted); margin-top: 3px; }
+  .stat .hint { font-size: .66rem; color: var(--muted-2); margin-top: 5px; line-height: 1.35; }
+
+  .chart { height: 340px; }
+  .chart.sm { height: 280px; }
+
+  /* ── Investment rows ────────────────── */
+  .invlist { display: flex; flex-direction: column; gap: 9px; }
+  .invrow { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 11px; background: var(--surface-2); }
+  .invrow .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+  .invrow .nm { flex: 1; min-width: 0; }
+  .invrow .nm .t { font-size: .88rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .invrow .nm .d { font-size: .7rem; color: var(--muted-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .invrow .amt { font-size: .76rem; color: var(--muted); text-align: right; white-space: nowrap; }
+
+  /* ── Tables ─────────────────────────── */
+  .tblwrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: .8rem; }
+  th, td { padding: 9px 11px; text-align: right; border-bottom: 1px solid var(--border-soft); white-space: nowrap; }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--muted); font-weight: 600; font-size: .68rem; text-transform: uppercase; letter-spacing: .05em; }
+  tbody tr:hover { background: rgba(255,255,255,.02); }
+  .win { color: var(--accent-bright); font-weight: 700; }
+  .dotin { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 7px; vertical-align: middle; }
+  .best-tag { font-size: .6rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--accent); border: 1px solid var(--accent); border-radius: 5px; padding: 1px 5px; margin-left: 7px; }
+
+  /* ── Learn cards ────────────────────── */
+  .cardgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(252px, 1fr)); gap: 12px; }
+  .learn { background: var(--surface-2); border: 1px solid var(--border-soft); border-left: 3px solid var(--accent); border-radius: 11px; padding: 15px 16px; }
+  .learn h3 { margin: 0 0 7px; font-size: .96rem; font-weight: 600; }
+  .learn p { margin: 0; font-size: .82rem; color: var(--muted); line-height: 1.55; }
+  .learn .tags { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px; }
+  .learn .tag { font-size: .66rem; padding: 2px 8px; border-radius: 6px; background: var(--surface-3); color: var(--muted); border: 1px solid var(--border-soft); }
+  .learn .tag.lo { color: var(--accent-bright); }
+  .learn .tag.hi { color: var(--gold); }
+
+  .bigline { font-size: 1.02rem; line-height: 1.65; margin: 4px 0 0; }
+  .bigline b.g { color: var(--accent-bright); }
+  .bigline b.j { color: var(--gold); }
+  .pills { display: flex; flex-wrap: wrap; gap: 7px; margin: 10px 0; }
+  .pill { padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-2); color: var(--muted); cursor: pointer; font-size: .78rem; font-family: inherit; }
+  .pill:hover { border-color: var(--accent); color: var(--accent-bright); }
+
+  .ai-out { margin-top: 12px; padding: 14px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--border-soft); font-size: .9rem; line-height: 1.6; white-space: pre-wrap; }
+  .ai-out:empty { display: none; }
+  .ai-row { display: flex; gap: 8px; }
+  .ai-row input { flex: 1; }
+
+  .muted { color: var(--muted); }
+  .tiny { font-size: .72rem; }
+  .center { text-align: center; }
+  footer.foot { text-align: center; font-size: .72rem; color: var(--muted-2); margin-top: 1.5rem; line-height: 1.6; }
+  .disc { max-width: 660px; margin: .5rem auto 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="badge">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#6ee7b7" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l5-5 4 4 8-9"/><path d="M21 7v5h-5"/></svg>
+    </div>
+    <div class="titles">
+      <h1>Pé de <span class="accent">Meia</span></h1>
+      <p>Simulador de investimentos para planejar a dois</p>
+    </div>
+    <div class="who">
+      <div class="avatars" id="avatars"></div>
+      <span class="lbl" id="whoLbl"></span>
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab" data-view="aprender">Aprender</button>
+    <button class="tab active" data-view="portfolio">Portfólio</button>
+    <button class="tab" data-view="comparar">Comparar</button>
+  </nav>
+
+  <!-- ════════════════ APRENDER ════════════════ -->
+  <section class="view" id="view-aprender">
+    <div class="card">
+      <h2>Juros compostos <span class="sub">— como o dinheiro cresce com o tempo</span></h2>
+      <div class="grid-2">
+        <div>
+          <div class="fldwrap">
+            <div class="rangehead"><label class="fld" style="margin:0">Valor inicial</label><span class="val" id="eInitVal"></span></div>
+            <input type="range" id="eInit" min="0" max="50000" step="500" value="1000">
+          </div>
+          <div class="fldwrap">
+            <div class="rangehead"><label class="fld" style="margin:0">Aporte mensal</label><span class="val" id="eMonVal"></span></div>
+            <input type="range" id="eMon" min="0" max="5000" step="50" value="300">
+          </div>
+          <div class="fldwrap">
+            <div class="rangehead"><label class="fld" style="margin:0">Rende por ano</label><span class="val" id="eRateVal"></span></div>
+            <input type="range" id="eRate" min="0" max="20" step="0.5" value="10">
+          </div>
+          <div class="fldwrap">
+            <div class="rangehead"><label class="fld" style="margin:0">Período</label><span class="val" id="eYrVal"></span></div>
+            <input type="range" id="eYr" min="1" max="40" step="1" value="20">
+          </div>
+          <p class="bigline" id="eStory"></p>
+        </div>
+        <div>
+          <div id="eChart" class="chart"></div>
+          <p class="tiny muted center" style="margin-top:6px">
+            Em verde o que você <b>aportou</b>, em amarelo o que os <b>juros</b> renderam. A linha tracejada é o mesmo dinheiro <b>sem render</b>.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Tire suas dúvidas <span class="sub">— em linguagem simples, sobre qualquer conceito</span></h2>
+      <div class="pills" id="aiPills"></div>
+      <div class="ai-row">
+        <input type="text" id="aiInput" placeholder="Ex: por que não deixar tudo na poupança?">
+        <button class="btn" id="aiAsk">Perguntar</button>
+      </div>
+      <div class="ai-out" id="aiOut"></div>
+      <p class="tiny muted" style="margin:.6rem 0 0">Respostas geradas por IA, em linguagem simples. Conteúdo educativo — não é recomendação de investimento.</p>
+    </div>
+
+    <div class="card">
+      <h2>Conceitos, em linguagem simples</h2>
+      <div class="cardgrid" id="conceptCards"></div>
+    </div>
+
+    <div class="card">
+      <h2>Tipos de investimento</h2>
+      <div class="cardgrid" id="productCards"></div>
+    </div>
+  </section>
+
+  <!-- ════════════════ PORTFÓLIO ════════════════ -->
+  <section class="view active" id="view-portfolio">
+    <div class="grid-2">
+      <div>
+        <div class="card">
+          <h2>Premissas <span class="sub">— as taxas usadas na simulação</span></h2>
+          <div class="fldwrap">
+            <div class="rangehead">
+              <label class="fld" style="margin:0">Selic ao ano <span class="tip">?<span class="box">Taxa básica de juros da economia. Serve de referência para a renda fixa. Em meados de 2026 está em torno de 14,25%.</span></span></label>
+              <span class="val" id="aSelicVal"></span>
+            </div>
+            <input type="range" id="aSelic" min="2" max="20" step="0.25" value="14.25">
+          </div>
+          <div class="fldwrap">
+            <div class="rangehead">
+              <label class="fld" style="margin:0">Inflação (IPCA) ao ano <span class="tip">?<span class="box">A inflação anual. Seu investimento precisa render acima dela para você ganhar poder de compra.</span></span></label>
+              <span class="val" id="aIpcaVal"></span>
+            </div>
+            <input type="range" id="aIpca" min="0" max="12" step="0.25" value="4.5">
+          </div>
+          <div class="fldwrap">
+            <div class="rangehead">
+              <label class="fld" style="margin:0">Horizonte (anos) <span class="tip">?<span class="box">Por quanto tempo o dinheiro fica investido. Prazos maiores potencializam os juros compostos e reduzem a alíquota de IR.</span></span></label>
+              <span class="val" id="aYrVal"></span>
+            </div>
+            <input type="range" id="aYr" min="1" max="40" step="1" value="15">
+          </div>
+        </div>
+
+        <div class="card">
+          <h2 id="invFormTitle">Adicionar investimento</h2>
+          <div class="fldwrap">
+            <label class="fld">Apelido</label>
+            <input type="text" id="fName" placeholder="Ex: Reserva de emergência">
+          </div>
+          <div class="fldwrap">
+            <label class="fld">Tipo</label>
+            <select id="fProduct"></select>
+          </div>
+          <p class="tiny muted" id="fProductDesc" style="margin:-6px 0 12px"></p>
+          <div class="row c2">
+            <div class="fldwrap">
+              <label class="fld">Aporte inicial <span class="tip">?<span class="box">Valor investido agora, de uma vez.</span></span></label>
+              <input type="number" id="fInit" value="1000" min="0" step="100">
+            </div>
+            <div class="fldwrap">
+              <label class="fld">Aporte mensal <span class="tip">?<span class="box">Valor adicionado todo mês. É o principal motor do longo prazo.</span></span></label>
+              <input type="number" id="fMonthly" value="300" min="0" step="50">
+            </div>
+          </div>
+          <div id="fRateFields"></div>
+          <div class="fldwrap">
+            <label class="fld">Aumento anual do aporte (%) <span class="tip">?<span class="box">Opcional: aumenta o aporte mensal por essa % a cada ano — por exemplo, acompanhando o salário.</span></span></label>
+            <input type="number" id="fGrowth" value="0" min="0" step="1">
+          </div>
+          <button class="btn wide" id="fSubmit">Adicionar à carteira</button>
+          <button class="btn ghost wide" id="fCancel" style="margin-top:8px; display:none">Cancelar edição</button>
+        </div>
+      </div>
+
+      <div>
+        <div class="card">
+          <h2>Resultado da carteira <span class="sub" id="horizonLbl"></span></h2>
+          <div class="summary" id="pSummary"></div>
+        </div>
+        <div class="card">
+          <h2>Investimentos</h2>
+          <div class="invlist" id="invList"></div>
+          <p class="tiny muted center" id="invEmpty" style="display:none">Nenhum investimento ainda. Adicione o primeiro ao lado.</p>
+        </div>
+        <div class="card">
+          <h2>Evolução do patrimônio</h2>
+          <div id="pChart" class="chart"></div>
+        </div>
+        <div class="grid-2" style="grid-template-columns:1fr 1fr">
+          <div class="card">
+            <h2>Aportes × rendimento</h2>
+            <div id="pBreak" class="chart sm"></div>
+          </div>
+          <div class="card">
+            <h2>Composição por investimento</h2>
+            <div id="pDonut" class="chart sm"></div>
+          </div>
+        </div>
+        <div class="card">
+          <h2>Detalhe por investimento</h2>
+          <div class="tblwrap"><table id="pTable"></table></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ════════════════ COMPARAR ════════════════ -->
+  <section class="view" id="view-comparar">
+    <div class="card">
+      <h2>Para o mesmo aporte, onde rende mais? <span class="sub">— valores líquidos, já com impostos e taxas</span></h2>
+      <div class="row c3" style="max-width:620px">
+        <div class="fldwrap">
+          <label class="fld">Aporte inicial</label>
+          <input type="number" id="cInit" value="5000" min="0" step="500">
+        </div>
+        <div class="fldwrap">
+          <label class="fld">Aporte mensal</label>
+          <input type="number" id="cMonthly" value="500" min="0" step="50">
+        </div>
+        <div class="fldwrap">
+          <label class="fld">Período (anos)</label>
+          <input type="number" id="cYears" value="10" min="1" max="40" step="1">
+        </div>
+      </div>
+      <p class="tiny muted" id="cAssumLbl" style="margin:0 0 4px"></p>
+    </div>
+    <div class="card">
+      <h2>Valor líquido no final <span class="sub">— em poder de compra de hoje (descontada a inflação)</span></h2>
+      <div id="cChart" class="chart"></div>
+    </div>
+    <div class="card">
+      <h2>Comparativo completo</h2>
+      <div class="tblwrap"><table id="cTable"></table></div>
+    </div>
+  </section>
+
+  <footer class="foot">
+    Pé de Meia · um app no Worlds para planejar investimentos a dois
+    <p class="disc tiny">Ferramenta educativa. As premissas são editáveis e o futuro é incerto — rentabilidade passada não garante rentabilidade futura. Não constitui recomendação de investimento. Regras de IR, custódia e produtos conferidas em jun/2026.</p>
+  </footer>
+</div>
+
+<script src="/worlds.js"></script>
+<script>
+(() => {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const SDK = (typeof window !== "undefined" && window.worlds) ? window.worlds : null;
+
+  // ════════════════════════════════════════════════════════════
+  //  DOMÍNIO: produtos, impostos e taxas (conferido jun/2026)
+  // ════════════════════════════════════════════════════════════
+  const CUSTODY = 0.0020;          // taxa de custódia B3: 0,20% a.a.
+  const SELIC_EXEMPT = 10000;      // Tesouro Selic: 1ºs R$10k isentos de custódia
+
+  // IR renda fixa (regressivo, sobre o lucro) — tabela em vigor em 2026
+  function irFixed(months) {
+    if (months <= 6) return 0.225;   // até 180 dias
+    if (months <= 12) return 0.20;   // 181–360
+    if (months <= 24) return 0.175;  // 361–720
+    return 0.15;                     // > 720 dias
+  }
+  // IR previdência regressivo (VGBL/PGBL, sobre o lucro no VGBL)
+  function irPrev(months) {
+    const y = months / 12;
+    if (y < 2) return 0.35;
+    if (y < 4) return 0.30;
+    if (y < 6) return 0.25;
+    if (y < 8) return 0.20;
+    if (y < 10) return 0.15;
+    return 0.10;                      // 10% após 10 anos
+  }
+
+  const PRODUCTS = {
+    selic: {
+      label: "Tesouro Selic", color: "#34d399", kind: "fixed", index: "selic", custody: "selic",
+      blurb: "Acompanha a Selic e quase não oscila. Ideal para a reserva de emergência.",
+      eli5: "Acompanha a taxa Selic e quase não oscila. Como você resgata a qualquer momento sem perder valor, é a escolha natural para a reserva de emergência.",
+      serve: "Reserva de emergência", risk: "lo", riskTxt: "risco baixíssimo",
+      fields: [{ k: "spread", label: "Ágio/deságio sobre a Selic (% a.a.)", def: 0, step: 0.05, tip: "Costuma ficar próximo de zero — pode render um pouco acima ou abaixo da Selic." }]
+    },
+    reserva: {
+      label: "Tesouro Reserva", color: "#22d3ee", kind: "fixed", index: "selic", custody: "selic",
+      blurb: "Rende como o Selic, sem oscilação de preço no caminho.",
+      eli5: "Lançado em 2026. Rende como o Tesouro Selic, mas sem marcação a mercado — o valor não oscila no caminho. Deixa a reserva ainda mais estável.",
+      serve: "Reserva sem oscilação", risk: "lo", riskTxt: "risco baixíssimo",
+      fields: [{ k: "spread", label: "Ágio/deságio sobre a Selic (% a.a.)", def: 0, step: 0.05, tip: "Acompanha a Selic de perto." }]
+    },
+    prefixado: {
+      label: "Tesouro Prefixado", color: "#fbbf24", kind: "fixed", index: "pre", custody: "std",
+      blurb: "Taxa travada na compra — você já sabe quanto terá no vencimento.",
+      eli5: "Você trava a taxa no momento da compra e já sabe quanto terá no vencimento. Vale quando se espera queda dos juros. Se resgatar antes do prazo, o valor pode oscilar.",
+      serve: "Apostar em queda de juros", risk: "mid", riskTxt: "risco baixo até o vencimento",
+      fields: [{ k: "rate", label: "Taxa contratada (% a.a.)", def: 13.5, step: 0.25, tip: "A taxa fixa contratada. Em 2026, prefixados ficavam em torno de 13–14% a.a." }]
+    },
+    ipca: {
+      label: "Tesouro IPCA+", color: "#a78bfa", kind: "fixed", index: "ipca", custody: "std",
+      blurb: "Rende a inflação mais uma taxa fixa. Ganho real garantido, para o longo prazo.",
+      eli5: "Rende a inflação (IPCA) mais uma taxa fixa. Garante ganho acima da inflação, qualquer que seja ela — indicado para objetivos de longo prazo, como aposentadoria e imóvel.",
+      serve: "Longo prazo, proteção contra inflação", risk: "mid", riskTxt: "risco baixo até o vencimento",
+      fields: [{ k: "realRate", label: "Taxa real, acima da inflação (% a.a.)", def: 7, step: 0.25, tip: "A parte fixa acima do IPCA. Em 2026, em torno de IPCA + 7%." }]
+    },
+    rendaplus: {
+      label: "Tesouro RendA+", color: "#f97316", kind: "fixed", index: "ipca", custody: "renda",
+      blurb: "IPCA+ para aposentadoria: acumula e paga renda mensal por 20 anos.",
+      eli5: "Um IPCA+ voltado à aposentadoria: você acumula até a data escolhida e depois recebe uma renda mensal por 20 anos. Levado até o fim, não tem taxa de custódia.",
+      serve: "Renda na aposentadoria", risk: "mid", riskTxt: "risco baixo, longo prazo",
+      fields: [{ k: "realRate", label: "Taxa real acima da inflação (% a.a.)", def: 7, step: 0.25, tip: "A parte fixa acima do IPCA, como no IPCA+." }]
+    },
+    educaplus: {
+      label: "Tesouro Educa+", color: "#38bdf8", kind: "fixed", index: "ipca", custody: "renda",
+      blurb: "IPCA+ para educação: acumula e paga renda mensal por 5 anos.",
+      eli5: "Mesma lógica do RendA+, voltado à educação: acumula e depois paga uma renda mensal por 5 anos, na fase da faculdade.",
+      serve: "Faculdade dos filhos", risk: "mid", riskTxt: "risco baixo, longo prazo",
+      fields: [{ k: "realRate", label: "Taxa real acima da inflação (% a.a.)", def: 7, step: 0.25, tip: "A parte fixa acima do IPCA." }]
+    },
+    vgbl: {
+      label: "VGBL (previdência)", color: "#ec4899", kind: "prev", index: "custom", custody: "none",
+      blurb: "Previdência: IR cai a 10% após 10 anos, só sobre o rendimento. Longo prazo.",
+      eli5: "Previdência privada. Na tabela regressiva, a alíquota de IR cai até 10% após 10 anos e incide só sobre o rendimento, sem come-cotas. Indicado para prazos muito longos — fique atento à taxa de administração.",
+      serve: "Prazo muito longo e sucessão", risk: "mid", riskTxt: "depende dos ativos do fundo",
+      fields: [
+        { k: "rate", label: "Rendimento bruto do fundo (% a.a.)", def: 11, step: 0.25, tip: "Quanto o fundo rende ao ano, antes das taxas. Use algo próximo da renda fixa em que ele investe." },
+        { k: "adminFee", label: "Taxa de administração (% a.a.)", def: 0.8, step: 0.1, tip: "Cobrada ao ano sobre o total. Acima de 1,5% pesa bastante; procure abaixo de 1%." },
+        { k: "carreg", label: "Taxa de carregamento (% por aporte)", def: 0, step: 0.5, tip: "Cobrança sobre cada aporte. Bons planos cobram 0%." }
+      ]
+    },
+    poupanca: {
+      label: "Poupança", color: "#94a3b8", kind: "savings", index: "poup", custody: "none",
+      blurb: "Isenta de IR, mas rende pouco. Serve como referência de comparação.",
+      eli5: "A mais conhecida do país. É isenta de IR e líquida, mas rende pouco: com a Selic acima de 8,5%, rende 0,5% ao mês (cerca de 6,2% ao ano). Costuma perder para o Tesouro Selic. Aqui serve como referência de comparação.",
+      serve: "Referência de comparação", risk: "lo", riskTxt: "risco baixíssimo",
+      fields: []
+    }
+  };
+  const PRODUCT_ORDER = ["selic", "reserva", "prefixado", "ipca", "rendaplus", "educaplus", "vgbl", "poupanca"];
+
+  // ── conversões de taxa ──
+  const annualToMonthly = (annualPct) => Math.pow(1 + annualPct / 100, 1 / 12) - 1;
+
+  function nominalAnnualPct(inv, macro) {
+    const p = PRODUCTS[inv.product];
+    if (p.index === "selic") return macro.selic + (Number(inv.spread) || 0);
+    if (p.index === "pre") return Number(inv.rate) || 0;
+    if (p.index === "ipca") return ((1 + macro.ipca / 100) * (1 + (Number(inv.realRate) || 0) / 100) - 1) * 100;
+    if (p.index === "custom") return Number(inv.rate) || 0;       // VGBL: bruto do fundo
+    if (p.index === "poup") return macro.selic > 8.5 ? (Math.pow(1.005, 12) - 1) * 100 : 0.7 * macro.selic;
+    return 0;
+  }
+
+  function monthlyFee(inv, balance) {
+    const p = PRODUCTS[inv.product];
+    let fee = 0;
+    if (p.custody === "std") fee += balance * CUSTODY / 12;
+    else if (p.custody === "selic") fee += Math.max(0, balance - SELIC_EXEMPT) * CUSTODY / 12;
+    // "renda" (RendA+/Educa+): isento se levado até o fim → 0 na acumulação
+    // "none" (VGBL/poupança): sem custódia B3
+    if (inv.product === "vgbl") fee += balance * (Number(inv.adminFee) || 0) / 100 / 12;
+    return fee;
+  }
+
+  // ════════════════════════════════════════════════════════════
+  //  MOTOR DE SIMULAÇÃO (por cohort, mês a mês)
+  // ════════════════════════════════════════════════════════════
+  // opts: { tax, fees } — desligados no explicador de juros compostos.
+  function simulate(inv, macro, opts) {
+    opts = opts || { tax: true, fees: true };
+    const N = Math.round(macro.years * 12);
+    const mRate = annualToMonthly(nominalAnnualPct(inv, macro));
+    const p = PRODUCTS[inv.product];
+    const carreg = inv.product === "vgbl" ? (Number(inv.carreg) || 0) / 100 : 0;
+    const growth = (Number(inv.growth) || 0) / 100;
+    const initial = Number(inv.initial) || 0;
+    const monthly = Number(inv.monthly) || 0;
+
+    let balance = 0, contributed = 0, feesPaid = 0, loadPaid = 0;
+    const cohorts = [];                 // {m, principal, value}
+    const balances = [], contribSeries = [];
+
+    function addContribution(gross, m) {
+      if (gross <= 0) return;
+      const invested = gross * (1 - carreg);
+      loadPaid += gross - invested;
+      cohorts.push({ m, principal: invested, value: invested });
+      balance += invested;
+      contributed += gross;             // o que saiu do bolso
+    }
+
+    addContribution(initial, 0);
+    balances.push(balance); contribSeries.push(contributed);
+
+    for (let m = 1; m <= N; m++) {
+      // aporte do mês (com reajuste anual opcional)
+      if (monthly > 0) {
+        const factor = Math.pow(1 + growth, Math.floor((m - 1) / 12));
+        addContribution(monthly * factor, m);
+      }
+      // rende
+      const grow = 1 + mRate;
+      balance *= grow;
+      for (const c of cohorts) c.value *= grow;
+      // taxas
+      if (opts.fees) {
+        const fee = monthlyFee(inv, balance);
+        if (fee > 0 && balance > 0) {
+          const scale = (balance - fee) / balance;
+          balance -= fee; feesPaid += fee;
+          for (const c of cohorts) c.value *= scale;
+        }
+      }
+      balances.push(balance); contribSeries.push(contributed);
+    }
+
+    const gross = balance;
+    // imposto sobre o lucro, cohort a cohort (cada aporte tem sua idade)
+    let ir = 0;
+    if (opts.tax && p.kind !== "savings") {
+      for (const c of cohorts) {
+        const age = N - c.m;
+        const gain = Math.max(0, c.value - c.principal);
+        ir += gain * (p.kind === "prev" ? irPrev(age) : irFixed(age));
+      }
+    }
+    const net = gross - ir;
+    const realNet = net / Math.pow(1 + macro.ipca / 100, macro.years);
+    const netGain = net - contributed;
+    const irrAnnual = computeIRR(inv, macro, net, growth);
+
+    return { N, gross, ir, net, realNet, contributed, feesPaid, loadPaid, netGain, irrAnnual, balances, contribSeries, color: p.color };
+  }
+
+  // TIR (rentabilidade líquida anualizada) por bisseção sobre o fluxo de caixa
+  function computeIRR(inv, macro, finalNet, growth) {
+    const N = Math.round(macro.years * 12);
+    const cf = new Array(N + 1).fill(0);
+    cf[0] = -(Number(inv.initial) || 0);
+    const monthly = Number(inv.monthly) || 0;
+    for (let m = 1; m <= N; m++) cf[m] = -monthly * Math.pow(1 + growth, Math.floor((m - 1) / 12));
+    cf[N] += finalNet;
+    return irrFromCashflows(cf);
+  }
+  function irrFromCashflows(cf) {
+    const npv = (i) => cf.reduce((s, c, m) => s + c / Math.pow(1 + i, m), 0);
+    // bounds dentro de ±60%/mês para (1+i)^N não estourar/underflowar com N até 480
+    let lo = -0.6, hi = 0.6, flo = npv(lo), fhi = npv(hi);
+    if (!isFinite(flo) || !isFinite(fhi) || flo * fhi > 0) return null;
+    for (let k = 0; k < 100; k++) {
+      const mid = (lo + hi) / 2, fm = npv(mid);
+      if (Math.abs(fm) < 1e-6) { lo = hi = mid; break; }
+      if (flo * fm < 0) { hi = mid; fhi = fm; } else { lo = mid; flo = fm; }
+    }
+    const monthly = (lo + hi) / 2;
+    return (Math.pow(1 + monthly, 12) - 1) * 100;
+  }
+  function portfolioIRR(invs, macro, finalNet) {
+    const N = Math.round(macro.years * 12);
+    const cf = new Array(N + 1).fill(0);
+    invs.forEach((inv) => {
+      cf[0] -= (Number(inv.initial) || 0);
+      const g = (Number(inv.growth) || 0) / 100, mon = Number(inv.monthly) || 0;
+      for (let m = 1; m <= N; m++) cf[m] -= mon * Math.pow(1 + g, Math.floor((m - 1) / 12));
+    });
+    cf[N] += finalNet;
+    return irrFromCashflows(cf);
+  }
+
+  // ════════════════════════════════════════════════════════════
+  //  FORMATAÇÃO
+  // ════════════════════════════════════════════════════════════
+  const fmtBRL = (v) => "R$ " + Math.round(v).toLocaleString("pt-BR");
+  const fmtBRLk = (v) => {
+    const a = Math.abs(v);
+    if (a >= 1e6) return "R$ " + (v / 1e6).toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + "M";
+    if (a >= 1e3) return "R$ " + (v / 1e3).toLocaleString("pt-BR", { maximumFractionDigits: 0 }) + "k";
+    return "R$ " + Math.round(v);
+  };
+  const fmtPct = (v) => (v == null ? "—" : v.toLocaleString("pt-BR", { maximumFractionDigits: 2 }) + "%");
+  const clone = (o) => JSON.parse(JSON.stringify(o));
+
+  // ════════════════════════════════════════════════════════════
+  //  ESTADO + SINCRONIA (worlds.room compartilhado, ou localStorage)
+  // ════════════════════════════════════════════════════════════
+  const DEFAULT_PLAN = {
+    v: 1,
+    assumptions: { selic: 14.25, ipca: 4.5, years: 15 },
+    investments: [
+      { id: "a", name: "Reserva de emergência", product: "selic", initial: 5000, monthly: 300, growth: 0, spread: 0 },
+      { id: "b", name: "Aposentadoria", product: "ipca", initial: 2000, monthly: 500, growth: 0, realRate: 7 }
+    ]
+  };
+
+  let plan = clone(DEFAULT_PLAN);
+  let room = null;
+  let members = [];
+  let editingId = null;
+
+  function migrate(s) {
+    const out = clone(DEFAULT_PLAN);
+    if (s && s.assumptions) Object.assign(out.assumptions, s.assumptions);
+    if (s && Array.isArray(s.investments)) out.investments = s.investments;
+    return out;
+  }
+
+  async function commit() {
+    renderPortfolio();
+    if (room) {
+      for (let i = 0; i < 3; i++) {
+        const ok = await room.set(clone(plan));
+        if (ok !== false) break;
+        await room.refetch();
+      }
+    } else {
+      try { localStorage.setItem("peDeMeia", JSON.stringify(plan)); } catch (_) {}
+    }
+  }
+
+  function renderRoster() {
+    const list = SDK ? SDK.uniqByHandle(members || []) : [];
+    const box = $("avatars"), lbl = $("whoLbl");
+    box.innerHTML = "";
+    if (!list.length) { lbl.textContent = SDK ? "" : "modo solo"; return; }
+    list.slice(0, 5).forEach((m) => {
+      const a = document.createElement("div");
+      a.className = "av";
+      a.style.background = SDK ? SDK.colorFor(m.handle) : "var(--accent)";
+      a.textContent = (m.name || m.handle || "?").slice(0, 1).toUpperCase();
+      a.title = m.name || m.handle;
+      box.appendChild(a);
+    });
+    lbl.textContent = list.length === 1 ? "só você" : list.length + " participantes";
+  }
+
+  async function initSync() {
+    if (SDK && SDK.room) {
+      try {
+        room = SDK.room("plano", {
+          initial: () => clone(DEFAULT_PLAN),
+          onChange: (s) => {
+            members = s.members || [];
+            if (s.state) plan = migrate(s.state);
+            renderRoster();
+            syncAssumptionInputs();
+            renderPortfolio();
+          }
+        });
+        await room.ready;
+        if (room.state) plan = migrate(room.state);
+        members = room.members || [];
+      } catch (e) { console.warn("[pe-de-meia] room indisponível, modo solo", e); room = null; }
+    }
+    if (!room) {
+      try { const saved = localStorage.getItem("peDeMeia"); if (saved) plan = migrate(JSON.parse(saved)); } catch (_) {}
+    }
+    renderRoster();
+    syncAssumptionInputs();
+    renderPortfolio();
+  }
+
+  // ════════════════════════════════════════════════════════════
+  //  TABS
+  // ════════════════════════════════════════════════════════════
+  document.querySelectorAll(".tab").forEach((t) => {
+    t.addEventListener("click", () => {
+      document.querySelectorAll(".tab").forEach((x) => x.classList.remove("active"));
+      document.querySelectorAll(".view").forEach((x) => x.classList.remove("active"));
+      t.classList.add("active");
+      $("view-" + t.dataset.view).classList.add("active");
+      setTimeout(() => { Object.values(charts).forEach((c) => c && c.resize()); }, 30);
+      if (t.dataset.view === "comparar") renderCompare();
+      if (t.dataset.view === "aprender") renderExplainer();
+    });
+  });
+
+  // ════════════════════════════════════════════════════════════
+  //  CHARTS (echarts, init lazy)
+  // ════════════════════════════════════════════════════════════
+  const charts = {};
+  const ECHARTS = typeof echarts !== "undefined" ? echarts : null;
+  function chart(id) {
+    if (!ECHARTS) return null;
+    if (!charts[id]) charts[id] = ECHARTS.init($(id));
+    return charts[id];
+  }
+  const AXIS = {
+    line: { lineStyle: { color: "#25332b" } },
+    label: { color: "#6f857a" },
+    split: { lineStyle: { color: "#1c2620" } }
+  };
+  function baseTooltip(extra) {
+    return Object.assign({
+      trigger: "axis",
+      backgroundColor: "#0a100d", borderColor: "#25332b",
+      textStyle: { color: "#e8f1ec", fontSize: 12 }
+    }, extra || {});
+  }
+  function yearLabels(N) {
+    return Array.from({ length: N + 1 }, (_, i) => (i % 12 === 0 ? "Ano " + (i / 12) : ""));
+  }
+  window.addEventListener("resize", () => Object.values(charts).forEach((c) => c && c.resize()));
+
+  // ════════════════════════════════════════════════════════════
+  //  APRENDER — explicador de juros compostos
+  // ════════════════════════════════════════════════════════════
+  function renderExplainer() {
+    const init = +$("eInit").value, mon = +$("eMon").value, rate = +$("eRate").value, yr = +$("eYr").value;
+    $("eInitVal").textContent = fmtBRL(init);
+    $("eMonVal").textContent = fmtBRL(mon) + "/mês";
+    $("eRateVal").textContent = rate.toLocaleString("pt-BR") + "%";
+    $("eYrVal").textContent = yr + (yr === 1 ? " ano" : " anos");
+
+    const N = yr * 12, rM = annualToMonthly(rate), rSimpleM = rate / 100 / 12;
+    let comp = init, principal = init, simpleAcc = 0;
+    const compArr = [init], prinArr = [init], simpleArr = [init];
+    for (let m = 1; m <= N; m++) {
+      comp = comp * (1 + rM) + mon;
+      simpleAcc += principal * rSimpleM;   // juros simples sobre o principal acumulado
+      principal += mon;
+      compArr.push(comp); prinArr.push(principal); simpleArr.push(principal + simpleAcc);
+    }
+    const totalContrib = principal, juros = comp - principal;
+    const vsSimple = comp - simpleArr[simpleArr.length - 1];
+
+    $("eStory").innerHTML =
+      `Em <b>${yr} ${yr === 1 ? "ano" : "anos"}</b> você aporta <b class="g">${fmtBRL(totalContrib)}</b>. ` +
+      `No fim, são <b class="g">${fmtBRL(comp)}</b> — os juros somam <b class="j">${fmtBRL(juros)}</b>.` +
+      (vsSimple > 1 ? `<br><span class="tiny muted">Desse total, ${fmtBRL(vsSimple)} vêm do efeito composto (juros rendendo sobre juros), acima do que juros simples renderiam. Quanto maior o prazo, maior essa diferença.</span>` : "");
+
+    const c = chart("eChart"); if (!c) return;
+    c.setOption({
+      tooltip: baseTooltip({ formatter: (ps) => {
+        const m = ps[0].dataIndex; let h = `<b>Ano ${(m / 12).toFixed(1)}</b><br>`;
+        ps.forEach((p) => { h += `<span style="color:${p.color}">●</span> ${p.seriesName}: ${fmtBRL(p.value)}<br>`; });
+        return h;
+      }}),
+      legend: { data: ["Aportado", "Juros", "Sem render", "Juros simples"], textStyle: { color: "#9fb3a8" }, bottom: 0, icon: "roundRect" },
+      grid: { left: 56, right: 16, top: 16, bottom: 46 },
+      xAxis: { type: "category", data: yearLabels(N), axisLine: AXIS.line, axisLabel: Object.assign({ interval: 11 }, AXIS.label), axisTick: { show: false } },
+      yAxis: { type: "value", axisLine: { show: false }, axisLabel: Object.assign({ formatter: fmtBRLk }, AXIS.label), splitLine: { lineStyle: AXIS.split } },
+      series: [
+        { name: "Aportado", type: "line", stack: "tot", areaStyle: { color: "rgba(52,211,153,.5)" }, lineStyle: { width: 0 }, symbol: "none", data: prinArr, itemStyle: { color: "#34d399" } },
+        { name: "Juros", type: "line", stack: "tot", areaStyle: { color: "rgba(251,191,36,.42)" }, lineStyle: { width: 0 }, symbol: "none", data: compArr.map((v, i) => v - prinArr[i]), itemStyle: { color: "#fbbf24" } },
+        { name: "Sem render", type: "line", symbol: "none", data: prinArr, lineStyle: { color: "#6f857a", width: 1.5, type: "dashed" }, itemStyle: { color: "#6f857a" } },
+        { name: "Juros simples", type: "line", symbol: "none", data: simpleArr, lineStyle: { color: "#22d3ee", width: 1.5, type: [6, 4] }, itemStyle: { color: "#22d3ee" } }
+      ]
+    }, true);
+  }
+  ["eInit", "eMon", "eRate", "eYr"].forEach((id) => $(id).addEventListener("input", renderExplainer));
+
+  // ── conceito cards + product cards ──
+  const CONCEPTS = [
+    { t: "Juros compostos", p: "Os juros de um período passam a render junto com o valor principal no período seguinte. O crescimento começa devagar e acelera com o tempo — por isso o prazo importa tanto quanto o valor." },
+    { t: "Inflação (IPCA)", p: "É a alta geral dos preços. Com o tempo, o mesmo dinheiro compra menos. Para ganhar de verdade, o investimento precisa render acima da inflação." },
+    { t: "Selic", p: "A taxa básica de juros da economia. Serve de referência para boa parte da renda fixa: quando ela sobe, esses investimentos tendem a render mais." },
+    { t: "Nominal × real", p: "O retorno nominal é o número cheio. O real é o que sobra depois de descontar a inflação — o ganho de poder de compra. É o real que mostra se você ficou mais rico." },
+    { t: "Imposto regressivo", p: "Na renda fixa, o IR incide só sobre o lucro e cai com o tempo: de 22,5% (até 6 meses) a 15% (acima de 2 anos). Quanto mais tempo investido, menor a alíquota." },
+    { t: "Taxa de custódia", p: "Tarifa da B3 de 0,20% ao ano para manter seus títulos do Tesouro. No Tesouro Selic, os primeiros R$ 10 mil são isentos." },
+    { t: "Come-cotas", p: "Antecipação semestral de IR que ocorre em alguns fundos. No Tesouro Direto não existe: o imposto só é cobrado no resgate." },
+    { t: "Diversificação", p: "Distribuir o dinheiro entre objetivos e tipos diferentes reduz risco. Uma parte líquida para emergências, outra de longo prazo rendendo mais." }
+  ];
+  function renderConcepts() {
+    $("conceptCards").innerHTML = CONCEPTS.map((c) =>
+      `<div class="learn"><h3>${c.t}</h3><p>${c.p}</p></div>`).join("");
+  }
+  function renderProductCards() {
+    $("productCards").innerHTML = PRODUCT_ORDER.map((k) => {
+      const p = PRODUCTS[k];
+      const tagcls = p.risk === "lo" ? "lo" : (p.risk === "hi" ? "hi" : "");
+      return `<div class="learn" style="border-left-color:${p.color}"><h3>${p.label}</h3><p>${p.eli5}</p>` +
+        `<div class="tags"><span class="tag ${tagcls}">${p.riskTxt}</span><span class="tag">${p.serve}</span></div></div>`;
+    }).join("");
+  }
+
+  // ── assistente (IA) ──
+  const AI_SUGGEST = ["O que é Tesouro Selic?", "Vale a pena VGBL?", "Por que não deixar tudo na poupança?", "IPCA+ ou prefixado?", "O que é juros compostos?"];
+  function renderAiPills() {
+    $("aiPills").innerHTML = AI_SUGGEST.map((q) => `<button class="pill" data-q="${SDK && SDK.esc ? SDK.esc(q) : q}">${q}</button>`).join("");
+    document.querySelectorAll("#aiPills .pill").forEach((b) => b.addEventListener("click", () => { $("aiInput").value = b.dataset.q; askAi(); }));
+  }
+  const AI_SYS = "Você é um educador financeiro brasileiro, claro e didático. Explique como se a pessoa estivesse começando a investir agora: linguagem simples, frases curtas, analogias do dia a dia quando ajudarem, sem jargão. Contexto Brasil: Tesouro Direto, Selic, IPCA, VGBL, poupança. Responda em português do Brasil, no máximo 5 frases. Quando fizer sentido, dê um exemplo com números redondos. Não use emojis. Nunca recomende um investimento específico nem prometa retorno — deixe claro que é conteúdo educativo e que cada caso é um caso. Tom profissional e acolhedor.";
+  let aiBusy = false;
+  async function askAi() {
+    const q = $("aiInput").value.trim();
+    if (!q || aiBusy) return;
+    const out = $("aiOut");
+    if (!SDK || !SDK.ai) { out.textContent = "O assistente por IA fica disponível quando o app está publicado no Worlds. Por enquanto, consulte os conceitos e os tipos de investimento abaixo."; return; }
+    aiBusy = true; out.textContent = "Pensando…";
+    try {
+      const res = await SDK.ai.complete({ messages: [{ role: "user", content: q }], system: AI_SYS, model: "smart", max_tokens: 400 });
+      out.textContent = (res && res.text || "").trim() || "Não consegui responder isso agora. Pode reformular a pergunta?";
+    } catch (e) {
+      out.textContent = e && e.code === "quota_exceeded" ? "Você atingiu o limite de perguntas por hoje. Tente novamente amanhã." : "Não consegui responder agora. Tente novamente em instantes.";
+    } finally { aiBusy = false; }
+  }
+  $("aiAsk").addEventListener("click", askAi);
+  $("aiInput").addEventListener("keydown", (e) => { if (e.key === "Enter") askAi(); });
+
+  // ════════════════════════════════════════════════════════════
+  //  PORTFÓLIO
+  // ════════════════════════════════════════════════════════════
+  function macroOf() { return { selic: plan.assumptions.selic, ipca: plan.assumptions.ipca, years: plan.assumptions.years }; }
+
+  function syncAssumptionInputs() {
+    $("aSelic").value = plan.assumptions.selic;
+    $("aIpca").value = plan.assumptions.ipca;
+    $("aYr").value = plan.assumptions.years;
+    $("aSelicVal").textContent = plan.assumptions.selic.toLocaleString("pt-BR") + "%";
+    $("aIpcaVal").textContent = plan.assumptions.ipca.toLocaleString("pt-BR") + "%";
+    $("aYrVal").textContent = plan.assumptions.years + (plan.assumptions.years === 1 ? " ano" : " anos");
+  }
+  [["aSelic", "selic"], ["aIpca", "ipca"], ["aYr", "years"]].forEach(([id, key]) => {
+    $(id).addEventListener("input", () => {
+      plan.assumptions[key] = +$(id).value;
+      syncAssumptionInputs();
+      commit();
+    });
+  });
+
+  // form: campos de taxa dinâmicos por produto
+  function buildProductSelect() {
+    $("fProduct").innerHTML = PRODUCT_ORDER.map((k) => `<option value="${k}">${PRODUCTS[k].label}</option>`).join("");
+  }
+  function renderRateFields(product, vals) {
+    const p = PRODUCTS[product];
+    $("fProductDesc").textContent = p.blurb;
+    $("fRateFields").innerHTML = p.fields.map((f) => {
+      const v = vals && vals[f.k] != null ? vals[f.k] : f.def;
+      return `<div class="fldwrap"><label class="fld">${f.label}<span class="tip">?<span class="box">${f.tip}</span></span></label>` +
+        `<input type="number" data-fk="${f.k}" value="${v}" step="${f.step}"></div>`;
+    }).join("");
+  }
+  $("fProduct").addEventListener("change", () => renderRateFields($("fProduct").value));
+
+  function readForm() {
+    const product = $("fProduct").value;
+    const inv = {
+      id: editingId || Math.random().toString(36).slice(2, 8),
+      name: $("fName").value.trim() || PRODUCTS[product].label,
+      product,
+      initial: +$("fInit").value || 0,
+      monthly: +$("fMonthly").value || 0,
+      growth: +$("fGrowth").value || 0
+    };
+    document.querySelectorAll("#fRateFields [data-fk]").forEach((el) => { inv[el.dataset.fk] = +el.value || 0; });
+    return inv;
+  }
+  function resetForm() {
+    editingId = null;
+    $("invFormTitle").textContent = "Adicionar investimento";
+    $("fSubmit").textContent = "Adicionar à carteira";
+    $("fCancel").style.display = "none";
+    $("fName").value = ""; $("fInit").value = 1000; $("fMonthly").value = 300; $("fGrowth").value = 0;
+    $("fProduct").value = "selic"; renderRateFields("selic");
+  }
+  $("fSubmit").addEventListener("click", () => {
+    const inv = readForm();
+    if (editingId) {
+      const i = plan.investments.findIndex((x) => x.id === editingId);
+      if (i >= 0) plan.investments[i] = inv;
+    } else plan.investments.push(inv);
+    resetForm();
+    commit();
+    if (SDK && SDK.toast) SDK.toast("Salvo");
+  });
+  $("fCancel").addEventListener("click", resetForm);
+
+  function editInvestment(id) {
+    const inv = plan.investments.find((x) => x.id === id);
+    if (!inv) return;
+    editingId = id;
+    $("invFormTitle").textContent = "Editar investimento";
+    $("fSubmit").textContent = "Salvar alterações";
+    $("fCancel").style.display = "block";
+    $("fName").value = inv.name; $("fInit").value = inv.initial; $("fMonthly").value = inv.monthly; $("fGrowth").value = inv.growth || 0;
+    $("fProduct").value = inv.product; renderRateFields(inv.product, inv);
+    $("view-portfolio").scrollIntoView({ behavior: "smooth" });
+  }
+  function removeInvestment(id) {
+    plan.investments = plan.investments.filter((x) => x.id !== id);
+    if (editingId === id) resetForm();
+    commit();
+  }
+
+  function renderPortfolio() {
+    const macro = macroOf();
+    const N = Math.round(macro.years * 12);
+    $("horizonLbl").textContent = "— em " + macro.years + (macro.years === 1 ? " ano" : " anos");
+
+    const list = $("invList");
+    $("invEmpty").style.display = plan.investments.length ? "none" : "block";
+    list.innerHTML = "";
+    const sims = {};
+    plan.investments.forEach((inv) => {
+      const p = PRODUCTS[inv.product];
+      sims[inv.id] = simulate(inv, macro, { tax: true, fees: true });
+      const row = document.createElement("div");
+      row.className = "invrow";
+      const rateTxt = nominalAnnualPct(inv, macro);
+      row.innerHTML =
+        `<span class="dot" style="background:${p.color}"></span>` +
+        `<div class="nm"><div class="t">${SDK && SDK.esc ? SDK.esc(inv.name) : inv.name}</div>` +
+        `<div class="d">${p.label} · ~${rateTxt.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}% a.a.</div></div>` +
+        `<div class="amt">${fmtBRL(inv.initial)} + ${fmtBRL(inv.monthly)}/mês</div>`;
+      const edit = document.createElement("button"); edit.className = "mini"; edit.textContent = "editar";
+      edit.addEventListener("click", () => editInvestment(inv.id));
+      const del = document.createElement("button"); del.className = "mini"; del.textContent = "remover"; del.title = "remover";
+      del.addEventListener("click", () => removeInvestment(inv.id));
+      row.appendChild(edit); row.appendChild(del);
+      list.appendChild(row);
+    });
+
+    let tContrib = 0, tGross = 0, tNet = 0, tReal = 0, tIR = 0, tFees = 0, tLoad = 0;
+    plan.investments.forEach((inv) => {
+      const s = sims[inv.id];
+      tContrib += s.contributed; tGross += s.gross; tNet += s.net; tReal += s.realNet;
+      tIR += s.ir; tFees += s.feesPaid; tLoad += s.loadPaid;
+    });
+    const tGain = tNet - tContrib;
+    const portIRR = portfolioIRR(plan.investments, macro, tNet);
+
+    $("pSummary").innerHTML = [
+      ["green", fmtBRL(tNet), "Valor líquido final", "o que sobra após impostos e taxas"],
+      ["", fmtBRL(tContrib), "Total aportado", "o que saiu do seu bolso no período"],
+      ["gold", fmtBRL(tGain), "Rendimento líquido", "ganho já descontados impostos e taxas"],
+      ["green", fmtBRL(tReal), "Em valor de hoje", "valor final descontada a inflação (poder de compra atual)"],
+      ["", fmtPct(portIRR), "Rentabilidade a.a.", "retorno líquido anualizado da carteira"],
+      ["red", fmtBRL(tIR + tFees + tLoad), "Impostos + taxas", `IR ${fmtBRL(tIR)} · taxas ${fmtBRL(tFees + tLoad)}`]
+    ].map(([cls, v, k, hint]) =>
+      `<div class="stat"><div class="v ${cls}">${v}</div><div class="k">${k}</div><div class="hint">${hint}</div></div>`).join("");
+
+    const c = chart("pChart");
+    if (c) {
+      const series = plan.investments.map((inv) => {
+        const s = sims[inv.id]; const p = PRODUCTS[inv.product];
+        return { name: inv.name, type: "line", stack: "p", symbol: "none", areaStyle: { opacity: .5 }, lineStyle: { width: 0 }, itemStyle: { color: p.color }, data: s.balances };
+      });
+      const contribTotal = [];
+      for (let m = 0; m <= N; m++) { let v = 0; plan.investments.forEach((inv) => v += sims[inv.id].contribSeries[m]); contribTotal.push(v); }
+      series.push({ name: "Total aportado", type: "line", symbol: "none", data: contribTotal, lineStyle: { color: "#9fb3a8", width: 1.5, type: "dashed" }, itemStyle: { color: "#9fb3a8" } });
+      c.setOption({
+        tooltip: baseTooltip({ formatter: (ps) => {
+          const m = ps[0].dataIndex; let h = `<b>Ano ${(m / 12).toFixed(1)}</b><br>`; let tot = 0;
+          ps.forEach((p) => { if (p.seriesName !== "Total aportado") tot += p.value; h += `<span style="color:${p.color}">●</span> ${p.seriesName}: ${fmtBRL(p.value)}<br>`; });
+          h += `<b>Patrimônio: ${fmtBRL(tot)}</b>`; return h;
+        }}),
+        legend: { type: "scroll", textStyle: { color: "#9fb3a8" }, bottom: 0, icon: "roundRect" },
+        grid: { left: 58, right: 16, top: 14, bottom: 40 },
+        xAxis: { type: "category", data: yearLabels(N), axisLine: AXIS.line, axisLabel: Object.assign({ interval: 11 }, AXIS.label), axisTick: { show: false } },
+        yAxis: { type: "value", axisLine: { show: false }, axisLabel: Object.assign({ formatter: fmtBRLk }, AXIS.label), splitLine: { lineStyle: AXIS.split } },
+        series
+      }, true);
+    }
+
+    const cb = chart("pBreak");
+    if (cb) {
+      cb.setOption({
+        tooltip: { trigger: "item", backgroundColor: "#0a100d", borderColor: "#25332b", textStyle: { color: "#e8f1ec" }, formatter: (p) => `${p.name}: ${fmtBRL(p.value)} (${p.percent}%)` },
+        legend: { bottom: 0, textStyle: { color: "#9fb3a8" }, icon: "circle" },
+        series: [{ type: "pie", radius: ["42%", "70%"], center: ["50%", "44%"], label: { color: "#e8f1ec", fontSize: 11, formatter: "{b}\n{d}%" },
+          data: [
+            { name: "Aportado", value: Math.max(0, tContrib), itemStyle: { color: "#34d399" } },
+            { name: "Rendimento", value: Math.max(0, tGain), itemStyle: { color: "#fbbf24" } }
+          ] }]
+      }, true);
+    }
+
+    const cd = chart("pDonut");
+    if (cd) {
+      cd.setOption({
+        tooltip: { trigger: "item", backgroundColor: "#0a100d", borderColor: "#25332b", textStyle: { color: "#e8f1ec" }, formatter: (p) => `${p.name}: ${fmtBRL(p.value)} (${p.percent}%)` },
+        legend: { type: "scroll", bottom: 0, textStyle: { color: "#9fb3a8" }, icon: "circle" },
+        series: [{ type: "pie", radius: ["42%", "70%"], center: ["50%", "44%"], label: { show: false },
+          data: plan.investments.map((inv) => ({ name: inv.name, value: Math.max(0, sims[inv.id].net), itemStyle: { color: PRODUCTS[inv.product].color } })) }]
+      }, true);
+    }
+
+    let th = `<thead><tr><th>Investimento</th><th>Aportado</th><th>Bruto</th><th>IR</th><th>Taxas</th><th>Líquido</th><th>Em valor de hoje</th><th>Líq. a.a.</th></tr></thead><tbody>`;
+    plan.investments.forEach((inv) => {
+      const s = sims[inv.id]; const p = PRODUCTS[inv.product];
+      th += `<tr><td><span class="dotin" style="background:${p.color}"></span>${SDK && SDK.esc ? SDK.esc(inv.name) : inv.name}</td>` +
+        `<td>${fmtBRL(s.contributed)}</td><td>${fmtBRL(s.gross)}</td><td>${fmtBRL(s.ir)}</td><td>${fmtBRL(s.feesPaid + s.loadPaid)}</td>` +
+        `<td class="win">${fmtBRL(s.net)}</td><td>${fmtBRL(s.realNet)}</td><td>${fmtPct(s.irrAnnual)}</td></tr>`;
+    });
+    th += `</tbody>`;
+    $("pTable").innerHTML = th;
+  }
+
+  // ════════════════════════════════════════════════════════════
+  //  COMPARAR
+  // ════════════════════════════════════════════════════════════
+  function renderCompare() {
+    const macro = macroOf();
+    const init = +$("cInit").value || 0, mon = +$("cMonthly").value || 0, years = +$("cYears").value || 1;
+    const m2 = { selic: macro.selic, ipca: macro.ipca, years };
+    $("cAssumLbl").textContent = `Premissas: Selic ${macro.selic.toLocaleString("pt-BR")}% · IPCA ${macro.ipca.toLocaleString("pt-BR")}% (ajuste na aba Portfólio). Aporte: ${fmtBRL(init)} + ${fmtBRL(mon)}/mês por ${years} ${years === 1 ? "ano" : "anos"}.`;
+
+    const rows = PRODUCT_ORDER.map((k) => {
+      const p = PRODUCTS[k];
+      const inv = { id: k, name: p.label, product: k, initial: init, monthly: mon, growth: 0 };
+      p.fields.forEach((f) => inv[f.k] = f.def);
+      const s = simulate(inv, m2, { tax: true, fees: true });
+      return { k, p, s };
+    }).sort((a, b) => b.s.realNet - a.s.realNet);
+
+    const best = rows[0];
+    const c = chart("cChart");
+    if (c) {
+      c.setOption({
+        tooltip: { trigger: "axis", backgroundColor: "#0a100d", borderColor: "#25332b", textStyle: { color: "#e8f1ec" }, formatter: (ps) => `${ps[0].name}<br>Líquido (valor de hoje): <b>${fmtBRL(ps[0].value)}</b>` },
+        grid: { left: 64, right: 20, top: 14, bottom: 66 },
+        xAxis: { type: "category", data: rows.map((r) => r.p.label), axisLine: AXIS.line, axisLabel: Object.assign({ interval: 0, rotate: 28, fontSize: 10 }, AXIS.label), axisTick: { show: false } },
+        yAxis: { type: "value", axisLine: { show: false }, axisLabel: Object.assign({ formatter: fmtBRLk }, AXIS.label), splitLine: { lineStyle: AXIS.split } },
+        series: [{ type: "bar", data: rows.map((r) => ({ value: Math.round(r.s.realNet), itemStyle: { color: r.p.color, borderRadius: [6, 6, 0, 0] } })), barWidth: "52%",
+          label: { show: true, position: "top", color: "#9fb3a8", fontSize: 10, formatter: (p) => fmtBRLk(p.value) } }]
+      }, true);
+    }
+
+    let th = `<thead><tr><th>Investimento</th><th>Bruto</th><th>IR</th><th>Taxas</th><th>Líquido</th><th>Em valor de hoje</th><th>Líq. a.a.</th></tr></thead><tbody>`;
+    rows.forEach((r) => {
+      const isBest = r.k === best.k;
+      th += `<tr><td><span class="dotin" style="background:${r.p.color}"></span>${r.p.label}${isBest ? '<span class="best-tag">melhor</span>' : ""}</td>` +
+        `<td>${fmtBRL(r.s.gross)}</td><td>${fmtBRL(r.s.ir)}</td><td>${fmtBRL(r.s.feesPaid + r.s.loadPaid)}</td>` +
+        `<td class="${isBest ? "win" : ""}">${fmtBRL(r.s.net)}</td><td class="${isBest ? "win" : ""}">${fmtBRL(r.s.realNet)}</td><td>${fmtPct(r.s.irrAnnual)}</td></tr>`;
+    });
+    th += `</tbody>`;
+    $("cTable").innerHTML = th;
+  }
+  ["cInit", "cMonthly", "cYears"].forEach((id) => $(id).addEventListener("input", renderCompare));
+
+  // ════════════════════════════════════════════════════════════
+  //  BOOT
+  // ════════════════════════════════════════════════════════════
+  buildProductSelect();
+  renderRateFields("selic");
+  renderConcepts();
+  renderProductCards();
+  renderAiPills();
+  renderExplainer();
+  syncAssumptionInputs();
+  initSync();
+})();
+</script>
+</body>
+</html>
