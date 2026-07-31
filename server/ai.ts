@@ -9,7 +9,7 @@ import { store } from "./blobstore";
 // `noThink` disables thinking for snappy short replies; pro models require
 // thinking, so they keep it on and get a generous output floor instead.
 const CHAT_MODELS: Record<string, { id: string; noThink: boolean; minOut?: number }> = {
-  fast: { id: "gemini-3.5-flash", noThink: true },
+  fast: { id: "gemini-3.6-flash", noThink: true },
   smart: { id: "gemini-3.1-pro-preview", noThink: false, minOut: 2048 },
 };
 const EMBED_MODEL = "gemini-embedding-001";
