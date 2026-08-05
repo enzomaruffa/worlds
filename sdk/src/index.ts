@@ -2,7 +2,7 @@
 // /worlds.js artifact via `bun run build:sdk`. Frozen surface; see docs/sdk.md + /llms.txt.
 import { WorldsError } from "./error";
 import { call } from "./http";
-import { collection } from "./db";
+import { collection, collections } from "./db";
 import { ai } from "./ai";
 import { uploads } from "./uploads";
 import { ws } from "./channels";
@@ -21,7 +21,13 @@ const worlds: any = {
   me: () => call("GET", "/api/v1/me"),
   db: {
     collection,
-    site: (name: string) => ({ collection: (c: string) => collection(c, name) }),
+    collections: () => collections(),
+    // Same shape as worlds.db itself, so a cross-world read is the same code with a
+    // different prefix — writes on the returned collection reject as read-only.
+    site: (name: string) => ({
+      collection: (c: string) => collection(c, name),
+      collections: () => collections(name),
+    }),
   },
   ai,
   uploads,

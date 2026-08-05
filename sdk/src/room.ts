@@ -1,6 +1,7 @@
 import { ws } from "./channels";
 import { collection } from "./db";
 import { call } from "./http";
+import type { Person } from "./socket";
 
 // worlds.room(name) — ONE named shared space for everyone on a site. It rolls the
 // two things every multiplayer/collab app re-implements into a single primitive:
@@ -21,18 +22,16 @@ import { call } from "./http";
 // For raw per-frame data (cursors, poses) drop down to worlds.ws; for many loose
 // documents (polls, posts) use worlds.db.
 
-export interface RoomMember {
-  handle: string;
-  name: string;
+export interface RoomMember extends Person {
   ready: boolean;
   isMe: boolean;
   isHost: boolean;
 }
 
 export interface RoomSnapshot<T = any> {
-  me: { handle: string; name: string } | null;
+  me: Person | null;
   members: RoomMember[];
-  host: { handle: string; name: string } | null;
+  host: Person | null;
   isHost: boolean;
   ready: boolean; // is the caller ready
   readyCount: number;
@@ -59,8 +58,6 @@ export interface RoomOptions<T = any> {
   onReturn?: (s: RoomSnapshot<T>) => void; // fired on every client on return-to-lobby
 }
 
-type Person = { handle: string; name: string };
-
 export interface Room<T = any> {
   ready: Promise<RoomSnapshot<T>>;
   // roster
@@ -82,8 +79,9 @@ export interface Room<T = any> {
   readonly members: RoomMember[];
   readonly state: T | null;
   // lifecycle
-  leave(): void; // alias for destroy()
   destroy(): void;
+  leave(): void; // alias for destroy() — a single room is the thing you leave
+  stop(): void; // alias for destroy()
 }
 
 export function room<T extends Record<string, any> = any>(name: string, opts: RoomOptions<T> = {}): Room<T> {
@@ -399,6 +397,9 @@ export function room<T extends Record<string, any> = any>(name: string, opts: Ro
       return hasState ? state : null;
     },
     leave() {
+      this.destroy();
+    },
+    stop() {
       this.destroy();
     },
     destroy() {

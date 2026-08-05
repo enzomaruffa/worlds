@@ -102,7 +102,8 @@ function send(controller: ReadableStreamDefaultController, chunk: Uint8Array): v
 }
 
 // SSE passthrough: re-emit Gemini's stream as `data: {"delta": "..."}` events, then
-// a final `{"done": true, "model": alias}`. The SDK accumulates and resolves the full text.
+// a final `{"done": true, "model": alias, "usage": {…}}`. The SDK accumulates and resolves
+// the full text.
 async function streamComplete(alias: string, modelId: string, reqBody: unknown): Promise<Response> {
   const upstream = await fetch(`${BASE}/models/${modelId}:streamGenerateContent?alt=sse`, {
     method: "POST",
@@ -119,6 +120,7 @@ async function streamComplete(alias: string, modelId: string, reqBody: unknown):
   const stream = new ReadableStream({
     async start(controller) {
       let buf = "";
+      let usage = { input_tokens: 0, output_tokens: 0 };
       try {
         for (;;) {
           const { done, value } = await reader.read();
@@ -132,13 +134,24 @@ async function streamComplete(alias: string, modelId: string, reqBody: unknown):
             const payload = line.slice(5).trim();
             if (!payload || payload === "[DONE]") continue;
             try {
-              const obj = JSON.parse(payload) as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
+              const obj = JSON.parse(payload) as {
+                candidates?: { content?: { parts?: { text?: string }[] } }[];
+                usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
+              };
               const delta = obj.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
               if (delta) send(controller, enc.encode(`data: ${JSON.stringify({ delta })}\n\n`));
+              // Carried on the last chunks; the done frame reports it so a streaming
+              // caller reads the same {text, model, usage} a buffered one does.
+              if (obj.usageMetadata) {
+                usage = {
+                  input_tokens: obj.usageMetadata.promptTokenCount ?? usage.input_tokens,
+                  output_tokens: obj.usageMetadata.candidatesTokenCount ?? usage.output_tokens,
+                };
+              }
             } catch { /* skip partial/non-JSON keepalive lines */ }
           }
         }
-        send(controller, enc.encode(`data: ${JSON.stringify({ done: true, model: alias })}\n\n`));
+        send(controller, enc.encode(`data: ${JSON.stringify({ done: true, model: alias, usage })}\n\n`));
       } catch {
         send(controller, enc.encode(`data: ${JSON.stringify({ error: "stream interrupted" })}\n\n`));
       } finally {

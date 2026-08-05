@@ -36,6 +36,8 @@ export interface Idle {
   elapsed(): Promise<number | null>; // capped seconds since last visit (null if first/too-short)
   beat(): void;                      // stamp lastSeen = now (no-op when the caller owns lastSeen)
   summary(report: any, opts?: IdleSummaryOptions): void;
+  // Every SDK primitive tears down with destroy(); stop() is the same call.
+  destroy(): void;
   stop(): void;
 }
 
@@ -127,7 +129,7 @@ export function idle(key = "default", opts: IdleOptions = {}): Idle {
     try { document.removeEventListener("visibilitychange", onHide); window.removeEventListener("beforeunload", beat); } catch {}
   }
 
-  return { elapsed, beat, summary, stop };
+  return { elapsed, beat, summary, stop, destroy: stop };
 }
 
 function defaultRender(report: any): string {

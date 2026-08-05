@@ -5,13 +5,16 @@
   class WorldsError extends Error {
     code;
     status;
-    retry_after;
+    retryAfter;
     constructor(code, message, status = 0, retryAfter) {
       super(message);
       this.name = "WorldsError";
       this.code = code;
       this.status = status;
-      this.retry_after = retryAfter;
+      this.retryAfter = retryAfter;
+    }
+    get retry_after() {
+      return this.retryAfter;
     }
   }
 
@@ -140,6 +143,10 @@
   };
 
   // sdk/src/db.ts
+  function collections(otherSite) {
+    const q = otherSite ? `?site=${encodeURIComponent(otherSite)}` : "";
+    return call("GET", `/api/v1/db${q}`);
+  }
   function collection(name, otherSite) {
     const base = `/api/v1/db/${encodeURIComponent(name)}`;
     const siteQ = otherSite ? `site=${encodeURIComponent(otherSite)}` : "";
@@ -148,7 +155,12 @@
     return {
       create: (data) => otherSite ? readOnly() : call("POST", base, data),
       get: (id) => call("GET", withSite(`${base}/${encodeURIComponent(id)}`)),
-      update: (id, patch, opts = {}) => otherSite ? readOnly() : call("PATCH", `${base}/${encodeURIComponent(id)}`, patch, opts.if_updated_at ? { headers: { "if-unmodified-since-version": opts.if_updated_at } } : {}),
+      update: (id, patch, opts = {}) => {
+        if (otherSite)
+          return readOnly();
+        const version = opts.ifUpdatedAt ?? opts.if_updated_at;
+        return call("PATCH", `${base}/${encodeURIComponent(id)}`, patch, version ? { headers: { "if-unmodified-since-version": version } } : {});
+      },
       replace: (id, data) => otherSite ? readOnly() : call("PUT", `${base}/${encodeURIComponent(id)}`, data),
       delete: (id) => otherSite ? readOnly() : call("DELETE", `${base}/${encodeURIComponent(id)}`),
       increment: (id, field, by = 1) => otherSite ? readOnly() : call("POST", `${base}/${encodeURIComponent(id)}/increment`, { field, by }),
@@ -211,6 +223,7 @@
     let buf = "";
     let text = "";
     let model = body.model || "fast";
+    let usage = { input_tokens: 0, output_tokens: 0 };
     for (;; ) {
       const { done, value } = await reader.read();
       if (done)
@@ -233,10 +246,12 @@
           }
           if (obj.model)
             model = obj.model;
+          if (obj.usage)
+            usage = obj.usage;
         } catch {}
       }
     }
-    return { text, model };
+    return { text, model, usage };
   }
 
   // sdk/src/uploads.ts
@@ -573,6 +588,9 @@
       leave() {
         this.destroy();
       },
+      stop() {
+        this.destroy();
+      },
       destroy() {
         dead = true;
         try {
@@ -773,6 +791,16 @@
         lastMirror = sig;
         dir.update(dbId, patch).catch(() => {});
       }
+      const roomDestroy = r.destroy.bind(r);
+      let torn = false;
+      r.destroy = () => {
+        if (torn)
+          return;
+        torn = true;
+        roomDestroy();
+        if (current === r)
+          detach();
+      };
       stopMirror = r.onChange(mirror);
       heartbeat = setInterval(() => {
         const s = r.snapshot();
@@ -889,6 +917,9 @@
         } catch {}
         clearInterval(sweeper);
         listeners.clear();
+      },
+      stop() {
+        this.destroy();
       }
     };
   }
@@ -945,7 +976,7 @@
     }
     h = setInterval(tick, interval);
     tick();
-    return { stop };
+    return { stop, destroy: stop };
   }
 
   // sdk/src/actors.ts
@@ -1069,6 +1100,9 @@
         changeFns.clear();
         eventFns.clear();
         leaveFns.clear();
+      },
+      stop() {
+        this.destroy();
       }
     };
   }
@@ -1199,7 +1233,7 @@
         window.removeEventListener("beforeunload", beat);
       } catch {}
     }
-    return { elapsed, beat, summary, stop };
+    return { elapsed, beat, summary, stop, destroy: stop };
   }
   function defaultRender(report) {
     if (report == null)
@@ -1294,7 +1328,11 @@
     me: () => call("GET", "/api/v1/me"),
     db: {
       collection,
-      site: (name) => ({ collection: (c) => collection(c, name) })
+      collections: () => collections(),
+      site: (name) => ({
+        collection: (c) => collection(c, name),
+        collections: () => collections(name)
+      })
     },
     ai,
     uploads,

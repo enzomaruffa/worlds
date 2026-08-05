@@ -2,11 +2,18 @@
 // share it. Reconnects with backoff, replays db cursors, and queues frames sent
 // while still connecting so nothing is dropped.
 type Frame = Record<string, unknown> & { op: string; id?: string };
+
+// Who a peer is on the wire. Defined here because socket.ts is the bottom of the SDK's
+// import order, so channels/room/actors can all share this one shape.
+export interface Person {
+  handle: string;
+  name: string;
+}
 interface Sub {
   frame: Frame;
   handler: (ev: any) => void;
   cursor: string | null;
-  onPresence?: (members: unknown[]) => void;
+  onPresence?: (members: Person[]) => void;
   onExpired?: () => void;
   onSnapshot?: (actors: any[]) => void; // actors: full in-zone state (join / zone switch)
   onActors?: (updates: any[]) => void; // actors: batched per-flush updates

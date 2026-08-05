@@ -1,7 +1,7 @@
 import { call, HEADERS } from "./http";
 import { WorldsError } from "./error";
 
-interface CompleteOpts {
+export interface CompleteOpts {
   prompt?: string;
   messages?: { role: string; content: string }[];
   system?: string;
@@ -11,19 +11,36 @@ interface CompleteOpts {
   onToken?: (chunk: string) => void;
 }
 
+export interface Usage {
+  input_tokens: number;
+  output_tokens: number;
+}
+
+export interface Completion {
+  text: string;
+  model: string;
+  usage: Usage;
+}
+
+export interface ImageOpts {
+  size?: string;
+  name?: string; // upload name for the generated file
+}
+
 // Models are stable aliases ("fast", "smart"); the server maps them to providers.
 export const ai = {
-  complete: (promptOrOpts: string | CompleteOpts) => {
+  complete: (promptOrOpts: string | CompleteOpts): Promise<Completion> => {
     const opts = typeof promptOrOpts === "string" ? { prompt: promptOrOpts } : promptOrOpts;
     return opts.stream ? streamComplete(opts) : call("POST", "/api/v1/ai/complete", opts);
   },
   embed: (text: string) => call("POST", "/api/v1/ai/embed", { text }),
-  image: (prompt: string, opts: Record<string, unknown> = {}) => call("POST", "/api/v1/ai/image", { prompt, ...opts }),
+  image: (prompt: string, opts: ImageOpts = {}) => call("POST", "/api/v1/ai/image", { prompt, ...opts }),
   models: () => call("GET", "/api/v1/ai/models"),
 };
 
-// SSE streaming: fires onToken per chunk and resolves with the full {text, model}.
-async function streamComplete(opts: CompleteOpts): Promise<{ text: string; model: string }> {
+// SSE streaming: fires onToken per chunk, then resolves with the same shape the
+// non-streaming call returns, so `stream: true` never changes what a caller reads.
+async function streamComplete(opts: CompleteOpts): Promise<Completion> {
   const { onToken, ...body } = opts;
   const res = await fetch("/api/v1/ai/complete", {
     method: "POST",
@@ -44,7 +61,8 @@ async function streamComplete(opts: CompleteOpts): Promise<{ text: string; model
   const dec = new TextDecoder();
   let buf = "";
   let text = "";
-  let model = body.model || "fast";
+  let model: string = body.model || "fast";
+  let usage: Usage = { input_tokens: 0, output_tokens: 0 };
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -58,8 +76,9 @@ async function streamComplete(opts: CompleteOpts): Promise<{ text: string; model
         const obj = JSON.parse(line.slice(5).trim());
         if (obj.delta) { text += obj.delta; onToken?.(obj.delta); }
         if (obj.model) model = obj.model;
+        if (obj.usage) usage = obj.usage;
       } catch { /* ignore keepalives */ }
     }
   }
-  return { text, model };
+  return { text, model, usage };
 }
