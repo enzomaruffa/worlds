@@ -19,6 +19,14 @@
   }
 
   // sdk/src/http.ts
+  function currentSite() {
+    if (typeof location === "undefined")
+      return null;
+    const m = location.pathname.match(/^\/app\/([^/]+)/);
+    if (m)
+      return decodeURIComponent(m[1]);
+    return location.hostname.split(".")[0] || null;
+  }
   function siteHeaders() {
     if (typeof location === "undefined")
       return {};
@@ -1109,7 +1117,7 @@
 
   // sdk/src/idle.ts
   var HOUR = 3600;
-  var siteName = () => typeof location !== "undefined" ? location.hostname.split(".")[0] : "site";
+  var siteName = () => currentSite() ?? "site";
   var esc2 = (s) => {
     const d = document.createElement("div");
     d.textContent = s == null ? "" : String(s);
@@ -1355,7 +1363,7 @@
   }).catch(() => worlds.site);
   worlds.ready.then((s) => mountLeave(s));
   try {
-    const site = location.hostname.split(".")[0];
+    const site = currentSite();
     if (navigator.sendBeacon && site && site !== "worlds") {
       navigator.sendBeacon("/api/v1/beacon/visit", new Blob([JSON.stringify({ site })], { type: "application/json" }));
     }

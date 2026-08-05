@@ -860,4 +860,25 @@ describe("path routing (WORLDS_ROUTING=path)", () => {
     const home = await (await fetch(`${PB}/api/v1/db/notes`)).json(); // no header → home
     expect(home.items.length).toBe(0);
   });
+
+  test("a visit is credited to the site named in the beacon", async () => {
+    // Every site shares one hostname here, so the site can only come from the body —
+    // and it has to reach the right row rather than the apex's.
+    const before = (await (await fetch(`${PB}/api/v1/sites/${SITE}`)).json()).visits_30d;
+    await fetch(`${PB}/api/v1/beacon/visit`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ site: SITE }),
+    });
+    const after = (await (await fetch(`${PB}/api/v1/sites/${SITE}`)).json()).visits_30d;
+    expect(after).toBe(before + 1);
+  });
+
+  test("uploads round-trip on the shared origin", async () => {
+    const form = new FormData();
+    form.set("file", new Blob(["path bytes"], { type: "text/plain" }), "p.txt");
+    const put = await (await fetch(`${PB}/api/v1/uploads`, {
+      method: "POST", headers: { "x-worlds-csrf": "1", "x-worlds-site": SITE }, body: form,
+    })).json();
+    expect(put.url).toBe(`/u/${SITE}/p.txt`);
+    expect(await (await fetch(`${PB}${put.url}`)).text()).toBe("path bytes");
+  });
 });

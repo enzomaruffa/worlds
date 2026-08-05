@@ -1,4 +1,4 @@
-import { call } from "./http";
+import { call, currentSite } from "./http";
 import { collection } from "./db";
 
 // worlds.idle(key, opts) — the offline/idle-progress battery. Every incremental
@@ -42,7 +42,10 @@ export interface Idle {
 }
 
 const HOUR = 3600;
-const siteName = () => (typeof location !== "undefined" ? location.hostname.split(".")[0] : "site");
+// Namespaces the localStorage key. Must be the real site, not the hostname: in path
+// mode every site shares one origin, so a hostname-derived key would have every idle
+// game on the platform reading and overwriting one another's lastSeen.
+const siteName = () => currentSite() ?? "site";
 const esc = (s: any) => { const d = document.createElement("div"); d.textContent = s == null ? "" : String(s); return d.innerHTML; };
 
 export function idle(key = "default", opts: IdleOptions = {}): Idle {

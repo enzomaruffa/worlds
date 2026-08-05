@@ -332,5 +332,12 @@ const server = Bun.serve<SocketData, never>({
   websocket,
 });
 
-console.log(`worlds: listening on :${server.port} (base domain ${config.baseDomain}, dev=${config.dev})`);
-console.log(`worlds: homepage http://${config.baseDomain}:${server.port} · deploy POST /api/v1/deploy`);
+const authLabel = config.dev ? "dev-stub" : config.authMode;
+// publicOrigin when set, so the logged URL is the one people actually open rather than a
+// guessed scheme plus the container's internal port.
+const homepage = config.publicOrigin ?? `http://${config.baseDomain}:${server.port}`;
+console.log(
+  `worlds: listening on :${server.port} ` +
+    `(base domain ${config.baseDomain}, routing ${config.routing}, auth ${authLabel})`,
+);
+console.log(`worlds: homepage ${homepage} · deploy POST /api/v1/deploy`);

@@ -1,7 +1,7 @@
 // worlds.js v1 — the SDK entry point. Built (bundled) into the single served
 // /worlds.js artifact via `bun run build:sdk`. Frozen surface; see docs/sdk.md + /llms.txt.
 import { WorldsError } from "./error";
-import { call } from "./http";
+import { call, currentSite } from "./http";
 import { collection, collections } from "./db";
 import { ai } from "./ai";
 import { uploads } from "./uploads";
@@ -55,7 +55,7 @@ worlds.ready.then((s: any) => mountLeave(s));
 
 // Visit beacon — feeds the universe's planet sizes. Never throws.
 try {
-  const site = location.hostname.split(".")[0];
+  const site = currentSite();
   if (navigator.sendBeacon && site && site !== "worlds") {
     navigator.sendBeacon("/api/v1/beacon/visit", new Blob([JSON.stringify({ site })], { type: "application/json" }));
   }
