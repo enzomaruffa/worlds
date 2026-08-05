@@ -24,8 +24,12 @@ COPY universe ./universe
 
 ENV WORLDS_PORT=8420 \
     WORLDS_DATA_DIR=/data
-RUN mkdir -p /data
+RUN mkdir -p /data && chown bun:bun /data
 EXPOSE 8420
+
+# The server only ever writes under WORLDS_DATA_DIR, and it unpacks caller-supplied
+# tarballs — no reason to give that root.
+USER bun
 
 # Prod note: WORLDS_BASE_DOMAIN, DATABASE_URL, GEMINI_API_KEY, SLACK_BOT_TOKEN come
 # from the deployment (secrets); /data is backed by the sites/uploads object store.

@@ -19,6 +19,8 @@ forwards `*.<your-domain>` and `<your-domain>` to it.
 1. **Wildcard DNS + TLS** for `*.<your-domain>` and `<your-domain>` — every site gets its
    own subdomain (`<site>.<your-domain>`), the bare domain serves the homepage. Point both
    at your reverse proxy (Caddy/nginx/Traefik/Cloudflare) and set `WORLDS_BASE_DOMAIN`.
+   No wildcard cert available? `WORLDS_ROUTING=path` puts every site on one origin at
+   `<your-domain>/app/<site>/` instead, which needs only a single-host cert.
 2. **A Google OAuth client** (https://console.cloud.google.com/apis/credentials):
    redirect URI `https://<your-domain>/auth/callback`. Set `GOOGLE_CLIENT_ID` /
    `GOOGLE_CLIENT_SECRET`, and `WORLDS_PUBLIC_ORIGIN=https://<your-domain>` so sign-in always
@@ -34,6 +36,7 @@ A reverse proxy must forward WebSocket upgrades (`/api/v1/socket`) for realtime 
 | Var | Meaning |
 |---|---|
 | `WORLDS_BASE_DOMAIN` | wildcard base, e.g. `world.example.com`. `<site>.<base>` → that site; bare base → homepage. |
+| `WORLDS_ROUTING` | `subdomain` (default) or `path` — one origin, sites at `<base>/app/<site>/`, no wildcard DNS/cert. |
 | `WORLDS_PUBLIC_ORIGIN` | external origin for the OAuth redirect, e.g. `https://world.example.com`. |
 | `WORLDS_AUTH` | `google` (built-in sign-in, default) or `gateway` (trust a verified-email header from an upstream proxy). |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google OAuth client (google mode). |

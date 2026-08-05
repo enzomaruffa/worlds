@@ -5,3 +5,8 @@ tests
 .git
 .DS_Store
 *.tgz
+.playwright-mcp
+# ~9MB the image never COPYs — worlds ship via the blobstore, not the build.
+examples
+*.jpeg
+*.png
