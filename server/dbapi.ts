@@ -85,38 +85,55 @@ export async function patchDoc(
   requireDb();
   checkCollection(collection);
   checkDoc(body);
-  if (precondition) {
-    const [cur] = await sql`
-      SELECT id, data, created_by, created_at, updated_at FROM documents
-      WHERE site = ${site} AND collection = ${collection} AND id = ${id}`;
-    if (!cur) throw new WorldsError("not_found", "no such document");
-    if (new Date(cur.updated_at).toISOString() !== precondition) {
-      throw new WorldsError("conflict", "document changed since read", undefined, {
-        doc: envelope(cur as DocRow),
-      });
-    }
+  if (precondition && Number.isNaN(Date.parse(precondition))) {
+    throw new WorldsError("invalid_request", "if-unmodified-since-version must be an ISO timestamp");
   }
+  // The precondition is part of the UPDATE, not a SELECT before it: checked separately,
+  // two concurrent writers both pass and both write — the exact race the header exists
+  // to lose. `updated_at` is truncated because the version clients echo back is a JS
+  // Date (milliseconds), while postgres stores microseconds.
+  // Merge also caps the *result*: a patch that fits can still push the doc past the
+  // limit, and unlike a replace the final size isn't knowable before the write.
   const [row] = mode === "merge"
     ? await sql`
         UPDATE documents SET data = data || ${body as never}, updated_at = now()
         WHERE site = ${site} AND collection = ${collection} AND id = ${id}
+          AND (${precondition}::timestamptz IS NULL
+               OR date_trunc('milliseconds', updated_at) = ${precondition}::timestamptz)
+          AND octet_length((data || ${body as never})::text) <= ${LIMITS.docBytes}
         RETURNING id, data, created_by, created_at, updated_at`
     : await sql`
         UPDATE documents SET data = ${body as never}, updated_at = now()
         WHERE site = ${site} AND collection = ${collection} AND id = ${id}
+          AND (${precondition}::timestamptz IS NULL
+               OR date_trunc('milliseconds', updated_at) = ${precondition}::timestamptz)
         RETURNING id, data, created_by, created_at, updated_at`;
-  if (!row) throw new WorldsError("not_found", "no such document");
+  if (!row) await explainFailedPatch(site, collection, id, precondition);
   const doc = envelope(row as DocRow);
   await emitChange(site, collection, "update", doc);
   return json(doc);
+}
+
+// A patch matched no row for one of three reasons; re-read to say which. Always throws.
+async function explainFailedPatch(site: string, collection: string, id: string, precondition: string | null): Promise<never> {
+  const [cur] = await sql`
+    SELECT id, data, created_by, created_at, updated_at FROM documents
+    WHERE site = ${site} AND collection = ${collection} AND id = ${id}`;
+  if (!cur) throw new WorldsError("not_found", "no such document");
+  if (precondition && new Date(cur.updated_at).toISOString() !== precondition) {
+    throw new WorldsError("conflict", "document changed since read", undefined, { doc: envelope(cur as DocRow) });
+  }
+  throw new WorldsError("payload_too_large", `merged document would exceed ${LIMITS.docBytes / 1024}KB`);
 }
 
 export async function incrementDoc(site: string, collection: string, id: string, body: unknown) {
   requireDb();
   checkCollection(collection);
   const { field, by = 1 } = (body ?? {}) as { field?: string; by?: number };
-  if (!field || typeof field !== "string" || !/^[\w.-]{1,128}$/.test(field) || typeof by !== "number") {
-    throw new WorldsError("invalid_request", "expected {field, by?}");
+  // Number.isFinite, not typeof: NaN and Infinity are numbers that postgres rejects
+  // mid-statement, which would surface as a 500 rather than a bad request.
+  if (!field || typeof field !== "string" || !/^[\w.-]{1,128}$/.test(field) || !Number.isFinite(by)) {
+    throw new WorldsError("invalid_request", "expected {field, by?} with a finite number");
   }
   // dot paths drill into nested keys, consistent with list/filter (e.g. "score.total")
   const pgPath = `{${field.split(".").join(",")}}`;
@@ -148,10 +165,21 @@ export async function deleteDoc(site: string, collection: string, id: string) {
 // Filter grammar (frozen, deliberately small): {field: value | {gt,gte,lt,lte,ne,in}}, AND only.
 const OPS: Record<string, string> = { gt: ">", gte: ">=", lt: "<", lte: "<=", ne: "<>" };
 
+// Reject rather than clamp: `?limit=abc` is a caller bug, and a silent fallback to 50
+// hides it. The value is interpolated into LIMIT, so it must be a real integer.
+export function clampLimit(raw: string | null): number {
+  if (raw === null || raw === "") return 50;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1 || n > 100) {
+    throw new WorldsError("invalid_request", "limit must be an integer between 1 and 100");
+  }
+  return n;
+}
+
 export async function listDocs(site: string, collection: string, params: URLSearchParams) {
   requireDb();
   checkCollection(collection);
-  const limit = Math.min(Math.max(Number(params.get("limit") ?? 50), 1), 100);
+  const limit = clampLimit(params.get("limit"));
   const cursor = params.get("cursor");
   const sort = params.get("sort");
 
@@ -199,7 +227,9 @@ export async function listDocs(site: string, collection: string, params: URLSear
     const desc = sort.startsWith("-");
     const key = desc ? sort.slice(1) : sort;
     if (!/^[\w.-]{1,128}$/.test(key)) throw new WorldsError("invalid_request", "bad sort key");
-    order = `data #>> ${pathArg(key)} ${desc ? "DESC" : "ASC"}, n ASC`;
+    // `#>` (jsonb) not `#>>` (text): jsonb btree order compares numbers numerically, so
+    // a leaderboard on `-score` puts 10 above 9. Text order sorts "9" above "10".
+    order = `data #> ${pathArg(key)} ${desc ? "DESC" : "ASC"}, n ASC`;
   }
   if (cursor) {
     // Sorted lists also page by the insertion-order tiebreak (documented v1 behavior).
