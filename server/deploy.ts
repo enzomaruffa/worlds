@@ -1,4 +1,4 @@
-import { mkdir, rm, readdir, stat } from "node:fs/promises";
+import { mkdir, rm, readdir, lstat } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { LIMITS, RESERVED_SITES } from "./config";
 import { WorldsError, json } from "./errors";
@@ -14,7 +14,9 @@ const SITE_NAME = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
 // Ownership: the first uploader owns a site; only the owner can overwrite it
 // (basic maintainer model). New sites are open to anyone.
 async function requireOwner(site: string, who: Identity): Promise<void> {
-  if (!dbReady()) return;
+  // Ownership lives in postgres, so without it there is no way to tell the owner from
+  // anyone else — refuse rather than let a db blip open every site up to overwrite.
+  if (!dbReady()) throw new WorldsError("maintenance", "database unavailable — deploys are paused");
   const existing = await getSite(site);
   if (existing && existing.creator !== who.handle) {
     throw new WorldsError("forbidden", `"${site}" is owned by @${existing.creator} — only the owner can update it`);
@@ -37,11 +39,16 @@ function validateSiteName(site: string): void {
   if (RESERVED_SITES.has(site)) throw new WorldsError("reserved_name", `"${site}" is reserved`);
 }
 
+// lstat, never stat: a tarball can carry a symlink (tar recreates it, and the entry
+// name itself looks harmless), and following one would publish the target's bytes —
+// any file the server can read — under the site, or copy it into the S3 bucket.
 async function walk(dir: string, base = ""): Promise<{ path: string; size: number }[]> {
   const entries = await Promise.all((await readdir(dir)).map(async (name) => {
     const full = join(dir, name);
-    const s = await stat(full);
-    return s.isDirectory() ? walk(full, join(base, name)) : [{ path: join(base, name), size: s.size }];
+    const s = await lstat(full);
+    if (s.isDirectory()) return walk(full, join(base, name));
+    if (!s.isFile()) throw new WorldsError("invalid_request", `bundle entry is not a regular file: ${join(base, name)}`);
+    return [{ path: join(base, name), size: s.size }];
   }));
   return entries.flat();
 }
@@ -105,9 +112,12 @@ export async function handleDeploy(req: Request): Promise<Response> {
     const tarPath = join(staged, "_bundle.tgz");
     await Bun.write(tarPath, bundle);
 
-    const list = Bun.spawnSync(["tar", "-tzf", tarPath]);
-    if (list.exitCode !== 0) throw new WorldsError("invalid_request", "bundle is not a valid tar.gz");
-    const entries = list.stdout.toString().split("\n").filter(Boolean);
+    // Async spawn (NOT spawnSync) — a 100MB bundle would block the event loop for
+    // the whole list + extract, stalling every other request and socket flush.
+    const list = Bun.spawn(["tar", "-tzf", tarPath], { stdout: "pipe", stderr: "ignore" });
+    const listing = await new Response(list.stdout).text();
+    if ((await list.exited) !== 0) throw new WorldsError("invalid_request", "bundle is not a valid tar.gz");
+    const entries = listing.split("\n").filter(Boolean);
     for (const e of entries) {
       if (e.startsWith("/") || e.split("/").includes("..")) {
         throw new WorldsError("invalid_request", `unsafe path in bundle: ${e}`);
@@ -117,16 +127,17 @@ export async function handleDeploy(req: Request): Promise<Response> {
       throw new WorldsError("payload_too_large", `bundle exceeds ${LIMITS.deployFiles} files`);
     }
 
-    const extract = Bun.spawnSync(["tar", "-xzf", tarPath, "-C", staged]);
+    const extract = Bun.spawn(["tar", "-xzf", tarPath, "-C", staged], { stdout: "ignore", stderr: "ignore" });
+    const extractCode = await extract.exited;
     await rm(tarPath, { force: true });
-    if (extract.exitCode !== 0) throw new WorldsError("invalid_request", "failed to extract bundle");
+    if (extractCode !== 0) throw new WorldsError("invalid_request", "failed to extract bundle");
 
     // Tolerate single-directory tarballs (tar -czf site.tgz my-site/).
     let root = staged;
     const top = await readdir(staged);
     if (top.length === 1) {
       const only = join(staged, top[0]!);
-      if ((await stat(only)).isDirectory()) root = only;
+      if ((await lstat(only)).isDirectory()) root = only;
     }
 
     return json(await finalizeDeploy(site, root, who));
@@ -205,7 +216,7 @@ export async function handleDeployFolder(req: Request): Promise<Response> {
     const top = await readdir(staged);
     if (top.length === 1) {
       const only = join(staged, top[0]!);
-      if ((await stat(only)).isDirectory()) root = only;
+      if ((await lstat(only)).isDirectory()) root = only;
     }
     return json(await finalizeDeploy(site, root, who));
   } finally {
