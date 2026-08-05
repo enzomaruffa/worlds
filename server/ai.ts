@@ -1,4 +1,4 @@
-import { config } from "./config";
+import { config, LIMITS } from "./config";
 import { WorldsError, json } from "./errors";
 import { identityFrom, requireCsrf } from "./identity";
 import { takeQuota } from "./ratelimit";
@@ -53,9 +53,18 @@ export async function complete(req: Request): Promise<Response> {
   const cfg = CHAT_MODELS[alias];
   if (!cfg) throw new WorldsError("invalid_request", `unknown model alias "${alias}"`);
 
+  if (body.messages !== undefined && !Array.isArray(body.messages)) {
+    throw new WorldsError("invalid_request", "messages must be an array of {role, content}");
+  }
+  // The daily quota counts calls, not size, so an uncapped prompt is a free multiplier
+  // on upstream cost. Cap the whole conversation rather than each turn.
   const contents = body.messages
-    ? body.messages.map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: m.content }] }))
+    ? body.messages.map((m) => ({ role: m?.role === "assistant" ? "model" : "user", parts: [{ text: String(m?.content ?? "") }] }))
     : [{ role: "user", parts: [{ text: String(body.prompt ?? "") }] }];
+  const inputChars = contents.reduce((n, c) => n + c.parts[0]!.text.length, 0) + (body.system?.length ?? 0);
+  if (inputChars > LIMITS.aiInputChars) {
+    throw new WorldsError("payload_too_large", `prompt exceeds ${LIMITS.aiInputChars} characters`);
+  }
 
   let maxOut = Math.min(body.max_tokens ?? 2048, 8192);
   const generationConfig: Record<string, unknown> = {};
@@ -82,6 +91,14 @@ export async function complete(req: Request): Promise<Response> {
     model: alias,
     usage: { input_tokens: usage?.promptTokenCount ?? 0, output_tokens: usage?.candidatesTokenCount ?? 0 },
   });
+}
+
+// Enqueueing into a stream the client already dropped throws, and the throw would
+// escape the error path (which enqueues too) and reject start().
+function send(controller: ReadableStreamDefaultController, chunk: Uint8Array): void {
+  try {
+    controller.enqueue(chunk);
+  } catch { /* client gone — cancel() is tearing the upstream down */ }
 }
 
 // SSE passthrough: re-emit Gemini's stream as `data: {"delta": "..."}` events, then
@@ -117,16 +134,23 @@ async function streamComplete(alias: string, modelId: string, reqBody: unknown):
             try {
               const obj = JSON.parse(payload) as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
               const delta = obj.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
-              if (delta) controller.enqueue(enc.encode(`data: ${JSON.stringify({ delta })}\n\n`));
+              if (delta) send(controller, enc.encode(`data: ${JSON.stringify({ delta })}\n\n`));
             } catch { /* skip partial/non-JSON keepalive lines */ }
           }
         }
-        controller.enqueue(enc.encode(`data: ${JSON.stringify({ done: true, model: alias })}\n\n`));
+        send(controller, enc.encode(`data: ${JSON.stringify({ done: true, model: alias })}\n\n`));
       } catch {
-        controller.enqueue(enc.encode(`data: ${JSON.stringify({ error: "stream interrupted" })}\n\n`));
+        send(controller, enc.encode(`data: ${JSON.stringify({ error: "stream interrupted" })}\n\n`));
       } finally {
-        controller.close();
+        try {
+          controller.close();
+        } catch { /* already closed by a client disconnect */ }
       }
+    },
+    // Without this a client that navigates away leaves the upstream response open
+    // until the model finishes generating — one hung connection per abandoned stream.
+    cancel() {
+      void reader.cancel();
     },
   });
   return new Response(stream, {

@@ -32,11 +32,14 @@ export interface BlobStore {
   uploadsBytes(site: string): Promise<number>;
 }
 
-// Reject path traversal; join into a clean relative key/path.
+// Reject path traversal; join into a clean relative key/path. The check has to run on
+// the raw parts: normalize() collapses "site/../other" down to "other", so a check on
+// the result would find no ".." and silently hand back a path in a different site.
 function safeRel(...parts: string[]): string {
-  const p = normalize(join("/", ...parts)).replace(/^\/+/, "");
-  if (p.split("/").includes("..")) throw new WorldsError("invalid_request", "bad path");
-  return p;
+  for (const part of parts) {
+    if (part.split(/[/\\]/).includes("..")) throw new WorldsError("invalid_request", "bad path");
+  }
+  return normalize(join("/", ...parts)).replace(/^\/+/, "");
 }
 
 export class LocalBlobStore implements BlobStore {
@@ -59,12 +62,21 @@ export class LocalBlobStore implements BlobStore {
   async swapSite(site: string, stagedDir: string): Promise<void> {
     const live = this.abs("sites", site);
     const old = `${live}.old-${Date.now()}`;
+    let moved = false;
     try {
       await rename(live, old);
+      moved = true;
     } catch {
       /* first deploy */
     }
-    await rename(stagedDir, live);
+    try {
+      await rename(stagedDir, live);
+    } catch (e) {
+      // The old tree is already out of the way, so a failure here (ENOSPC, EXDEV,
+      // permissions) would otherwise leave the site serving nothing at all.
+      if (moved) await rename(old, live).catch(() => {});
+      throw e;
+    }
     await rm(old, { recursive: true, force: true });
   }
 
@@ -152,9 +164,24 @@ export class S3BlobStore implements BlobStore {
     return out.flat();
   }
 
+  // S3 returns at most 1000 keys per call, so an unpaginated list silently truncates:
+  // a redeploy would leave the tail of the old site behind, an uploads listing would
+  // hide files, and the quota computed from it would under-count.
+  private async listAll(prefix: string): Promise<NonNullable<Bun.S3ListObjectsResponse["contents"]>> {
+    const all: NonNullable<Bun.S3ListObjectsResponse["contents"]> = [];
+    let token: string | undefined;
+    do {
+      const res = await this.client.list({ prefix, ...(token ? { continuationToken: token } : {}) });
+      if (res?.contents) all.push(...res.contents);
+      token = res?.isTruncated ? res.nextContinuationToken : undefined;
+    } while (token);
+    return all;
+  }
+
   private async deletePrefix(prefix: string): Promise<void> {
-    const res = await this.client.list({ prefix });
-    for (const obj of res?.contents ?? []) if (obj.key) await this.client.file(obj.key).delete().catch(() => {});
+    for (const obj of await this.listAll(prefix)) {
+      if (obj.key) await this.client.file(obj.key).delete().catch(() => {});
+    }
   }
 
   async swapSite(site: string, stagedDir: string): Promise<void> {
@@ -190,8 +217,8 @@ export class S3BlobStore implements BlobStore {
 
   async listUploads(site: string): Promise<UploadInfo[]> {
     const prefix = `uploads/${safeRel(site)}/`;
-    const res = await this.client.list({ prefix }).catch(() => null);
-    return (res?.contents ?? [])
+    const contents = await this.listAll(prefix).catch(() => []);
+    return contents
       .filter((o) => o.key && !o.key.endsWith("/"))
       .map((o) => ({
         name: o.key!.slice(prefix.length),
@@ -248,8 +275,14 @@ export class LayeredBlobStore implements BlobStore {
     }
     return merged;
   }
-  deleteUpload(site: string, name: string): Promise<boolean> {
-    return this.primary.deleteUpload(site, name);
+  async deleteUpload(site: string, name: string): Promise<boolean> {
+    // Both layers: readUpload falls through, so deleting only the primary would report
+    // success while the file stays readable from the fallback.
+    const [inPrimary, inFallback] = await Promise.all([
+      this.primary.deleteUpload(site, name),
+      this.fallback.deleteUpload(site, name),
+    ]);
+    return inPrimary || inFallback;
   }
   uploadsBytes(site: string): Promise<number> {
     return this.primary.uploadsBytes(site);

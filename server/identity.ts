@@ -53,7 +53,7 @@ export function identityFrom(req: Request): Identity {
 
 export function requireCsrf(req: Request): void {
   // Custom header forces a CORS preflight; same-origin only by design.
-  if (!req.headers.get("x-worlds-csrf") && !req.headers.get("authorization")) {
+  if (!req.headers.get("x-worlds-csrf")) {
     throw new WorldsError("invalid_request", "missing X-Worlds-Csrf header");
   }
 }

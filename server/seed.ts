@@ -15,7 +15,18 @@ const SYSTEM: Identity = {
   avatar: avatarFor("system@localhost"),
 };
 
-export async function seedWorlds(): Promise<void> {
+// Runs at boot and again on every db reconnect, so two calls can overlap — and both
+// would pass the "already present" check and deploy the universe twice. Callers share
+// one in-flight run; a finished one is cleared so a failed attempt can be retried.
+let inFlight: Promise<void> | null = null;
+
+export function seedWorlds(): Promise<void> {
+  return (inFlight ??= runSeed().finally(() => {
+    inFlight = null;
+  }));
+}
+
+async function runSeed(): Promise<void> {
   if (process.env.WORLDS_SEED === "0" || !dbReady()) return;
   const dir = new URL("../universe", import.meta.url).pathname;
   try {

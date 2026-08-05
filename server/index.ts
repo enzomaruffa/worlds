@@ -3,7 +3,7 @@ import { config } from "./config";
 import { WorldsError, asWorldsError, json, jsonError } from "./errors";
 import { identityFrom, requireCsrf } from "./identity";
 import { store } from "./blobstore";
-import { initDb, sql, requireDb } from "./db";
+import { initDb, sql, requireDb, onDbReady } from "./db";
 import { handleDeploy, handleDeployFolder } from "./deploy";
 import { serveSite, siteNotFound } from "./staticsite";
 import { getSiteOr404, listSites, publicSite, siteUrl, bumpVisit, getSite } from "./sites";
@@ -19,8 +19,11 @@ import { seedWorlds } from "./seed";
 import { websocket, type SocketData } from "./ws";
 
 await store.init();
+// Registered before initDb so an install that boots ahead of postgres still gets its
+// universe once the connection lands, instead of staying empty until a manual restart.
+onDbReady(seedWorlds);
 await initDb();
-await seedWorlds();
+await seedWorlds(); // joins the hook's run when the db was up at boot
 
 const HOMEPAGE_DIR = new URL("../homepage", import.meta.url).pathname;
 const SDK_DIR = new URL("../sdk", import.meta.url).pathname;
@@ -124,12 +127,16 @@ async function api(req: Request, url: URL, site: string): Promise<Response> {
       const items = (await listSites({
         creator: url.searchParams.get("creator") ?? undefined,
         search: url.searchParams.get("q") ?? undefined,
-        limit: Math.min(Number(url.searchParams.get("limit") ?? 50), 100),
+        limit: dbapi.clampLimit(url.searchParams.get("limit")),
       })).map(publicSite);
       await overlayCreators(items);
       return json({ items, next_cursor: null });
     }
-    if (p.length === 2 && method === "GET") return json(universeEntry(await getSiteOr404(p[1]!)));
+    if (p.length === 2 && method === "GET") {
+      const entry = universeEntry(await getSiteOr404(p[1]!));
+      await overlayCreators([entry]); // the display handle, as the list endpoint returns
+      return json(entry);
+    }
     if (p.length === 3 && p[2] === "deploys" && method === "GET") {
       await getSiteOr404(p[1]!);
       const rows = await sql`
@@ -190,8 +197,15 @@ async function api(req: Request, url: URL, site: string): Promise<Response> {
   if (p[0] === "universe" && method === "GET") return universe();
   if (p[0] === "creators" && p[1] && method === "GET") return creator(p[1]);
   if (p[0] === "beacon" && p[1] === "visit" && method === "POST") {
-    const { site: target } = (await req.json().catch(() => ({}))) as { site?: string };
-    if (target) await bumpVisit(target);
+    // sendBeacon can't set headers, so path mode has to name its site in the body.
+    // Subdomain mode already knows it from the Host — prefer that, so a page can't
+    // pad another world's counter.
+    let target = site;
+    if (config.routing === "path") {
+      const body = (await req.json().catch(() => ({}))) as { site?: string };
+      target = typeof body.site === "string" ? body.site : site;
+    }
+    if (target && target !== "home") await bumpVisit(target);
     return new Response(null, { status: 204 });
   }
   if (p[0] === "meta" && method === "GET") return json({ api_version: 1, build: "dev" });
