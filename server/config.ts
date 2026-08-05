@@ -1,3 +1,5 @@
+const DEV_SESSION_SECRET = "insecure-dev-secret-change-me";
+
 export const config = {
   port: Number(process.env.WORLDS_PORT ?? 8420),
   dataDir: process.env.WORLDS_DATA_DIR ?? "./data",
@@ -31,10 +33,21 @@ export const config = {
   allowedDomains: (process.env.WORLDS_ALLOWED_DOMAINS ?? "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean),
   allowedEmails: (process.env.WORLDS_ALLOWED_EMAILS ?? "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean),
   // HMAC key for the session cookie — MUST be set to a random value in production.
-  sessionSecret: process.env.WORLDS_SESSION_SECRET ?? "insecure-dev-secret-change-me",
+  // `||` so a present-but-empty var takes the dev value and trips the guard below.
+  sessionSecret: process.env.WORLDS_SESSION_SECRET || DEV_SESSION_SECRET,
   // External origin for OAuth redirect_uri, e.g. https://world.example.com. Derived from the request if unset.
   publicOrigin: process.env.WORLDS_PUBLIC_ORIGIN || null,
 };
+
+// Google mode HMACs the session cookie and the screenshot render token with this key,
+// so a known value lets anyone mint a session for any email. Refuse to boot instead.
+// (Gateway mode takes identity from a proxy header and never consults it.)
+if (config.authMode === "google" && !config.dev && config.sessionSecret === DEV_SESSION_SECRET) {
+  throw new Error(
+    "WORLDS_SESSION_SECRET is unset — set it to a random value (openssl rand -hex 32) " +
+      "or run with WORLDS_DEV=1. Refusing to start with a publicly-known session key.",
+  );
+}
 
 export const RESERVED_SITES = new Set([
   "api", "www", "home", "hello", "assets", "uploads", "list", "mcp", "docs", "u",
@@ -51,6 +64,7 @@ export const LIMITS = {
   deploysPerSitePerHour: 60,
   aiCompletionsPerUserPerDay: 200,
   aiImagesPerUserPerDay: 50,
+  aiInputChars: 200_000,
   wsPayloadBytes: 16 * 1024,
   slackPerUserPerDay: 50,
 };
