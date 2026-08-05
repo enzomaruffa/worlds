@@ -10,9 +10,28 @@ export interface SocketData {
   who: Identity;
   site: string;
   subs: Map<string, { kind: "db" | "channel" | "actors"; key: string; cid?: string }>;
+  fanout?: { tokens: number; at: number }; // broadcast budget, created on first pub/aevent
 }
 
 type WS = ServerWebSocket<SocketData>;
+
+// `set` is safe by construction — it's last-value state drained by the room's flush
+// timer, so a faster publisher only overwrites itself. `pub` and `aevent` fan out on
+// arrival, one 16KB frame per in-zone peer, which is where a single tab can melt a
+// room. A token bucket keeps bursts (a buzzer, a volley of strokes) working while
+// capping the sustained rate.
+const FANOUT_BURST = 120;
+const FANOUT_PER_SEC = 40;
+
+function allowFanout(ws: WS): boolean {
+  const now = Date.now();
+  const b = (ws.data.fanout ??= { tokens: FANOUT_BURST, at: now });
+  b.tokens = Math.min(FANOUT_BURST, b.tokens + ((now - b.at) / 1000) * FANOUT_PER_SEC);
+  b.at = now;
+  if (b.tokens < 1) return false;
+  b.tokens -= 1;
+  return true;
+}
 
 const channelMembers = new Map<string, Map<WS, Identity>>();
 const dbSubs = new Map<string, Map<WS, string>>(); // scopeKey -> ws -> subId
@@ -199,6 +218,10 @@ async function handleSub(ws: WS, id: string, frame: Record<string, unknown>): Pr
     sendErr(ws, id, "invalid_request", `too many subscriptions (max ${MAX_SUBS_PER_SOCKET})`);
     return;
   }
+  // Re-using an id replaces the subscription, so retire the old one first: overwriting
+  // the entry alone would leave this socket in the previous scope's registry — a ghost
+  // in that channel's presence, and a second db scope quietly stealing its events.
+  if (ws.data.subs.has(id)) handleUnsub(ws, id);
   if (frame.kind === "db") {
     if (!dbReady()) {
       sendErr(ws, id, "maintenance", "database unavailable");
@@ -245,6 +268,17 @@ async function handleSub(ws: WS, id: string, frame: Record<string, unknown>): Pr
       const rate = Math.max(1, Math.min(MAX_ACTOR_RATE, Number(frame.rate) || 15));
       room = { members: new Map(), rate, timer: null };
       actorRooms.set(key, room);
+    }
+    // cid comes from the client, so without this an entry could be taken over: the
+    // victim's own set/ameta/aevent stop matching (wrong socket) and their disconnect
+    // refuses to clean up, leaving the stolen actor in the zone after they're gone.
+    // A still-open holder blocks the claim; a dead one doesn't, because a reconnecting
+    // tab re-subscribes with the same cid and may beat its own close event here.
+    const held = room.members.get(cid);
+    if (held && held.ws !== ws && held.ws.readyState === 1) {
+      ws.data.subs.delete(id);
+      sendErr(ws, id, "conflict", `actor id "${cid}" is already in use`);
+      return;
     }
     const observer = frame.observer === true;
     const meta = !observer && frame.meta && typeof frame.meta === "object" ? (frame.meta as Record<string, unknown>) : {};
@@ -311,6 +345,10 @@ function handleActorEvent(ws: WS, frame: Record<string, unknown>): void {
     sendErr(ws, undefined, "payload_too_large", "actor event over 16KB");
     return;
   }
+  if (!allowFanout(ws)) {
+    sendErr(ws, undefined, "rate_limited", `actor events are capped at ${FANOUT_PER_SEC}/s`);
+    return;
+  }
   const key = presenceKey(ws.data.site, String(frame.channel ?? ""));
   const room = actorRooms.get(key);
   const e = room && room.members.get(cid);
@@ -342,6 +380,10 @@ function handlePub(ws: WS, id: string, frame: Record<string, unknown>): void {
   const payload = frame.payload;
   if (JSON.stringify(payload ?? null).length > LIMITS.wsPayloadBytes) {
     sendErr(ws, id, "payload_too_large", "ws payload over 16KB");
+    return;
+  }
+  if (!allowFanout(ws)) {
+    sendErr(ws, id, "rate_limited", `channel publishes are capped at ${FANOUT_PER_SEC}/s`);
     return;
   }
   const key = presenceKey(ws.data.site, String(frame.channel ?? ""));
