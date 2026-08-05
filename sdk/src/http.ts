@@ -3,8 +3,19 @@ import { WorldsError } from "./error";
 // Custom header forces a CORS preflight → same-origin only. Auth is the gateway's
 // session cookie; sites never carry tokens. In path-routing mode (sites at
 // /app/<site>/), the page shares the apex origin, so declare the site explicitly.
+// Which site this page IS. Subdomain mode puts it in the first hostname label; path
+// mode puts every site on one hostname and distinguishes them by `/app/<site>/`, so
+// reading the hostname there returns the apex for all of them.
+export function currentSite(): string | null {
+  if (typeof location === "undefined") return null;
+  const m = location.pathname.match(/^\/app\/([^/]+)/);
+  if (m) return decodeURIComponent(m[1]!);
+  return location.hostname.split(".")[0] || null;
+}
+
 function siteHeaders(): Record<string, string> {
   if (typeof location === "undefined") return {};
+  // Only in path mode: in subdomain mode the Host already says which site is calling.
   const m = location.pathname.match(/^\/app\/([^/]+)/);
   return m ? { "x-worlds-site": m[1]! } : {};
 }

@@ -4,3 +4,4 @@ bin/
 *.tgz
 .DS_Store
 .env
+.playwright-mcp/

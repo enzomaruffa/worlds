@@ -85,11 +85,13 @@ async function capture(url: string): Promise<Blob | null> {
       );
       const code = await proc.exited;
       if (code === 0 && (await Bun.file(out).exists())) {
-        const blob = new Blob([await Bun.file(out).arrayBuffer()], { type: "image/png" });
-        await rm(out, { force: true });
-        return blob;
+        return new Blob([await Bun.file(out).arrayBuffer()], { type: "image/png" });
       }
-    } catch { /* try the next candidate */ }
+    } catch { /* try the next candidate */ } finally {
+      // A timed-out or crashed Chrome can still have written a partial PNG, and every
+      // capture uses a fresh uuid — cleaning up only on success leaks one file per failure.
+      await rm(out, { force: true }).catch(() => {});
+    }
   }
   return null;
 }

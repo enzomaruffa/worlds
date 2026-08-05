@@ -7,12 +7,18 @@ export type ErrorCode =
 export class WorldsError extends Error {
   code: ErrorCode;
   status: number;
-  retry_after?: number;
+  retryAfter?: number;
   constructor(code: ErrorCode, message: string, status = 0, retryAfter?: number) {
     super(message);
     this.name = "WorldsError";
     this.code = code;
     this.status = status;
-    this.retry_after = retryAfter;
+    this.retryAfter = retryAfter;
+  }
+
+  // The wire envelope spells this `retry_after` and sites have branched on it since
+  // v1; the property is camelCase like every other one on this class.
+  get retry_after(): number | undefined {
+    return this.retryAfter;
   }
 }

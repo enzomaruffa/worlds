@@ -14,6 +14,15 @@ export function requireDb(): void {
   if (!ready) throw new WorldsError("maintenance", "database unavailable — run `bun run db:up`");
 }
 
+// Work that needs a live db at boot but must also run if the db only shows up later
+// (installed before postgres, or postgres bounced). Hooks must be idempotent — they
+// run again on every reconnect.
+const readyHooks = new Set<() => unknown>();
+
+export function onDbReady(fn: () => unknown): void {
+  readyHooks.add(fn);
+}
+
 export async function initDb(): Promise<void> {
   try {
     await sql`
@@ -82,6 +91,7 @@ export async function initDb(): Promise<void> {
     ready = true;
     console.log("db: ready");
     startPrune();
+    for (const fn of readyHooks) void Promise.resolve(fn()).catch(() => {});
   } catch (e) {
     ready = false;
     console.warn(`db: unavailable (${(e as Error).message}) — db-backed APIs will 503; reconnecting…`);
@@ -175,7 +185,10 @@ export async function replaySince(
     SELECT min(seq) AS min FROM events
     WHERE site = ${site} AND collection = ${collection}
       AND at > now() - make_interval(hours => ${EVENT_RETENTION_HOURS})`;
-  if (oldest?.min !== null && seq < Number(oldest.min) - 1) return "expired";
+  // A NULL min means the window holds nothing, which is "your cursor aged out",
+  // not "you're caught up" — returning [] there tells the client it missed nothing.
+  if (oldest?.min === null || oldest?.min === undefined) return "expired";
+  if (seq < Number(oldest.min) - 1) return "expired";
   const rows = await sql`
     SELECT seq, type, doc FROM events
     WHERE site = ${site} AND collection = ${collection} AND seq > ${seq}

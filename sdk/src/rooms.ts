@@ -2,6 +2,7 @@ import { collection } from "./db";
 import { WorldsError } from "./error";
 import { room } from "./room";
 import type { Room, RoomSnapshot } from "./room";
+import type { Person } from "./socket";
 
 // worlds.rooms(name) — the plural of worlds.room: a live directory of many
 // concurrent rooms on one site (a lobby browser with private join codes). Each
@@ -20,8 +21,8 @@ export interface RoomInfo {
   id: string;
   code: string;
   name: string;
-  host: { handle: string; name: string } | null;
-  members: { handle: string; name: string }[];
+  host: Person | null;
+  members: Person[];
   count: number;
   max: number; // 0 = unlimited
   status: "open" | "playing";
@@ -53,9 +54,12 @@ export interface Hall<T = any> {
   create(opts?: { name?: string; private?: boolean; max?: number }): Promise<JoinedRoom<T>>;
   join(id: string): Promise<JoinedRoom<T>>;
   joinByCode(code: string): Promise<JoinedRoom<T>>;
+  // Leaves the joined room but keeps the directory live — NOT the teardown call.
+  // (On a single `Room`, leave() *is* destroy(); a Hall outlives the rooms you join.)
   leave(): Promise<void>;
   readonly current: JoinedRoom<T> | null;
   destroy(): void;
+  stop(): void; // alias for destroy()
 }
 
 // Unambiguous code alphabet — no 0/O/1/I to keep codes easy to read out loud.
@@ -115,6 +119,13 @@ export function rooms<T extends Record<string, any> = any>(name: string, opts: R
     const t = Date.parse(doc.updated_at || doc.created_at || "");
     return !Number.isFinite(t) || Date.now() - t < ttlMs;
   }
+  // Hiding a quiet room from the list is cheap and reversible; deleting it and its
+  // state doc is neither, and the only evidence is a heartbeat that a background tab's
+  // throttled timers can delay well past the ttl. Destroy only on much staler proof.
+  function sweepable(doc: any): boolean {
+    const t = Date.parse(doc.updated_at || doc.created_at || "");
+    return Number.isFinite(t) && Date.now() - t > ttlMs * 4;
+  }
   function computeList(): RoomInfo[] {
     const out: RoomInfo[] = [];
     for (const doc of docs.values()) {
@@ -140,7 +151,7 @@ export function rooms<T extends Record<string, any> = any>(name: string, opts: R
   async function sweep(): Promise<void> {
     for (const [dbId, doc] of [...docs.entries()]) {
       if (dbId === currentDbId) continue; // never GC the room we're in (host migration handles a dead host)
-      if (doc.data && doc.data._dir && !fresh(doc)) {
+      if (doc.data && doc.data._dir && sweepable(doc)) {
         docs.delete(dbId);
         try {
           await dir.delete(dbId);
@@ -239,6 +250,18 @@ export function rooms<T extends Record<string, any> = any>(name: string, opts: R
       lastMirror = sig;
       dir.update(dbId, patch).catch(() => {});
     }
+    // `hall.leave()` and `room.destroy()` have to end in the same place. Tearing the
+    // room down on its own would otherwise leave the hall mirroring and heartbeating
+    // an instance nobody is in, and `hall.current` pointing at a dead room.
+    const roomDestroy = r.destroy.bind(r);
+    let torn = false;
+    r.destroy = () => {
+      if (torn) return;
+      torn = true;
+      roomDestroy();
+      if (current === r) detach(); // re-entrant, but `torn` stops the recursion here
+    };
+
     stopMirror = r.onChange(mirror);
     heartbeat = setInterval(() => {
       const s = r.snapshot();
@@ -344,6 +367,9 @@ export function rooms<T extends Record<string, any> = any>(name: string, opts: R
       } catch {}
       clearInterval(sweeper);
       listeners.clear();
+    },
+    stop() {
+      this.destroy();
     },
   };
 }

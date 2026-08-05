@@ -8,5 +8,6 @@
     "noEmit": true,
     "types": ["bun-types"]
   },
-  "include": ["server", "cli", "tests"]
+  "include": ["server", "cli", "tests", "sdk/src"],
+  "exclude": ["sdk/worlds.js"]
 }

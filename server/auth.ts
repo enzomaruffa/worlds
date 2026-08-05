@@ -63,7 +63,12 @@ function unseal<T>(token: string | undefined | null): T | null {
 
 function readCookie(req: Request, name: string): string | null {
   const m = (req.headers.get("cookie") ?? "").match(new RegExp(`(?:^|;\\s*)${name}=([^;]+)`));
-  return m ? decodeURIComponent(m[1]!) : null;
+  if (!m) return null;
+  try {
+    return decodeURIComponent(m[1]!);
+  } catch {
+    return null; // malformed percent-escape — treat as no cookie, not a 500
+  }
 }
 
 function cookieAttrs(req: Request): string {
@@ -110,6 +115,8 @@ function origin(req: Request): string {
 // Only allow same-app redirect targets (relative, or a host under baseDomain).
 function safeReturn(rd: string | undefined): string {
   if (!rd) return "/";
+  // "//evil.com" and "/\evil.com" are relative-looking but resolve to another origin.
+  if (/^\/[/\\]/.test(rd)) return "/";
   if (rd.startsWith("/")) return rd;
   try {
     const u = new URL(rd);
@@ -196,7 +203,12 @@ async function verifyGoogleIdToken(jwt: string): Promise<GoogleClaims> {
 // then navigates to the (sanitized) return target. Self-contained, no build step.
 function signinPage(rd: string): Response {
   const cid = config.googleClientId ?? "";
-  const target = JSON.stringify(safeReturn(rd));
+  // Interpolated into an inline <script>: JSON.stringify leaves "<" literal, so a
+  // target containing "</script>" would close the block. \u form is inert as markup.
+  const target = JSON.stringify(safeReturn(rd)).replace(
+    /[<>&\u2028\u2029]/g,
+    (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"),
+  );
   const html = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>Sign in · Worlds</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">

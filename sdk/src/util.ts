@@ -43,6 +43,8 @@ export function esc(s: any): string {
 }
 
 export interface Countdown {
+  // Every SDK primitive tears down with destroy(); stop() is the same call.
+  destroy(): void;
   stop(): void;
 }
 // Drive a countdown to an absolute timestamp. onTick gets ms remaining; onEnd
@@ -71,5 +73,5 @@ export function countdown(
   }
   h = setInterval(tick, interval);
   tick();
-  return { stop };
+  return { stop, destroy: stop };
 }

@@ -1,4 +1,4 @@
-import { config } from "./config";
+import { config, LIMITS } from "./config";
 import { WorldsError, json } from "./errors";
 import { identityFrom, requireCsrf } from "./identity";
 import { takeQuota } from "./ratelimit";
@@ -53,9 +53,18 @@ export async function complete(req: Request): Promise<Response> {
   const cfg = CHAT_MODELS[alias];
   if (!cfg) throw new WorldsError("invalid_request", `unknown model alias "${alias}"`);
 
+  if (body.messages !== undefined && !Array.isArray(body.messages)) {
+    throw new WorldsError("invalid_request", "messages must be an array of {role, content}");
+  }
+  // The daily quota counts calls, not size, so an uncapped prompt is a free multiplier
+  // on upstream cost. Cap the whole conversation rather than each turn.
   const contents = body.messages
-    ? body.messages.map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: m.content }] }))
+    ? body.messages.map((m) => ({ role: m?.role === "assistant" ? "model" : "user", parts: [{ text: String(m?.content ?? "") }] }))
     : [{ role: "user", parts: [{ text: String(body.prompt ?? "") }] }];
+  const inputChars = contents.reduce((n, c) => n + c.parts[0]!.text.length, 0) + (body.system?.length ?? 0);
+  if (inputChars > LIMITS.aiInputChars) {
+    throw new WorldsError("payload_too_large", `prompt exceeds ${LIMITS.aiInputChars} characters`);
+  }
 
   let maxOut = Math.min(body.max_tokens ?? 2048, 8192);
   const generationConfig: Record<string, unknown> = {};
@@ -84,8 +93,17 @@ export async function complete(req: Request): Promise<Response> {
   });
 }
 
+// Enqueueing into a stream the client already dropped throws, and the throw would
+// escape the error path (which enqueues too) and reject start().
+function send(controller: ReadableStreamDefaultController, chunk: Uint8Array): void {
+  try {
+    controller.enqueue(chunk);
+  } catch { /* client gone — cancel() is tearing the upstream down */ }
+}
+
 // SSE passthrough: re-emit Gemini's stream as `data: {"delta": "..."}` events, then
-// a final `{"done": true, "model": alias}`. The SDK accumulates and resolves the full text.
+// a final `{"done": true, "model": alias, "usage": {…}}`. The SDK accumulates and resolves
+// the full text.
 async function streamComplete(alias: string, modelId: string, reqBody: unknown): Promise<Response> {
   const upstream = await fetch(`${BASE}/models/${modelId}:streamGenerateContent?alt=sse`, {
     method: "POST",
@@ -102,6 +120,7 @@ async function streamComplete(alias: string, modelId: string, reqBody: unknown):
   const stream = new ReadableStream({
     async start(controller) {
       let buf = "";
+      let usage = { input_tokens: 0, output_tokens: 0 };
       try {
         for (;;) {
           const { done, value } = await reader.read();
@@ -115,18 +134,36 @@ async function streamComplete(alias: string, modelId: string, reqBody: unknown):
             const payload = line.slice(5).trim();
             if (!payload || payload === "[DONE]") continue;
             try {
-              const obj = JSON.parse(payload) as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
+              const obj = JSON.parse(payload) as {
+                candidates?: { content?: { parts?: { text?: string }[] } }[];
+                usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
+              };
               const delta = obj.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
-              if (delta) controller.enqueue(enc.encode(`data: ${JSON.stringify({ delta })}\n\n`));
+              if (delta) send(controller, enc.encode(`data: ${JSON.stringify({ delta })}\n\n`));
+              // Carried on the last chunks; the done frame reports it so a streaming
+              // caller reads the same {text, model, usage} a buffered one does.
+              if (obj.usageMetadata) {
+                usage = {
+                  input_tokens: obj.usageMetadata.promptTokenCount ?? usage.input_tokens,
+                  output_tokens: obj.usageMetadata.candidatesTokenCount ?? usage.output_tokens,
+                };
+              }
             } catch { /* skip partial/non-JSON keepalive lines */ }
           }
         }
-        controller.enqueue(enc.encode(`data: ${JSON.stringify({ done: true, model: alias })}\n\n`));
+        send(controller, enc.encode(`data: ${JSON.stringify({ done: true, model: alias, usage })}\n\n`));
       } catch {
-        controller.enqueue(enc.encode(`data: ${JSON.stringify({ error: "stream interrupted" })}\n\n`));
+        send(controller, enc.encode(`data: ${JSON.stringify({ error: "stream interrupted" })}\n\n`));
       } finally {
-        controller.close();
+        try {
+          controller.close();
+        } catch { /* already closed by a client disconnect */ }
       }
+    },
+    // Without this a client that navigates away leaves the upstream response open
+    // until the model finishes generating — one hung connection per abandoned stream.
+    cancel() {
+      void reader.cancel();
     },
   });
   return new Response(stream, {

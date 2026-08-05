@@ -1,4 +1,4 @@
-import { sock } from "./socket";
+import { sock, type Person } from "./socket";
 import { id as tabId } from "./util";
 
 // worlds.actors(name, opts) — the realtime tier for per-member presence, beside
@@ -27,18 +27,15 @@ export interface ActorsOptions<T = any> {
   observer?: boolean; // watch a zone read-only — invisible to peers (set/send become no-ops)
 }
 
-export interface ActorRecord<T = any> {
-  id: string; // the peer's stable per-tab id
-  handle: string;
-  name: string;
-  state: T; // may be undefined until the peer's first set
-  metadata: Record<string, any>;
+// A peer's identity in an actors zone: who they are, plus the per-tab id that
+// distinguishes two tabs of the same person.
+export interface ActorFrom extends Person {
+  id: string;
 }
 
-export interface ActorFrom {
-  id: string;
-  handle: string;
-  name: string;
+export interface ActorRecord<T = any> extends ActorFrom {
+  state: T; // may be undefined until the peer's first set
+  metadata: Record<string, any>;
 }
 
 export interface Actors<T = any> {
@@ -50,6 +47,7 @@ export interface Actors<T = any> {
   onEvent(fn: (id: string, payload: any, from: ActorFrom) => void): () => void;
   onLeave(fn: (id: string) => void): () => void;
   destroy(): void;
+  stop(): void; // alias for destroy()
 }
 
 export function actors<T = any>(name: string, opts: ActorsOptions<T> = {}): Actors<T> {
@@ -87,8 +85,15 @@ export function actors<T = any>(name: string, opts: ActorsOptions<T> = {}): Acto
     }
   }
 
+  // Held (not spread) so a zoneKey-driven zone change is carried by the replay the
+  // socket sends on reconnect — otherwise you rejoin whichever zone you started in.
+  const subFrame = {
+    op: "sub", kind: "actors", channel: name, zone, cid,
+    rate: opts.rate, meta: opts.metadata, observer: opts.observer,
+  };
+
   const stopSub = sock.subscribe(
-    { op: "sub", kind: "actors", channel: name, zone, cid, rate: opts.rate, meta: opts.metadata, observer: opts.observer },
+    subFrame,
     () => { /* actors deliver via the on* hooks below, not the plain handler */ },
     {
       // A snapshot is the authoritative in-zone set (on join AND on zone switch), so
@@ -110,7 +115,7 @@ export function actors<T = any>(name: string, opts: ActorsOptions<T> = {}): Acto
   return {
     set(state: T): void {
       if (stopped || opts.observer) return; // observers are read-only
-      if (opts.zoneKey) zone = String(opts.zoneKey(state));
+      if (opts.zoneKey) zone = subFrame.zone = String(opts.zoneKey(state));
       sock.send({ op: "set", id: "set", channel: name, cid, state, zone });
     },
     setMetadata(patch: Record<string, any>): void {
@@ -129,6 +134,9 @@ export function actors<T = any>(name: string, opts: ActorsOptions<T> = {}): Acto
       stopped = true;
       try { stopSub(); } catch { /* socket may be gone */ }
       states.clear(); changeFns.clear(); eventFns.clear(); leaveFns.clear();
+    },
+    stop() {
+      this.destroy();
     },
   };
 }

@@ -6,7 +6,8 @@ services:
       POSTGRES_PASSWORD: world
       POSTGRES_DB: world
     ports:
-      - "5499:5432"
+      # Loopback only — the default binds 0.0.0.0, exposing world/world to the LAN.
+      - "127.0.0.1:5499:5432"
     volumes:
       - world-pg:/var/lib/postgresql/data
     healthcheck:

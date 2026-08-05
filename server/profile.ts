@@ -52,6 +52,17 @@ export async function updateProfile(
     if (RESERVED_SITES.has(h)) throw new WorldsError("invalid_request", `"${h}" is reserved`);
     const [taken] = await sql`SELECT canonical FROM profiles WHERE handle = ${h} AND canonical <> ${canonical}`;
     if (taken) throw new WorldsError("conflict", `@${h} is already taken`);
+    // A canonical belongs to the account whose email local-part it is, profile row or
+    // not — so a handle matching someone else's canonical would let you wear their
+    // identity in presence and on /@<handle>. Known canonicals are those that have
+    // saved a profile or shipped a world.
+    if (h !== canonical) {
+      const [owned] = await sql`
+        SELECT 1 FROM profiles WHERE canonical = ${h}
+        UNION ALL
+        SELECT 1 FROM sites WHERE creator = ${h} LIMIT 1`;
+      if (owned) throw new WorldsError("conflict", `@${h} belongs to another account`);
+    }
     handle = h;
   }
 
@@ -98,7 +109,9 @@ export async function overlayCreators(entries: { creator: { handle: string } }[]
   if (!entries.length) return;
   const byCanon = new Map<string, ProfileRow>();
   if (dbReady()) {
-    const rows = await sql`SELECT canonical, handle, name, avatar FROM profiles`;
+    const wanted = [...new Set(entries.map((e) => e.creator.handle))];
+    const rows = await sql`
+      SELECT canonical, handle, name, avatar FROM profiles WHERE canonical IN ${sql(wanted)}`;
     for (const r of rows as ProfileRow[]) byCanon.set(r.canonical, r);
   }
   for (const e of entries) {

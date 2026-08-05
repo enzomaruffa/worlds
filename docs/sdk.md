@@ -1,7 +1,14 @@
 # worlds.js — the SDK
 
-One script tag: `<script src="/worlds.js"></script>`. Sets `window.worlds`. Everything returns
-promises; every rejection is a `WorldsError` with `{code, message, status}`.
+One script tag: `<script src="/worlds.js"></script>`. Sets `window.worlds`. Anything that
+talks to the server returns a promise, and every rejection is a `WorldsError` with
+`{code, message, status}`. Fire-and-forget realtime sends (`ws.channel().publish`,
+`actors.set/setMetadata/send`) and the local helpers (`toast`, `id`, `esc`, …) are
+synchronous and return nothing.
+
+Every primitive that holds resources — `room`, `rooms`, `actors`, `idle`, `countdown` —
+is torn down with **`destroy()`**, and `stop()` is accepted everywhere as the same call.
+Every `on*`/`subscribe` returns an unsubscribe function.
 
 ## Identity
 
@@ -13,12 +20,14 @@ worlds.site;                    // {name, url} — populated after `await worlds
 
 ## Errors
 
-Every rejected promise is a `WorldsError` — `{ code, message, status, retry_after? }`.
+Every rejected promise is a `WorldsError` — `{ code, message, status, retryAfter? }`.
 `code` comes from a frozen registry, so you can branch on it reliably:
 
 `unauthorized` · `invalid_request` · `not_found` · `conflict` · `payload_too_large` ·
-`rate_limited` (carries `retry_after` seconds) · `quota_exceeded` · `upstream_error`
+`rate_limited` (carries `retryAfter` seconds) · `quota_exceeded` · `upstream_error`
 (AI provider) · `maintenance` · `internal`.
+
+(`retry_after` still reads the same value — the wire envelope spells it that way.)
 
 ```js
 try { await c.create(doc); }
@@ -42,6 +51,10 @@ await c.increment(doc.id, "votes", 2);                    // atomic — no read-
 await c.delete(doc.id);
 const page = await c.list({ filter: { votes: { gt: 0 } }, sort: "-votes", limit: 20 });
 const stop = c.subscribe(ev => { /* {type: create|update|delete, doc} */ });
+await worlds.db.collections();                            // {items:[{name, docs}]} — what this site has
+
+// Optimistic concurrency: pass the `updated_at` you read; a moved doc rejects `conflict`.
+await c.update(doc.id, { title: "hi!" }, { ifUpdatedAt: doc.updated_at });
 ```
 
 Filters: `{field: value}` equality or `{gt,gte,lt,lte,ne,in}`, dot paths allowed, AND only.
@@ -56,14 +69,15 @@ always stay with the owning site:
 const sites = worlds.db.site("home").collection("sites");   // the platform's own site registry
 await sites.list();                                        // read-only: list/get/subscribe
 sites.subscribe(ev => addPlanet(ev.doc));                  // this is how the universe map works
+await worlds.db.site("home").collections();                // same shape as worlds.db, one site over
 ```
 
 ## AI — `worlds.ai`
 
 ```js
-const { text } = await worlds.ai.complete("one-line haiku about plex");
+const { text, usage } = await worlds.ai.complete("one-line haiku about plex");
 const { text: t2 } = await worlds.ai.complete({ messages, system, model: "smart", max_tokens: 500 });
-// stream tokens as they arrive (still resolves with the full {text, model} at the end):
+// stream tokens as they arrive — resolves with the same {text, model, usage} either way:
 await worlds.ai.complete({ prompt, stream: true, onToken: (chunk) => append(chunk) });
 const { vector } = await worlds.ai.embed("some text");
 const { url } = await worlds.ai.image("a tiny planet", { size: "1024" });
@@ -171,9 +185,16 @@ const r = await hall.create({ name: "Enzo's table" });   // make one, join it
 const r = await hall.join(roomId);            // join a listed room
 const r = await hall.joinByCode("K7QF");      // join by code (works for private)
 await hall.create({ private: true });         // hidden from the list, code-only
-await hall.leave();                           // leave; the host closes empty rooms
+await hall.leave();                           // leave the room; the hall stays live
 hall.current;                                 // the joined room (or null)
+hall.destroy();                               // tear the whole directory down
 ```
+
+Note the one place the two primitives read differently: on a single `worlds.room`,
+`leave()` **is** `destroy()` — the room is the thing you're in. On a `hall`, `leave()`
+only leaves the joined room and keeps the directory live, so `destroy()` is the teardown.
+Destroying the joined room directly (`hall.current.destroy()`) also detaches the hall, so
+it can't be left heartbeating a room you already left.
 
 Each returned room also carries `r.id` and `r.code` (show the code so others can
 join). `RoomInfo`: `{ id, code, name, host, members, count, max, status:"open"|
@@ -250,7 +271,7 @@ worlds.id();                            // stable per-tab id — attach as `cid`
 worlds.colorFor(handle);                // deterministic "hsl(…)" color — same handle → same color everywhere
 worlds.uniqByHandle(members);           // dedupe a presence list by handle → [{handle, name}]
 worlds.esc(userText);                   // HTML-escape before innerHTML
-const t = worlds.countdown(endsAt, { onTick: (ms) => …, onEnd: () => … }); // t.stop() to cancel
+const t = worlds.countdown(endsAt, { onTick: (ms) => …, onEnd: () => … }); // t.destroy() to cancel
 ```
 
 Every site also gets an automatic **"◐ Worlds" leave pill** (top-left) that flies the

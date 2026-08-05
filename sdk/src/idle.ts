@@ -1,4 +1,4 @@
-import { call } from "./http";
+import { call, currentSite } from "./http";
 import { collection } from "./db";
 
 // worlds.idle(key, opts) — the offline/idle-progress battery. Every incremental
@@ -36,11 +36,16 @@ export interface Idle {
   elapsed(): Promise<number | null>; // capped seconds since last visit (null if first/too-short)
   beat(): void;                      // stamp lastSeen = now (no-op when the caller owns lastSeen)
   summary(report: any, opts?: IdleSummaryOptions): void;
+  // Every SDK primitive tears down with destroy(); stop() is the same call.
+  destroy(): void;
   stop(): void;
 }
 
 const HOUR = 3600;
-const siteName = () => (typeof location !== "undefined" ? location.hostname.split(".")[0] : "site");
+// Namespaces the localStorage key. Must be the real site, not the hostname: in path
+// mode every site shares one origin, so a hostname-derived key would have every idle
+// game on the platform reading and overwriting one another's lastSeen.
+const siteName = () => currentSite() ?? "site";
 const esc = (s: any) => { const d = document.createElement("div"); d.textContent = s == null ? "" : String(s); return d.innerHTML; };
 
 export function idle(key = "default", opts: IdleOptions = {}): Idle {
@@ -63,8 +68,12 @@ export function idle(key = "default", opts: IdleOptions = {}): Idle {
       try {
         col = col || collection("__idle");
         const h = await whoami();
-        const page = await col.list({ filter: { _idle: key }, limit: 50 });
-        const mine = (page.items || []).find((it: any) => it.created_by === h || (it.data && it.data.handle === h));
+        if (!h) return null;
+        // Filter on the handle rather than scanning a page of everyone's docs: past the
+        // first 50 players a returning player's doc is invisible, so they get no offline
+        // credit and writeLastSeen creates them a fresh duplicate on every visit.
+        const page = await col.list({ filter: { _idle: key, handle: h }, limit: 1 });
+        const mine = (page.items || [])[0];
         if (mine) { docId = mine.id; return mine.data.lastSeen ?? null; }
       } catch {}
     }
@@ -123,7 +132,7 @@ export function idle(key = "default", opts: IdleOptions = {}): Idle {
     try { document.removeEventListener("visibilitychange", onHide); window.removeEventListener("beforeunload", beat); } catch {}
   }
 
-  return { elapsed, beat, summary, stop };
+  return { elapsed, beat, summary, stop, destroy: stop };
 }
 
 function defaultRender(report: any): string {

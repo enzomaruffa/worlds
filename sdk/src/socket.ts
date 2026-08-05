@@ -2,11 +2,18 @@
 // share it. Reconnects with backoff, replays db cursors, and queues frames sent
 // while still connecting so nothing is dropped.
 type Frame = Record<string, unknown> & { op: string; id?: string };
+
+// Who a peer is on the wire. Defined here because socket.ts is the bottom of the SDK's
+// import order, so channels/room/actors can all share this one shape.
+export interface Person {
+  handle: string;
+  name: string;
+}
 interface Sub {
   frame: Frame;
   handler: (ev: any) => void;
   cursor: string | null;
-  onPresence?: (members: unknown[]) => void;
+  onPresence?: (members: Person[]) => void;
   onExpired?: () => void;
   onSnapshot?: (actors: any[]) => void; // actors: full in-zone state (join / zone switch)
   onActors?: (updates: any[]) => void; // actors: batched per-flush updates
@@ -19,7 +26,7 @@ export const sock = {
   backoff: 1000,
   nextId: 1,
   subs: new Map<string, Sub>(),
-  outbox: [] as string[],
+  outbox: [] as Frame[],
 
   open(): void {
     if (this.ws && (this.ws.readyState === 0 || this.ws.readyState === 1)) return;
@@ -35,7 +42,7 @@ export const sock = {
         if (sub.cursor) frame.since = sub.cursor;
         this.ws!.send(JSON.stringify(frame));
       }
-      for (const f of this.outbox) this.ws!.send(f);
+      for (const f of this.outbox) this.ws!.send(JSON.stringify(f));
       this.outbox = [];
     };
     this.ws.onmessage = (m) => {
@@ -58,13 +65,19 @@ export const sock = {
         sub.onActorEvent(f.from, f.payload);
       } else if (f.op === "actors_leave" && sub.onActorLeave) {
         sub.onActorLeave(f.ids || []);
-      } else if (f.op === "error" && f.error?.code === "replay_expired" && sub.onExpired) {
-        sub.cursor = null;
-        sub.onExpired();
+      } else if (f.op === "error") {
+        if (f.error?.code === "replay_expired" && sub.onExpired) {
+          sub.cursor = null;
+          sub.onExpired();
+        } else {
+          // Nothing else can surface this — a rejected subscription would otherwise
+          // look identical to a topic that is simply quiet.
+          console.warn("[worlds] realtime error", f.error?.code, f.error?.message);
+        }
       }
     };
     this.ws.onclose = () => {
-      if (this.subs.size === 0) return;
+      if (this.subs.size === 0 && this.outbox.length === 0) return;
       setTimeout(() => this.open(), this.backoff);
       this.backoff = Math.min(this.backoff * 2, 30000);
     };
@@ -72,15 +85,17 @@ export const sock = {
 
   send(frame: Frame): void {
     this.open();
-    const s = JSON.stringify(frame);
-    if (this.ws && this.ws.readyState === 1) this.ws.send(s);
-    else this.outbox.push(s); // flushed on open — frames are never dropped
+    if (this.ws && this.ws.readyState === 1) this.ws.send(JSON.stringify(frame));
+    else this.outbox.push(frame); // flushed on open — frames are never dropped
   },
 
   subscribe(frame: Frame, handler: (ev: any) => void, extras: Partial<Sub> = {}): () => void {
     const id = `s${this.nextId++}`;
     this.subs.set(id, { frame, handler, cursor: null, ...extras });
-    this.send({ ...frame, id });
+    this.open();
+    // Only send when already connected: onopen replays every entry in `subs`, so
+    // queueing here too would register the subscription twice per connect.
+    if (this.ws && this.ws.readyState === 1) this.ws.send(JSON.stringify({ ...frame, id }));
     return () => {
       this.subs.delete(id);
       if (this.ws && this.ws.readyState === 1) this.ws.send(JSON.stringify({ op: "unsub", id }));

@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -104,6 +104,23 @@ describe("hosting", () => {
   test("bundle without index.html is invalid_request", async () => {
     const res = await deploy("t-noindex", { "main.css": "body{}" });
     expect((await res.json()).error.code).toBe("invalid_request");
+  });
+
+  test("a bundle carrying a symlink is rejected (no reading the host's files)", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "world-symlink-"));
+    await Bun.write(join(dir, "index.html"), "<h1>bait</h1>");
+    await symlink("/etc/passwd", join(dir, "leak.txt"));
+    const tar = join(dir, "out.tgz");
+    Bun.spawnSync(["tar", "-czf", tar, "-C", dir, "index.html", "leak.txt"]);
+    const form = new FormData();
+    form.set("site", `${S1}-link`);
+    form.set("bundle", new Blob([await Bun.file(tar).arrayBuffer()]), "bundle.tgz");
+    const res = await req("POST", "/api/v1/deploy", { form, site: "home" });
+    await rm(dir, { recursive: true, force: true });
+
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.code).toBe("invalid_request");
+    expect((await req("GET", "/leak.txt", { site: `${S1}-link` })).status).toBe(404);
   });
 
   test("unknown site 404s", async () => {
@@ -220,13 +237,61 @@ describe("worlds.db", () => {
   });
 
   test("the platform's home/sites collection is world-readable", async () => {
-    const sites = await (await req("GET", "/api/v1/db/sites?site=home", { site: S1 })).json();
+    // Filtered, not paged: an unfiltered read returns the first 50 sites in creation
+    // order, and every past run of this suite leaves its sites behind in the dev db.
+    const filter = encodeURIComponent(JSON.stringify({ name: S1 }));
+    const sites = await (await req("GET", `/api/v1/db/sites?site=home&filter=${filter}`, { site: S1 })).json();
     expect(sites.items.map((d: { data: { name: string } }) => d.data.name)).toContain(S1);
   });
 
   test("oversized documents are payload_too_large", async () => {
     const res = await req("POST", "/api/v1/db/posts", { body: { blob: "x".repeat(300 * 1024) } });
     expect((await res.json()).error.code).toBe("payload_too_large");
+  });
+
+  test("if-unmodified-since-version: the current version writes, a stale one 409s", async () => {
+    const doc = await (await req("POST", "/api/v1/db/versioned", { body: { n: 1 } })).json();
+    const ok = await req("PATCH", `/api/v1/db/versioned/${doc.id}`, {
+      body: { n: 2 },
+      headers: { "if-unmodified-since-version": doc.updated_at },
+    });
+    expect(ok.status).toBe(200);
+
+    const stale = await req("PATCH", `/api/v1/db/versioned/${doc.id}`, {
+      body: { n: 3 },
+      headers: { "if-unmodified-since-version": doc.updated_at },
+    });
+    expect(stale.status).toBe(409);
+    const body = await stale.json();
+    expect(body.error.code).toBe("conflict");
+    expect(body.error.doc.data.n).toBe(2);
+  });
+
+  test("a merge that would outgrow the doc limit is refused", async () => {
+    const doc = await (await req("POST", "/api/v1/db/growing", { body: { a: "x".repeat(200 * 1024) } })).json();
+    const res = await req("PATCH", `/api/v1/db/growing/${doc.id}`, { body: { b: "y".repeat(100 * 1024) } });
+    expect((await res.json()).error.code).toBe("payload_too_large");
+  });
+
+  test("a non-numeric limit is a bad request, not a 500", async () => {
+    for (const bad of ["abc", "-5", "0", "1000", "1.5"]) {
+      const res = await req("GET", `/api/v1/db/posts?limit=${bad}`);
+      expect(res.status).toBe(400);
+      expect((await res.json()).error.code).toBe("invalid_request");
+    }
+  });
+
+  test("increment rejects a non-finite step instead of 500ing", async () => {
+    const doc = await (await req("POST", "/api/v1/db/counters", { body: { hits: 0 } })).json();
+    const res = await req("POST", `/api/v1/db/counters/${doc.id}/increment`, { body: { field: "hits", by: 1e999 } });
+    expect(res.status).toBe(400);
+  });
+
+  test("sort orders numbers numerically, not as text", async () => {
+    const c = `scores${RUN.slice(-4)}`;
+    for (const score of [9, 10, 100, 2]) await req("POST", `/api/v1/db/${c}`, { body: { score } });
+    const desc = await (await req("GET", `/api/v1/db/${c}?sort=-score`)).json();
+    expect(desc.items.map((d: { data: { score: number } }) => d.data.score)).toEqual([100, 10, 9, 2]);
   });
 });
 
@@ -278,6 +343,23 @@ describe("uploads", () => {
 
     const del = await (await req("DELETE", "/api/v1/uploads/note.txt")).json();
     expect(del.deleted).toBe(true);
+  });
+
+  test("markup is served as bytes, never as an active document", async () => {
+    const form = new FormData();
+    form.set("file", new Blob(["<script>globalThis.pwned=1</script>"], { type: "text/html" }), "x.html");
+    await req("POST", "/api/v1/uploads", { form });
+    const served = await req("GET", `/u/${S1}/x.html`);
+    expect(served.headers.get("content-type")).not.toContain("text/html");
+    expect(served.headers.get("content-disposition")).toBe("attachment");
+    expect(served.headers.get("x-content-type-options")).toBe("nosniff");
+    await req("DELETE", "/api/v1/uploads/x.html");
+  });
+
+  test("an upload name cannot reach into another site's bucket", async () => {
+    const res = await req("DELETE", `/api/v1/uploads/${encodeURIComponent(`../${S2}/note.txt`)}`);
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.code).toBe("invalid_request");
   });
 });
 
@@ -715,6 +797,21 @@ describe("auth (google GIS mode — client id, no secret)", () => {
     const res = await fetch(`${GBASE}/auth/google`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ credential: "not.a.jwt" }) });
     expect(res.status).toBe(401);
   });
+  test("a return target cannot break out of the page's inline script", async () => {
+    const rd = "/</script><script>globalThis.pwned=1</script>";
+    const html = await (await fetch(`${GBASE}/auth/login?rd=${encodeURIComponent(rd)}`)).text();
+    expect(html).not.toContain("</script><script>");
+    expect(html).toContain("\\u003c/script");
+  });
+  test("a protocol-relative return target falls back to /", async () => {
+    const html = await (await fetch(`${GBASE}/auth/login?rd=${encodeURIComponent("//evil.example")}`)).text();
+    expect(html).toContain('const RD = "/"');
+    expect(html).not.toContain("evil.example");
+  });
+  test("a malformed session cookie is ignored, not a 500", async () => {
+    const res = await fetch(`${GBASE}/healthz`, { headers: { cookie: "world_session=%" } });
+    expect(res.status).toBe(200);
+  });
 });
 
 describe("path routing (WORLDS_ROUTING=path)", () => {
@@ -762,5 +859,26 @@ describe("path routing (WORLDS_ROUTING=path)", () => {
     expect(mine.items.length).toBe(1);
     const home = await (await fetch(`${PB}/api/v1/db/notes`)).json(); // no header → home
     expect(home.items.length).toBe(0);
+  });
+
+  test("a visit is credited to the site named in the beacon", async () => {
+    // Every site shares one hostname here, so the site can only come from the body —
+    // and it has to reach the right row rather than the apex's.
+    const before = (await (await fetch(`${PB}/api/v1/sites/${SITE}`)).json()).visits_30d;
+    await fetch(`${PB}/api/v1/beacon/visit`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ site: SITE }),
+    });
+    const after = (await (await fetch(`${PB}/api/v1/sites/${SITE}`)).json()).visits_30d;
+    expect(after).toBe(before + 1);
+  });
+
+  test("uploads round-trip on the shared origin", async () => {
+    const form = new FormData();
+    form.set("file", new Blob(["path bytes"], { type: "text/plain" }), "p.txt");
+    const put = await (await fetch(`${PB}/api/v1/uploads`, {
+      method: "POST", headers: { "x-worlds-csrf": "1", "x-worlds-site": SITE }, body: form,
+    })).json();
+    expect(put.url).toBe(`/u/${SITE}/p.txt`);
+    expect(await (await fetch(`${PB}${put.url}`)).text()).toBe("path bytes");
   });
 });

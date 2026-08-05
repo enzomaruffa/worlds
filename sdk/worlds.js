@@ -5,17 +5,28 @@
   class WorldsError extends Error {
     code;
     status;
-    retry_after;
+    retryAfter;
     constructor(code, message, status = 0, retryAfter) {
       super(message);
       this.name = "WorldsError";
       this.code = code;
       this.status = status;
-      this.retry_after = retryAfter;
+      this.retryAfter = retryAfter;
+    }
+    get retry_after() {
+      return this.retryAfter;
     }
   }
 
   // sdk/src/http.ts
+  function currentSite() {
+    if (typeof location === "undefined")
+      return null;
+    const m = location.pathname.match(/^\/app\/([^/]+)/);
+    if (m)
+      return decodeURIComponent(m[1]);
+    return location.hostname.split(".")[0] || null;
+  }
   function siteHeaders() {
     if (typeof location === "undefined")
       return {};
@@ -74,7 +85,7 @@
           this.ws.send(JSON.stringify(frame));
         }
         for (const f of this.outbox)
-          this.ws.send(f);
+          this.ws.send(JSON.stringify(f));
         this.outbox = [];
       };
       this.ws.onmessage = (m2) => {
@@ -102,13 +113,17 @@
           sub.onActorEvent(f.from, f.payload);
         } else if (f.op === "actors_leave" && sub.onActorLeave) {
           sub.onActorLeave(f.ids || []);
-        } else if (f.op === "error" && f.error?.code === "replay_expired" && sub.onExpired) {
-          sub.cursor = null;
-          sub.onExpired();
+        } else if (f.op === "error") {
+          if (f.error?.code === "replay_expired" && sub.onExpired) {
+            sub.cursor = null;
+            sub.onExpired();
+          } else {
+            console.warn("[worlds] realtime error", f.error?.code, f.error?.message);
+          }
         }
       };
       this.ws.onclose = () => {
-        if (this.subs.size === 0)
+        if (this.subs.size === 0 && this.outbox.length === 0)
           return;
         setTimeout(() => this.open(), this.backoff);
         this.backoff = Math.min(this.backoff * 2, 30000);
@@ -116,16 +131,17 @@
     },
     send(frame) {
       this.open();
-      const s = JSON.stringify(frame);
       if (this.ws && this.ws.readyState === 1)
-        this.ws.send(s);
+        this.ws.send(JSON.stringify(frame));
       else
-        this.outbox.push(s);
+        this.outbox.push(frame);
     },
     subscribe(frame, handler, extras = {}) {
       const id = `s${this.nextId++}`;
       this.subs.set(id, { frame, handler, cursor: null, ...extras });
-      this.send({ ...frame, id });
+      this.open();
+      if (this.ws && this.ws.readyState === 1)
+        this.ws.send(JSON.stringify({ ...frame, id }));
       return () => {
         this.subs.delete(id);
         if (this.ws && this.ws.readyState === 1)
@@ -135,6 +151,10 @@
   };
 
   // sdk/src/db.ts
+  function collections(otherSite) {
+    const q = otherSite ? `?site=${encodeURIComponent(otherSite)}` : "";
+    return call("GET", `/api/v1/db${q}`);
+  }
   function collection(name, otherSite) {
     const base = `/api/v1/db/${encodeURIComponent(name)}`;
     const siteQ = otherSite ? `site=${encodeURIComponent(otherSite)}` : "";
@@ -143,7 +163,12 @@
     return {
       create: (data) => otherSite ? readOnly() : call("POST", base, data),
       get: (id) => call("GET", withSite(`${base}/${encodeURIComponent(id)}`)),
-      update: (id, patch, opts = {}) => otherSite ? readOnly() : call("PATCH", `${base}/${encodeURIComponent(id)}`, patch, opts.if_updated_at ? { headers: { "if-unmodified-since-version": opts.if_updated_at } } : {}),
+      update: (id, patch, opts = {}) => {
+        if (otherSite)
+          return readOnly();
+        const version = opts.ifUpdatedAt ?? opts.if_updated_at;
+        return call("PATCH", `${base}/${encodeURIComponent(id)}`, patch, version ? { headers: { "if-unmodified-since-version": version } } : {});
+      },
       replace: (id, data) => otherSite ? readOnly() : call("PUT", `${base}/${encodeURIComponent(id)}`, data),
       delete: (id) => otherSite ? readOnly() : call("DELETE", `${base}/${encodeURIComponent(id)}`),
       increment: (id, field, by = 1) => otherSite ? readOnly() : call("POST", `${base}/${encodeURIComponent(id)}/increment`, { field, by }),
@@ -206,6 +231,7 @@
     let buf = "";
     let text = "";
     let model = body.model || "fast";
+    let usage = { input_tokens: 0, output_tokens: 0 };
     for (;; ) {
       const { done, value } = await reader.read();
       if (done)
@@ -228,10 +254,12 @@
           }
           if (obj.model)
             model = obj.model;
+          if (obj.usage)
+            usage = obj.usage;
         } catch {}
       }
     }
-    return { text, model };
+    return { text, model, usage };
   }
 
   // sdk/src/uploads.ts
@@ -280,8 +308,9 @@
     let dead = false;
     const ready = {};
     let docId = null;
-    let state = hasState ? null : null;
+    let state = null;
     let rev = 0;
+    let unsubState = null;
     const listeners = new Set;
     if (opts.onChange)
       listeners.add(opts.onChange);
@@ -419,12 +448,13 @@
         state = created.data;
         rev = 0;
       }
-      col.subscribe((ev) => {
+      const off = col.subscribe((ev) => {
         if (!ev || !ev.doc)
           return;
         const d = ev.doc;
         if (d.id === docId || d.data && d.data._room === key) {
           if (ev.type === "delete") {
+            docId = null;
             state = { ...seed(), _room: key, _rev: rev };
             emit();
             return;
@@ -432,6 +462,10 @@
           adopt(d, false);
         }
       });
+      if (dead)
+        off();
+      else
+        unsubState = off;
     }
     async function write(next) {
       if (!col)
@@ -441,10 +475,13 @@
           await opened;
         } catch {}
       }
-      if (!docId)
-        return false;
       const payload = { ...next, _room: key, _rev: rev + 1 };
       try {
+        if (!docId) {
+          const created = await col.create({ ...payload, _rev: rev + 1 });
+          adopt(created, true);
+          return true;
+        }
         const res = await col.replace(docId, payload);
         adopt(res, true);
         return true;
@@ -468,6 +505,11 @@
         return;
       if (p.t === "ready" && p.handle) {
         ready[p.handle] = !!p.ready;
+        if (p.started && !started) {
+          started = true;
+          emit();
+          opts.onStart?.(snapshot());
+        }
         emit();
         maybeAutoStart();
       } else if (p.t === "start") {
@@ -484,7 +526,7 @@
         opts.onReturn?.(snapshot());
       } else if (p.t === "hello" && p.handle) {
         if (me)
-          pub({ t: "ready", handle: me.handle, name: me.name, ready: !!ready[me.handle] });
+          pub({ t: "ready", handle: me.handle, name: me.name, ready: !!ready[me.handle], started });
       }
     });
     function announce() {
@@ -554,6 +596,9 @@
       leave() {
         this.destroy();
       },
+      stop() {
+        this.destroy();
+      },
       destroy() {
         dead = true;
         try {
@@ -562,6 +607,10 @@
         try {
           unsubMsg?.();
         } catch {}
+        try {
+          unsubState?.();
+        } catch {}
+        unsubState = null;
       }
     };
   }
@@ -622,6 +671,10 @@
       const t = Date.parse(doc.updated_at || doc.created_at || "");
       return !Number.isFinite(t) || Date.now() - t < ttlMs;
     }
+    function sweepable(doc) {
+      const t = Date.parse(doc.updated_at || doc.created_at || "");
+      return Number.isFinite(t) && Date.now() - t > ttlMs * 4;
+    }
     function computeList() {
       const out = [];
       for (const doc of docs.values()) {
@@ -648,7 +701,7 @@
       for (const [dbId, doc] of [...docs.entries()]) {
         if (dbId === currentDbId)
           continue;
-        if (doc.data && doc.data._dir && !fresh(doc)) {
+        if (doc.data && doc.data._dir && sweepable(doc)) {
           docs.delete(dbId);
           try {
             await dir.delete(dbId);
@@ -746,6 +799,16 @@
         lastMirror = sig;
         dir.update(dbId, patch).catch(() => {});
       }
+      const roomDestroy = r.destroy.bind(r);
+      let torn = false;
+      r.destroy = () => {
+        if (torn)
+          return;
+        torn = true;
+        roomDestroy();
+        if (current === r)
+          detach();
+      };
       stopMirror = r.onChange(mirror);
       heartbeat = setInterval(() => {
         const s = r.snapshot();
@@ -862,6 +925,9 @@
         } catch {}
         clearInterval(sweeper);
         listeners.clear();
+      },
+      stop() {
+        this.destroy();
       }
     };
   }
@@ -918,7 +984,7 @@
     }
     h = setInterval(tick, interval);
     tick();
-    return { stop };
+    return { stop, destroy: stop };
   }
 
   // sdk/src/actors.ts
@@ -969,7 +1035,17 @@
         emitChange(rec);
       }
     }
-    const stopSub = sock.subscribe({ op: "sub", kind: "actors", channel: name, zone, cid, rate: opts.rate, meta: opts.metadata, observer: opts.observer }, () => {}, {
+    const subFrame = {
+      op: "sub",
+      kind: "actors",
+      channel: name,
+      zone,
+      cid,
+      rate: opts.rate,
+      meta: opts.metadata,
+      observer: opts.observer
+    };
+    const stopSub = sock.subscribe(subFrame, () => {}, {
       onSnapshot: (list) => {
         const keep = new Set((list || []).map((a) => a && a.id).filter(Boolean));
         for (const peer of [...states.keys()])
@@ -997,7 +1073,7 @@
         if (stopped || opts.observer)
           return;
         if (opts.zoneKey)
-          zone = String(opts.zoneKey(state));
+          zone = subFrame.zone = String(opts.zoneKey(state));
         sock.send({ op: "set", id: "set", channel: name, cid, state, zone });
       },
       setMetadata(patch) {
@@ -1032,13 +1108,16 @@
         changeFns.clear();
         eventFns.clear();
         leaveFns.clear();
+      },
+      stop() {
+        this.destroy();
       }
     };
   }
 
   // sdk/src/idle.ts
   var HOUR = 3600;
-  var siteName = () => typeof location !== "undefined" ? location.hostname.split(".")[0] : "site";
+  var siteName = () => currentSite() ?? "site";
   var esc2 = (s) => {
     const d = document.createElement("div");
     d.textContent = s == null ? "" : String(s);
@@ -1075,8 +1154,10 @@
         try {
           col = col || collection("__idle");
           const h = await whoami();
-          const page = await col.list({ filter: { _idle: key }, limit: 50 });
-          const mine = (page.items || []).find((it) => it.created_by === h || it.data && it.data.handle === h);
+          if (!h)
+            return null;
+          const page = await col.list({ filter: { _idle: key, handle: h }, limit: 1 });
+          const mine = (page.items || [])[0];
           if (mine) {
             docId = mine.id;
             return mine.data.lastSeen ?? null;
@@ -1160,7 +1241,7 @@
         window.removeEventListener("beforeunload", beat);
       } catch {}
     }
-    return { elapsed, beat, summary, stop };
+    return { elapsed, beat, summary, stop, destroy: stop };
   }
   function defaultRender(report) {
     if (report == null)
@@ -1255,7 +1336,11 @@
     me: () => call("GET", "/api/v1/me"),
     db: {
       collection,
-      site: (name) => ({ collection: (c) => collection(c, name) })
+      collections: () => collections(),
+      site: (name) => ({
+        collection: (c) => collection(c, name),
+        collections: () => collections(name)
+      })
     },
     ai,
     uploads,
@@ -1278,7 +1363,7 @@
   }).catch(() => worlds.site);
   worlds.ready.then((s) => mountLeave(s));
   try {
-    const site = location.hostname.split(".")[0];
+    const site = currentSite();
     if (navigator.sendBeacon && site && site !== "worlds") {
       navigator.sendBeacon("/api/v1/beacon/visit", new Blob([JSON.stringify({ site })], { type: "application/json" }));
     }
