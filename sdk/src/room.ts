@@ -108,8 +108,9 @@ export function room<T extends Record<string, any> = any>(name: string, opts: Ro
 
   // Authoritative state (only when `initial` was given).
   let docId: string | null = null;
-  let state: any = hasState ? null : null;
+  let state: any = null;
   let rev = 0;
+  let unsubState: (() => void) | null = null;
 
   const listeners = new Set<(s: RoomSnapshot<T>) => void>();
   if (opts.onChange) listeners.add(opts.onChange);
@@ -252,11 +253,14 @@ export function room<T extends Record<string, any> = any>(name: string, opts: Ro
       state = created.data;
       rev = 0;
     }
-    col.subscribe((ev: any) => {
+    const off = col.subscribe((ev: any) => {
       if (!ev || !ev.doc) return;
       const d = ev.doc;
       if (d.id === docId || (d.data && d.data._room === key)) {
         if (ev.type === "delete") {
+          // The doc is gone, so keep serving the seed but forget the dead id —
+          // otherwise every later write replaces an id that no longer exists.
+          docId = null;
           state = { ...seed(), _room: key, _rev: rev };
           emit();
           return;
@@ -264,6 +268,9 @@ export function room<T extends Record<string, any> = any>(name: string, opts: Ro
         adopt(d, false);
       }
     });
+    // destroy() may have run while the list/create above were in flight.
+    if (dead) off();
+    else unsubState = off;
   }
   async function write(next: any): Promise<boolean> {
     if (!col) return false;
@@ -272,9 +279,15 @@ export function room<T extends Record<string, any> = any>(name: string, opts: Ro
         await opened;
       } catch {}
     }
-    if (!docId) return false;
     const payload = { ...next, _room: key, _rev: rev + 1 };
     try {
+      // No doc id means the state doc was swept or deleted under us; re-create it so
+      // the room keeps working instead of failing every write from here on.
+      if (!docId) {
+        const created = await col.create({ ...payload, _rev: rev + 1 });
+        adopt(created, true);
+        return true;
+      }
       const res = await col.replace(docId, payload);
       adopt(res, true);
       return true;
@@ -297,6 +310,13 @@ export function room<T extends Record<string, any> = any>(name: string, opts: Ro
     if (!p || !p._p || p.cid === cid) return;
     if (p.t === "ready" && p.handle) {
       ready[p.handle] = !!p.ready;
+      // A hello reply carries the sender's `started`, so someone arriving mid-game
+      // leaves the lobby instead of waiting for a `start` that already happened.
+      if (p.started && !started) {
+        started = true;
+        emit();
+        opts.onStart?.(snapshot());
+      }
       emit();
       maybeAutoStart();
     } else if (p.t === "start") {
@@ -311,7 +331,7 @@ export function room<T extends Record<string, any> = any>(name: string, opts: Ro
       emit();
       opts.onReturn?.(snapshot());
     } else if (p.t === "hello" && p.handle) {
-      if (me) pub({ t: "ready", handle: me.handle, name: me.name, ready: !!ready[me.handle] });
+      if (me) pub({ t: "ready", handle: me.handle, name: me.name, ready: !!ready[me.handle], started });
     }
   });
 
@@ -389,6 +409,13 @@ export function room<T extends Record<string, any> = any>(name: string, opts: Ro
       try {
         unsubMsg?.();
       } catch {}
+      // The state-doc subscription outlives the socket's reconnects, so leaving it
+      // behind leaks one db sub per room opened — a lobby that creates and drops
+      // rooms walks straight into the server's per-socket subscription cap.
+      try {
+        unsubState?.();
+      } catch {}
+      unsubState = null;
     },
   };
 }

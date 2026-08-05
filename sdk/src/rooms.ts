@@ -115,6 +115,13 @@ export function rooms<T extends Record<string, any> = any>(name: string, opts: R
     const t = Date.parse(doc.updated_at || doc.created_at || "");
     return !Number.isFinite(t) || Date.now() - t < ttlMs;
   }
+  // Hiding a quiet room from the list is cheap and reversible; deleting it and its
+  // state doc is neither, and the only evidence is a heartbeat that a background tab's
+  // throttled timers can delay well past the ttl. Destroy only on much staler proof.
+  function sweepable(doc: any): boolean {
+    const t = Date.parse(doc.updated_at || doc.created_at || "");
+    return Number.isFinite(t) && Date.now() - t > ttlMs * 4;
+  }
   function computeList(): RoomInfo[] {
     const out: RoomInfo[] = [];
     for (const doc of docs.values()) {
@@ -140,7 +147,7 @@ export function rooms<T extends Record<string, any> = any>(name: string, opts: R
   async function sweep(): Promise<void> {
     for (const [dbId, doc] of [...docs.entries()]) {
       if (dbId === currentDbId) continue; // never GC the room we're in (host migration handles a dead host)
-      if (doc.data && doc.data._dir && !fresh(doc)) {
+      if (doc.data && doc.data._dir && sweepable(doc)) {
         docs.delete(dbId);
         try {
           await dir.delete(dbId);

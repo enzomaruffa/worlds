@@ -87,8 +87,15 @@ export function actors<T = any>(name: string, opts: ActorsOptions<T> = {}): Acto
     }
   }
 
+  // Held (not spread) so a zoneKey-driven zone change is carried by the replay the
+  // socket sends on reconnect — otherwise you rejoin whichever zone you started in.
+  const subFrame = {
+    op: "sub", kind: "actors", channel: name, zone, cid,
+    rate: opts.rate, meta: opts.metadata, observer: opts.observer,
+  };
+
   const stopSub = sock.subscribe(
-    { op: "sub", kind: "actors", channel: name, zone, cid, rate: opts.rate, meta: opts.metadata, observer: opts.observer },
+    subFrame,
     () => { /* actors deliver via the on* hooks below, not the plain handler */ },
     {
       // A snapshot is the authoritative in-zone set (on join AND on zone switch), so
@@ -110,7 +117,7 @@ export function actors<T = any>(name: string, opts: ActorsOptions<T> = {}): Acto
   return {
     set(state: T): void {
       if (stopped || opts.observer) return; // observers are read-only
-      if (opts.zoneKey) zone = String(opts.zoneKey(state));
+      if (opts.zoneKey) zone = subFrame.zone = String(opts.zoneKey(state));
       sock.send({ op: "set", id: "set", channel: name, cid, state, zone });
     },
     setMetadata(patch: Record<string, any>): void {

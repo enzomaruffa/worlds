@@ -63,8 +63,12 @@ export function idle(key = "default", opts: IdleOptions = {}): Idle {
       try {
         col = col || collection("__idle");
         const h = await whoami();
-        const page = await col.list({ filter: { _idle: key }, limit: 50 });
-        const mine = (page.items || []).find((it: any) => it.created_by === h || (it.data && it.data.handle === h));
+        if (!h) return null;
+        // Filter on the handle rather than scanning a page of everyone's docs: past the
+        // first 50 players a returning player's doc is invisible, so they get no offline
+        // credit and writeLastSeen creates them a fresh duplicate on every visit.
+        const page = await col.list({ filter: { _idle: key, handle: h }, limit: 1 });
+        const mine = (page.items || [])[0];
         if (mine) { docId = mine.id; return mine.data.lastSeen ?? null; }
       } catch {}
     }

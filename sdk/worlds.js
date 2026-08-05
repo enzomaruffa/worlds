@@ -74,7 +74,7 @@
           this.ws.send(JSON.stringify(frame));
         }
         for (const f of this.outbox)
-          this.ws.send(f);
+          this.ws.send(JSON.stringify(f));
         this.outbox = [];
       };
       this.ws.onmessage = (m2) => {
@@ -102,13 +102,17 @@
           sub.onActorEvent(f.from, f.payload);
         } else if (f.op === "actors_leave" && sub.onActorLeave) {
           sub.onActorLeave(f.ids || []);
-        } else if (f.op === "error" && f.error?.code === "replay_expired" && sub.onExpired) {
-          sub.cursor = null;
-          sub.onExpired();
+        } else if (f.op === "error") {
+          if (f.error?.code === "replay_expired" && sub.onExpired) {
+            sub.cursor = null;
+            sub.onExpired();
+          } else {
+            console.warn("[worlds] realtime error", f.error?.code, f.error?.message);
+          }
         }
       };
       this.ws.onclose = () => {
-        if (this.subs.size === 0)
+        if (this.subs.size === 0 && this.outbox.length === 0)
           return;
         setTimeout(() => this.open(), this.backoff);
         this.backoff = Math.min(this.backoff * 2, 30000);
@@ -116,16 +120,17 @@
     },
     send(frame) {
       this.open();
-      const s = JSON.stringify(frame);
       if (this.ws && this.ws.readyState === 1)
-        this.ws.send(s);
+        this.ws.send(JSON.stringify(frame));
       else
-        this.outbox.push(s);
+        this.outbox.push(frame);
     },
     subscribe(frame, handler, extras = {}) {
       const id = `s${this.nextId++}`;
       this.subs.set(id, { frame, handler, cursor: null, ...extras });
-      this.send({ ...frame, id });
+      this.open();
+      if (this.ws && this.ws.readyState === 1)
+        this.ws.send(JSON.stringify({ ...frame, id }));
       return () => {
         this.subs.delete(id);
         if (this.ws && this.ws.readyState === 1)
@@ -280,8 +285,9 @@
     let dead = false;
     const ready = {};
     let docId = null;
-    let state = hasState ? null : null;
+    let state = null;
     let rev = 0;
+    let unsubState = null;
     const listeners = new Set;
     if (opts.onChange)
       listeners.add(opts.onChange);
@@ -419,12 +425,13 @@
         state = created.data;
         rev = 0;
       }
-      col.subscribe((ev) => {
+      const off = col.subscribe((ev) => {
         if (!ev || !ev.doc)
           return;
         const d = ev.doc;
         if (d.id === docId || d.data && d.data._room === key) {
           if (ev.type === "delete") {
+            docId = null;
             state = { ...seed(), _room: key, _rev: rev };
             emit();
             return;
@@ -432,6 +439,10 @@
           adopt(d, false);
         }
       });
+      if (dead)
+        off();
+      else
+        unsubState = off;
     }
     async function write(next) {
       if (!col)
@@ -441,10 +452,13 @@
           await opened;
         } catch {}
       }
-      if (!docId)
-        return false;
       const payload = { ...next, _room: key, _rev: rev + 1 };
       try {
+        if (!docId) {
+          const created = await col.create({ ...payload, _rev: rev + 1 });
+          adopt(created, true);
+          return true;
+        }
         const res = await col.replace(docId, payload);
         adopt(res, true);
         return true;
@@ -468,6 +482,11 @@
         return;
       if (p.t === "ready" && p.handle) {
         ready[p.handle] = !!p.ready;
+        if (p.started && !started) {
+          started = true;
+          emit();
+          opts.onStart?.(snapshot());
+        }
         emit();
         maybeAutoStart();
       } else if (p.t === "start") {
@@ -484,7 +503,7 @@
         opts.onReturn?.(snapshot());
       } else if (p.t === "hello" && p.handle) {
         if (me)
-          pub({ t: "ready", handle: me.handle, name: me.name, ready: !!ready[me.handle] });
+          pub({ t: "ready", handle: me.handle, name: me.name, ready: !!ready[me.handle], started });
       }
     });
     function announce() {
@@ -562,6 +581,10 @@
         try {
           unsubMsg?.();
         } catch {}
+        try {
+          unsubState?.();
+        } catch {}
+        unsubState = null;
       }
     };
   }
@@ -622,6 +645,10 @@
       const t = Date.parse(doc.updated_at || doc.created_at || "");
       return !Number.isFinite(t) || Date.now() - t < ttlMs;
     }
+    function sweepable(doc) {
+      const t = Date.parse(doc.updated_at || doc.created_at || "");
+      return Number.isFinite(t) && Date.now() - t > ttlMs * 4;
+    }
     function computeList() {
       const out = [];
       for (const doc of docs.values()) {
@@ -648,7 +675,7 @@
       for (const [dbId, doc] of [...docs.entries()]) {
         if (dbId === currentDbId)
           continue;
-        if (doc.data && doc.data._dir && !fresh(doc)) {
+        if (doc.data && doc.data._dir && sweepable(doc)) {
           docs.delete(dbId);
           try {
             await dir.delete(dbId);
@@ -969,7 +996,17 @@
         emitChange(rec);
       }
     }
-    const stopSub = sock.subscribe({ op: "sub", kind: "actors", channel: name, zone, cid, rate: opts.rate, meta: opts.metadata, observer: opts.observer }, () => {}, {
+    const subFrame = {
+      op: "sub",
+      kind: "actors",
+      channel: name,
+      zone,
+      cid,
+      rate: opts.rate,
+      meta: opts.metadata,
+      observer: opts.observer
+    };
+    const stopSub = sock.subscribe(subFrame, () => {}, {
       onSnapshot: (list) => {
         const keep = new Set((list || []).map((a) => a && a.id).filter(Boolean));
         for (const peer of [...states.keys()])
@@ -997,7 +1034,7 @@
         if (stopped || opts.observer)
           return;
         if (opts.zoneKey)
-          zone = String(opts.zoneKey(state));
+          zone = subFrame.zone = String(opts.zoneKey(state));
         sock.send({ op: "set", id: "set", channel: name, cid, state, zone });
       },
       setMetadata(patch) {
@@ -1075,8 +1112,10 @@
         try {
           col = col || collection("__idle");
           const h = await whoami();
-          const page = await col.list({ filter: { _idle: key }, limit: 50 });
-          const mine = (page.items || []).find((it) => it.created_by === h || it.data && it.data.handle === h);
+          if (!h)
+            return null;
+          const page = await col.list({ filter: { _idle: key, handle: h }, limit: 1 });
+          const mine = (page.items || [])[0];
           if (mine) {
             docId = mine.id;
             return mine.data.lastSeen ?? null;
