@@ -17,6 +17,9 @@ export const config = {
   // self-host or a single-pod deploy. Inferred from DATABASE_URL when it names a file.
   db: (process.env.WORLDS_DB ?? (/^(sqlite:|file:|\.?\/|[^:]+\.(db|sqlite3?)$)/.test(process.env.DATABASE_URL ?? "") ? "sqlite" : "postgres")) as "postgres" | "sqlite",
   databaseUrl: process.env.DATABASE_URL ?? "postgres://world:world@localhost:5499/world",
+  // sqlite + WORLDS_S3_BUCKET: how often the database is snapshotted to the bucket, and
+  // therefore how much a hard crash can lose. A graceful stop always snapshots first.
+  dbSnapshotSeconds: Math.max(10, Number(process.env.WORLDS_DB_SNAPSHOT_SECONDS ?? 60)),
   geminiKey: process.env.GEMINI_API_KEY,
   slackToken: process.env.SLACK_BOT_TOKEN,
   // When set, unrecognized hosts (e.g. a Cloudflare/ngrok tunnel) serve this site
