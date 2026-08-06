@@ -11,6 +11,13 @@ already the shape of a worlds deployment (the realtime change feed is in-process
 it's the right pick for a self-host or a single-pod install; reach for Postgres when you
 need managed backups, or before scaling past one instance.
 
+**SQLite on an ephemeral disk.** Set `WORLDS_S3_BUCKET` alongside `WORLDS_DB=sqlite` and
+the database gets its durability from the same bucket as sites and uploads: restored on
+boot, snapshotted (`VACUUM INTO`, so the copy is consistent) every
+`WORLDS_DB_SNAPSHOT_SECONDS` and again on `SIGTERM`. A graceful stop loses nothing; a
+hard crash loses at most one snapshot interval. No volume required — which is the point
+if your platform team would rather not hand out one.
+
 ## Fastest path (Docker Compose)
 
 ```sh
@@ -51,6 +58,7 @@ A reverse proxy must forward WebSocket upgrades (`/api/v1/socket`) for realtime 
 | `WORLDS_SESSION_SECRET` | HMAC key for the session cookie — set a long random value. |
 | `WORLDS_DB` | `postgres` (default) or `sqlite` — one file, no database server to run. |
 | `DATABASE_URL` | Postgres DSN, or the SQLite file path (default `<WORLDS_DATA_DIR>/worlds.sqlite`). |
+| `WORLDS_DB_SNAPSHOT_SECONDS` | sqlite + S3 only: snapshot cadence, and so the crash-loss window (default 60). |
 | `WORLDS_DATA_DIR` | site + upload storage root (mount a volume; default `./data`). |
 | `GEMINI_API_KEY` | server-side key for `worlds.ai` (optional). |
 | `SLACK_BOT_TOKEN` | bot token for `worlds.notify.slack` (optional). |

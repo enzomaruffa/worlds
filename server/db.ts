@@ -3,6 +3,7 @@ import { join, isAbsolute } from "node:path";
 import { config } from "./config";
 import { WorldsError } from "./errors";
 import { openSqlite } from "./sqlite";
+import { restoreSqlite, startSqliteSnapshots } from "./dbsnapshot";
 import { hoursAgo, isSqlite, jsonArg, jsonParam, NOW } from "./dialect";
 
 // sqlite: DATABASE_URL is a path (default: a file under WORLDS_DATA_DIR, so it rides
@@ -16,8 +17,14 @@ function sqliteFile(): string {
   return isAbsolute(raw) ? raw : join(config.dataDir, raw);
 }
 
+const SQLITE_FILE = isSqlite ? sqliteFile() : "";
+
+// Before the file is opened, not after: with an ephemeral disk the snapshot in S3 is the
+// database, and opening first would create an empty one that then wins.
+if (isSqlite) await restoreSqlite(SQLITE_FILE);
+
 export const sql: any = isSqlite
-  ? openSqlite(sqliteFile())
+  ? openSqlite(SQLITE_FILE)
   : new SQL(config.databaseUrl, { max: 10, idleTimeout: 30 });
 
 let ready = false;
@@ -45,6 +52,7 @@ export async function initDb(): Promise<void> {
     else await migratePostgres();
     ready = true;
     console.log("db: ready");
+    if (isSqlite) startSqliteSnapshots(sql, SQLITE_FILE);
     startPrune();
     for (const fn of readyHooks) void Promise.resolve(fn()).catch(() => {});
   } catch (e) {
