@@ -44,5 +44,10 @@ jobs:
       - name: typecheck
         run: bunx tsc --noEmit
 
-      - name: e2e tests
+      - name: e2e tests (postgres)
         run: bun test
+
+      # The same suite against the other backend — the contract is the contract
+      # whichever engine is underneath.
+      - name: e2e tests (sqlite)
+        run: WORLDS_DB=sqlite bun test

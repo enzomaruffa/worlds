@@ -1,8 +1,15 @@
 # Deploy / self-host
 
-Worlds is **one container** (the Bun server) plus **Postgres**. The server multiplexes
+Worlds is **one container** (the Bun server) plus a database. The server multiplexes
 everything by `Host`: each site's static files, the homepage, `/worlds.js`, the `/api/v1`
 platform, and the `/mcp` agent endpoint.
+
+The database is **Postgres** by default and **SQLite** with `WORLDS_DB=sqlite` — the
+whole platform then runs off one file under `WORLDS_DATA_DIR`, with no server to
+operate. The same e2e suite runs against both. SQLite expects a single writer, which is
+already the shape of a worlds deployment (the realtime change feed is in-process), so
+it's the right pick for a self-host or a single-pod install; reach for Postgres when you
+need managed backups, or before scaling past one instance.
 
 ## Fastest path (Docker Compose)
 
@@ -42,7 +49,8 @@ A reverse proxy must forward WebSocket upgrades (`/api/v1/socket`) for realtime 
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google OAuth client (google mode). |
 | `WORLDS_ALLOWED_DOMAINS` / `WORLDS_ALLOWED_EMAILS` | comma-separated allowlist; empty = any Google account. |
 | `WORLDS_SESSION_SECRET` | HMAC key for the session cookie — set a long random value. |
-| `DATABASE_URL` | Postgres DSN (`worlds.db` collections, deploy log, profiles, events). |
+| `WORLDS_DB` | `postgres` (default) or `sqlite` — one file, no database server to run. |
+| `DATABASE_URL` | Postgres DSN, or the SQLite file path (default `<WORLDS_DATA_DIR>/worlds.sqlite`). |
 | `WORLDS_DATA_DIR` | site + upload storage root (mount a volume; default `./data`). |
 | `GEMINI_API_KEY` | server-side key for `worlds.ai` (optional). |
 | `SLACK_BOT_TOKEN` | bot token for `worlds.notify.slack` (optional). |

@@ -2,6 +2,7 @@ import { sql, requireDb } from "./db";
 import { json, WorldsError } from "./errors";
 import { listSites, publicSite, type SiteRow } from "./sites";
 import { resolveHandle, resolveProfile, overlayCreators } from "./profile";
+import { hoursAgo, jsonArrayHas } from "./dialect";
 
 // Layout: embedding-derived [x,y,z] when the post-deploy worker has set it (so
 // similar sites cluster), else a deterministic name-hash placeholder on a disc.
@@ -47,13 +48,16 @@ export async function creator(handle: string): Promise<Response> {
   requireDb();
   const res = await resolveHandle(handle);
   if (!res) throw new WorldsError("not_found", `no creator "${handle}"`);
-  const sites = (await sql`
-    SELECT * FROM sites
-    WHERE creator = ${res.canonical} OR contributors ? ${res.canonical}
-    ORDER BY updated_at DESC`) as SiteRow[];
-  const [d] = await sql`
-    SELECT count(*)::int AS n FROM deploys
-    WHERE by_handle = ${res.canonical} AND at > now() - interval '90 days'`;
+  const sites = (await sql.unsafe(
+    `SELECT * FROM sites
+     WHERE creator = $1 OR ${jsonArrayHas("contributors", "$1")}
+     ORDER BY updated_at DESC`,
+    [res.canonical],
+  )) as SiteRow[];
+  const [d] = await sql.unsafe(
+    `SELECT count(*) AS n FROM deploys WHERE by_handle = $1 AND at > ${hoursAgo(90 * 24)}`,
+    [res.canonical],
+  );
   const prof = await resolveProfile(res.canonical, res.canonical);
   const items = sites.map(publicSite);
   await overlayCreators(items);

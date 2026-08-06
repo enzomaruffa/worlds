@@ -12,6 +12,10 @@ export const config = {
   baseDomain: process.env.WORLDS_BASE_DOMAIN ?? "worlds.localhost",
   // dev stubs identity (no real auth) — explicit opt-in.
   dev: process.env.WORLDS_DEV === "1",
+  // Postgres by default. `sqlite` runs the whole platform off one file under
+  // WORLDS_DATA_DIR — no database server to operate, which is the point for a small
+  // self-host or a single-pod deploy. Inferred from DATABASE_URL when it names a file.
+  db: (process.env.WORLDS_DB ?? (/^(sqlite:|file:|\.?\/|[^:]+\.(db|sqlite3?)$)/.test(process.env.DATABASE_URL ?? "") ? "sqlite" : "postgres")) as "postgres" | "sqlite",
   databaseUrl: process.env.DATABASE_URL ?? "postgres://world:world@localhost:5499/world",
   geminiKey: process.env.GEMINI_API_KEY,
   slackToken: process.env.SLACK_BOT_TOKEN,
