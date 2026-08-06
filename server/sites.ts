@@ -2,6 +2,7 @@ import { sql, requireDb, dbReady, emitChange } from "./db";
 import type { Identity } from "./identity";
 import { config } from "./config";
 import { WorldsError } from "./errors";
+import { asText, ILIKE, jsonArg, jsonArrayAppend, jsonArrayHas, jsonParam, NOW } from "./dialect";
 
 export interface SiteRow {
   name: string;
@@ -47,9 +48,7 @@ export function publicSite(s: SiteRow) {
 // Post-deploy worker results (universe pipeline) — set asynchronously after a deploy.
 export async function setEmbedPos(name: string, pos: number[]): Promise<void> {
   if (!dbReady()) return;
-  // Bind the array directly — Bun.sql encodes it as jsonb (don't pre-stringify or
-  // it stores a JSON string scalar, not an array).
-  await sql`UPDATE sites SET embed_pos = ${pos as never} WHERE name = ${name}`;
+  await sql.unsafe(`UPDATE sites SET embed_pos = ${jsonArg("$1")} WHERE name = $2`, [jsonParam(pos), name]);
 }
 
 export async function setScreenshot(name: string, url: string): Promise<void> {
@@ -64,10 +63,12 @@ export async function publishSiteDoc(site: string, created: boolean): Promise<vo
   const s = await getSite(site);
   if (!s) return;
   const doc = publicSite(s);
-  await sql`
-    INSERT INTO documents (site, collection, id, data, created_by)
-    VALUES ('home', 'sites', ${`site_${site}`}, ${doc as never}, 'world')
-    ON CONFLICT (site, collection, id) DO UPDATE SET data = ${doc as never}, updated_at = now()`;
+  await sql.unsafe(
+    `INSERT INTO documents (site, collection, id, data, created_by)
+     VALUES ('home', 'sites', $1, ${jsonArg("$2")}, 'world')
+     ON CONFLICT (site, collection, id) DO UPDATE SET data = ${jsonArg("$2")}, updated_at = ${NOW}`,
+    [`site_${site}`, jsonParam(doc)],
+  );
   await emitChange("home", "sites", created ? "create" : "update", doc);
 }
 
@@ -78,20 +79,29 @@ export async function upsertSite(
 ): Promise<{ created: boolean }> {
   requireDb();
   const category = CATEGORIES.has(meta.category ?? "") ? meta.category! : "misc";
-  const rows = await sql`
-    INSERT INTO sites (name, description, creator, contributors, spa_fallback, category)
-    VALUES (${name}, ${meta.description ?? ""}, ${who.handle}, ${JSON.stringify([who.handle]) as never}, ${meta.spa_fallback ?? false}, ${category})
-    ON CONFLICT (name) DO UPDATE SET
-      description = COALESCE(NULLIF(${meta.description ?? ""}, ''), sites.description),
-      spa_fallback = ${meta.spa_fallback ?? false},
-      category = CASE WHEN ${meta.category ?? ""} = '' THEN sites.category ELSE ${category} END,
-      contributors = CASE
-        WHEN sites.contributors ? ${who.handle} THEN sites.contributors
-        ELSE sites.contributors || ${JSON.stringify([who.handle]) as never}
-      END,
-      updated_at = now()
-    RETURNING (xmax = 0) AS created`;
-  return { created: Boolean(rows[0]?.created) };
+  // Read first rather than `RETURNING (xmax = 0)`: xmax is a Postgres system column
+  // with no SQLite equivalent, and `created` only decides whether the change feed
+  // reports a create or an update.
+  const [existing] = await sql`SELECT 1 AS present FROM sites WHERE name = ${name}`;
+  const created = !existing;
+  await sql.unsafe(
+    `INSERT INTO sites (name, description, creator, contributors, spa_fallback, category)
+     VALUES ($1, $2, $3, ${jsonArg("$4")}, $5, $6)
+     ON CONFLICT (name) DO UPDATE SET
+       description = COALESCE(NULLIF($2, ''), sites.description),
+       spa_fallback = $5,
+       category = CASE WHEN $7 = '' THEN sites.category ELSE $6 END,
+       contributors = CASE
+         WHEN ${jsonArrayHas("sites.contributors", "$3")} THEN sites.contributors
+         ELSE ${jsonArrayAppend("sites.contributors", "$3", "$4")}
+       END,
+       updated_at = ${NOW}`,
+    [
+      name, meta.description ?? "", who.handle, jsonParam([who.handle]),
+      meta.spa_fallback ?? false, category, meta.category ?? "",
+    ],
+  );
+  return { created };
 }
 
 export async function getSite(name: string): Promise<SiteRow | null> {
@@ -113,14 +123,14 @@ export async function listSites(q: {
   limit: number;
 }): Promise<SiteRow[]> {
   requireDb();
-  return (await sql`
-    SELECT * FROM sites
-    WHERE (${q.creator ?? null}::text IS NULL OR creator = ${q.creator ?? null})
-      AND (${q.search ?? null}::text IS NULL
-           OR name ILIKE '%' || ${q.search ?? ""} || '%'
-           OR description ILIKE '%' || ${q.search ?? ""} || '%')
-    ORDER BY updated_at DESC
-    LIMIT ${q.limit}`) as SiteRow[];
+  return (await sql.unsafe(
+    `SELECT * FROM sites
+     WHERE (${asText("$1")} IS NULL OR creator = $1)
+       AND (${asText("$2")} IS NULL OR name ${ILIKE} $3 OR description ${ILIKE} $3)
+     ORDER BY updated_at DESC
+     LIMIT $4`,
+    [q.creator ?? null, q.search ?? null, `%${q.search ?? ""}%`, q.limit],
+  )) as SiteRow[];
 }
 
 export async function spaFallback(name: string): Promise<boolean> {

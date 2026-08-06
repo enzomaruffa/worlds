@@ -2,6 +2,10 @@ import { sql, requireDb, emitChange } from "./db";
 import { LIMITS } from "./config";
 import { WorldsError, json } from "./errors";
 import type { Identity } from "./identity";
+import {
+  asText, eqParam, jsonArg, jsonEq, jsonIncrement, jsonMerge, jsonNumber, jsonParam, jsonPath, jsonSize, jsonText,
+  jsonValue, monotonicNow, NOW, timestampEq,
+} from "./dialect";
 
 const COLLECTION = /^[a-z0-9_-]{1,64}$/;
 
@@ -38,8 +42,8 @@ function checkDoc(data: unknown): void {
 
 async function checkQuotas(site: string, collection: string): Promise<void> {
   const [c] = await sql`
-    SELECT count(DISTINCT collection)::int AS collections,
-           count(*) FILTER (WHERE collection = ${collection})::int AS docs
+    SELECT count(DISTINCT collection) AS collections,
+           count(*) FILTER (WHERE collection = ${collection}) AS docs
     FROM documents WHERE site = ${site}`;
   if (Number(c.docs) >= LIMITS.docsPerCollection) {
     throw new WorldsError("quota_exceeded", `collection has ${LIMITS.docsPerCollection} docs`);
@@ -55,10 +59,12 @@ export async function createDoc(site: string, collection: string, body: unknown,
   checkDoc(body);
   await checkQuotas(site, collection);
   const id = `doc_${crypto.randomUUID().replaceAll("-", "").slice(0, 16)}`;
-  const [row] = await sql`
-    INSERT INTO documents (site, collection, id, data, created_by)
-    VALUES (${site}, ${collection}, ${id}, ${body as never}, ${who.handle})
-    RETURNING id, data, created_by, created_at, updated_at`;
+  const [row] = await sql.unsafe(
+    `INSERT INTO documents (site, collection, id, data, created_by)
+     VALUES ($1, $2, $3, ${jsonArg("$4")}, $5)
+     RETURNING id, data, created_by, created_at, updated_at`,
+    [site, collection, id, jsonParam(body), who.handle],
+  );
   const doc = envelope(row as DocRow);
   await emitChange(site, collection, "create", doc);
   return json(doc);
@@ -90,24 +96,26 @@ export async function patchDoc(
   }
   // The precondition is part of the UPDATE, not a SELECT before it: checked separately,
   // two concurrent writers both pass and both write — the exact race the header exists
-  // to lose. `updated_at` is truncated because the version clients echo back is a JS
-  // Date (milliseconds), while postgres stores microseconds.
+  // to lose. Both backends store `updated_at` at millisecond precision, which is what
+  // survives the JS Date round trip clients echo back.
   // Merge also caps the *result*: a patch that fits can still push the doc past the
   // limit, and unlike a replace the final size isn't knowable before the write.
+  const merged = jsonMerge("data", jsonArg("$5"));
+  const guard = `AND (${asText("$4")} IS NULL OR ${timestampEq("updated_at", "$4")})`;
   const [row] = mode === "merge"
-    ? await sql`
-        UPDATE documents SET data = data || ${body as never}, updated_at = now()
-        WHERE site = ${site} AND collection = ${collection} AND id = ${id}
-          AND (${precondition}::timestamptz IS NULL
-               OR date_trunc('milliseconds', updated_at) = ${precondition}::timestamptz)
-          AND octet_length((data || ${body as never})::text) <= ${LIMITS.docBytes}
-        RETURNING id, data, created_by, created_at, updated_at`
-    : await sql`
-        UPDATE documents SET data = ${body as never}, updated_at = now()
-        WHERE site = ${site} AND collection = ${collection} AND id = ${id}
-          AND (${precondition}::timestamptz IS NULL
-               OR date_trunc('milliseconds', updated_at) = ${precondition}::timestamptz)
-        RETURNING id, data, created_by, created_at, updated_at`;
+    ? await sql.unsafe(
+        `UPDATE documents SET data = ${merged}, updated_at = ${monotonicNow("updated_at")}
+         WHERE site = $1 AND collection = $2 AND id = $3 ${guard}
+           AND ${jsonSize(merged)} <= $6
+         RETURNING id, data, created_by, created_at, updated_at`,
+        [site, collection, id, precondition, jsonParam(body), LIMITS.docBytes],
+      )
+    : await sql.unsafe(
+        `UPDATE documents SET data = ${jsonArg("$5")}, updated_at = ${monotonicNow("updated_at")}
+         WHERE site = $1 AND collection = $2 AND id = $3 ${guard}
+         RETURNING id, data, created_by, created_at, updated_at`,
+        [site, collection, id, precondition, jsonParam(body)],
+      );
   if (!row) await explainFailedPatch(site, collection, id, precondition);
   const doc = envelope(row as DocRow);
   await emitChange(site, collection, "update", doc);
@@ -136,14 +144,13 @@ export async function incrementDoc(site: string, collection: string, id: string,
     throw new WorldsError("invalid_request", "expected {field, by?} with a finite number");
   }
   // dot paths drill into nested keys, consistent with list/filter (e.g. "score.total")
-  const pgPath = `{${field.split(".").join(",")}}`;
-  const [row] = await sql`
-    UPDATE documents
-    SET data = jsonb_set(data, ${pgPath}::text[],
-          (COALESCE((data #>> ${pgPath}::text[])::numeric, 0) + ${by})::text::jsonb, true),
-        updated_at = now()
-    WHERE site = ${site} AND collection = ${collection} AND id = ${id}
-    RETURNING id, data, created_by, created_at, updated_at`;
+  const [row] = await sql.unsafe(
+    `UPDATE documents
+     SET data = ${jsonIncrement("data", "$4", "$5")}, updated_at = ${monotonicNow("updated_at")}
+     WHERE site = $1 AND collection = $2 AND id = $3
+     RETURNING id, data, created_by, created_at, updated_at`,
+    [site, collection, id, jsonPath(field), by],
+  );
   if (!row) throw new WorldsError("not_found", "no such document");
   const doc = envelope(row as DocRow);
   await emitChange(site, collection, "update", doc);
@@ -195,28 +202,34 @@ export async function listDocs(site: string, collection: string, params: URLSear
   const conds: string[] = [];
   const args: unknown[] = [site, collection];
   const arg = (v: unknown) => `$${args.push(v)}`;
-  // Bun's sql.unsafe sends JS arrays as JSON, so JSON paths go as PG array literals.
-  const pathArg = (field: string) => `${arg(`{${field.split(".").join(",")}}`)}::text[]`;
+  const pathArg = (field: string) => arg(jsonPath(field));
 
   for (const [field, spec] of Object.entries(filter)) {
     if (!/^[\w.-]{1,128}$/.test(field)) throw new WorldsError("invalid_request", `bad filter field "${field}"`);
     // Lazy so an empty `in` (which compiles to a constant `false`) never allocates
     // a dangling path param the SQL won't reference.
-    let accessSql: string | null = null;
-    const access = () => (accessSql ??= `data #>> ${pathArg(field)}`);
+    let pathSql: string | null = null;
+    const path = () => (pathSql ??= pathArg(field));
     if (spec !== null && typeof spec === "object" && !Array.isArray(spec)) {
       for (const [op, v] of Object.entries(spec as Record<string, unknown>)) {
-        if (op === "in" && Array.isArray(v)) conds.push(v.length ? `${access()} IN (${v.map((x) => arg(String(x))).join(", ")})` : "false");
-        else if (OPS[op]) {
+        if (op === "in" && Array.isArray(v)) {
+          conds.push(
+            v.length
+              ? `(${v.map((x) => jsonEq("data", path(), arg(eqParam(x)))).join(" OR ")})`
+              : "false",
+          );
+        } else if (op === "ne") {
+          conds.push(`NOT ${jsonEq("data", path(), arg(eqParam(v)))}`);
+        } else if (OPS[op]) {
           conds.push(
             typeof v === "number"
-              ? `(${access()})::numeric ${OPS[op]} ${arg(v)}`
-              : `${access()} ${OPS[op]} ${arg(String(v))}`,
+              ? `${jsonNumber("data", path())} ${OPS[op]} ${arg(v)}`
+              : `${jsonText("data", path())} ${OPS[op]} ${arg(String(v))}`,
           );
         } else throw new WorldsError("invalid_request", `unknown filter op "${op}"`);
       }
     } else {
-      conds.push(`${access()} = ${arg(String(spec))}`);
+      conds.push(jsonEq("data", path(), arg(eqParam(spec))));
     }
   }
 
@@ -227,9 +240,9 @@ export async function listDocs(site: string, collection: string, params: URLSear
     const desc = sort.startsWith("-");
     const key = desc ? sort.slice(1) : sort;
     if (!/^[\w.-]{1,128}$/.test(key)) throw new WorldsError("invalid_request", "bad sort key");
-    // `#>` (jsonb) not `#>>` (text): jsonb btree order compares numbers numerically, so
-    // a leaderboard on `-score` puts 10 above 9. Text order sorts "9" above "10".
-    order = `data #> ${pathArg(key)} ${desc ? "DESC" : "ASC"}, n ASC`;
+    // Order on the typed JSON value, not its text: numbers then compare numerically,
+    // so a leaderboard on `-score` puts 10 above 9 instead of "9" above "10".
+    order = `${jsonValue("data", pathArg(key))} ${desc ? "DESC" : "ASC"}, n ASC`;
   }
   if (cursor) {
     // Sorted lists also page by the insertion-order tiebreak (documented v1 behavior).
@@ -257,8 +270,9 @@ export async function listDocs(site: string, collection: string, params: URLSear
 export async function listCollections(site: string) {
   requireDb();
   const rows = await sql`
-    SELECT collection AS name, count(*)::int AS docs
+    SELECT collection AS name, count(*) AS docs
     FROM documents WHERE site = ${site}
     GROUP BY collection ORDER BY collection`;
-  return json({ items: rows, next_cursor: null });
+  const items = rows.map((r: { name: string; docs: unknown }) => ({ name: r.name, docs: Number(r.docs) }));
+  return json({ items, next_cursor: null });
 }

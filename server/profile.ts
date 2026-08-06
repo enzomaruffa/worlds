@@ -2,6 +2,7 @@ import { sql, dbReady } from "./db";
 import { avatarFor, deriveName } from "./identity";
 import { RESERVED_SITES } from "./config";
 import { WorldsError } from "./errors";
+import { jsonArrayHas, NOW } from "./dialect";
 
 // canonical = email local-part (immutable identity key, used for all attribution).
 // handle = mutable, unique display/URL alias; defaults to canonical. "Custom
@@ -78,10 +79,12 @@ export async function updateProfile(
     avatar = a || null;
   }
 
-  await sql`
-    INSERT INTO profiles (canonical, handle, name, avatar, updated_at)
-    VALUES (${canonical}, ${handle}, ${name}, ${avatar}, now())
-    ON CONFLICT (canonical) DO UPDATE SET handle = ${handle}, name = ${name}, avatar = ${avatar}, updated_at = now()`;
+  await sql.unsafe(
+    `INSERT INTO profiles (canonical, handle, name, avatar, updated_at)
+     VALUES ($1, $2, $3, $4, ${NOW})
+     ON CONFLICT (canonical) DO UPDATE SET handle = $2, name = $3, avatar = $4, updated_at = ${NOW}`,
+    [canonical, handle, name, avatar],
+  );
   return withDefaults(canonical, { canonical, handle, name, avatar }, email);
 }
 
@@ -98,7 +101,10 @@ export async function resolveHandle(requested: string): Promise<HandleResolution
   if (byHandle) return { canonical: byHandle.canonical, handle: byHandle.handle, redirect_to: null };
   const [byCanon] = await sql`SELECT canonical, handle FROM profiles WHERE canonical = ${q}`;
   if (byCanon) return { canonical: byCanon.canonical, handle: byCanon.handle, redirect_to: byCanon.handle === q ? null : byCanon.handle };
-  const [hasSites] = await sql`SELECT 1 FROM sites WHERE creator = ${q} OR contributors ? ${q} LIMIT 1`;
+  const [hasSites] = await sql.unsafe(
+    `SELECT 1 AS present FROM sites WHERE creator = $1 OR ${jsonArrayHas("contributors", "$1")} LIMIT 1`,
+    [q],
+  );
   if (hasSites) return { canonical: q, handle: q, redirect_to: null };
   return null;
 }
@@ -110,8 +116,11 @@ export async function overlayCreators(entries: { creator: { handle: string } }[]
   const byCanon = new Map<string, ProfileRow>();
   if (dbReady()) {
     const wanted = [...new Set(entries.map((e) => e.creator.handle))];
-    const rows = await sql`
-      SELECT canonical, handle, name, avatar FROM profiles WHERE canonical IN ${sql(wanted)}`;
+    const rows = await sql.unsafe(
+      `SELECT canonical, handle, name, avatar FROM profiles
+       WHERE canonical IN (${wanted.map((_, i) => `$${i + 1}`).join(", ")})`,
+      wanted,
+    );
     for (const r of rows as ProfileRow[]) byCanon.set(r.canonical, r);
   }
   for (const e of entries) {
