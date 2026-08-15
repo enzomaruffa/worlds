@@ -1351,6 +1351,7 @@ function buildTraffic() {
       a: A.pos.clone().addScaledVector(lane, A.starR * 2.2),
       b: B.pos.clone().addScaledVector(lane, -B.starR * 2.2), t: rng(),
       speed: 0.0018 + rng() * 0.0026, off: new THREE.Vector3((rng() - 0.5) * 90, (rng() - 0.5) * 70, (rng() - 0.5) * 90),
+      hold: 0, yaw: 0, roll: 0,
     };
     transit.push(tr);
     const id = "freighter:" + i;
@@ -1374,15 +1375,48 @@ function buildTraffic() {
     });
   }
 }
-const _tA = new THREE.Vector3(), _tPrev = new THREE.Vector3();
+// A hauler flies a leg, slows into its destination, sits a while, then banks around and
+// runs the other way. Heading is a quaternion it steers toward — NOT lookAt, which
+// rebuilds orientation from scratch every frame and so can never hold a roll.
+const _tA = new THREE.Vector3(), _tHead = new THREE.Vector3();
+const _trEuler = new THREE.Euler(0, 0, 0, "YXZ"), _trQuat = new THREE.Quaternion();
+const DOCK_MIN = 6, DOCK_VAR = 6;
 function updateTraffic(dt) {
   for (const tr of transit) {
-    tr.t += tr.speed * dt * 10;
-    if (tr.t >= 1) { const tmp = tr.a; tr.a = tr.b; tr.b = tmp; tr.t = 0; tr.leg ^= 1; } // bounce back along the lane
-    _tPrev.copy(tr.mesh.position);
+    // ---- along the lane ----
+    if (tr.hold > 0) {
+      tr.hold -= dt; // parked alongside; the turn below runs while it sits
+      if (tr.hold <= 0) { const tmp = tr.a; tr.a = tr.b; tr.b = tmp; tr.leg ^= 1; tr.t = 0; }
+    } else {
+      // ease off on approach and back up on departure, so arrivals and launches read
+      const approach = Math.min(1, (1 - tr.t) / 0.16);
+      const launch = Math.min(1, tr.t / 0.06);
+      const throttle = 0.12 + 0.88 * Math.min(1 - (1 - approach) ** 3, 1 - (1 - launch) ** 3);
+      tr.t += tr.speed * dt * 10 * throttle;
+      if (tr.t >= 1) { tr.t = 1; tr.hold = DOCK_MIN + Math.random() * DOCK_VAR; }
+    }
     _tA.lerpVectors(tr.a, tr.b, tr.t).add(tr.off);
     tr.mesh.position.copy(_tA);
-    if (_tA.distanceToSquared(_tPrev) > 1e-4) tr.mesh.lookAt(_tPrev); // nose along travel (-Z faces back)
+
+    // ---- heading ----
+    // Parked, it aims back down the lane it came up — so the 180° is swept over the whole
+    // stop instead of snapped. The a/b swap only happens when the hold ends, which keeps
+    // position continuous (t=1 on the old lane is the same point as t=0 on the new one).
+    if (tr.hold > 0) _tHead.subVectors(tr.a, tr.b).normalize();
+    else _tHead.subVectors(tr.b, tr.a).normalize();
+    const yaw = Math.atan2(_tHead.x, -_tHead.z);
+    let d = yaw - tr.yaw;
+    while (d > Math.PI) d -= 2 * Math.PI;
+    while (d < -Math.PI) d += 2 * Math.PI;
+    const k = tr.hold > 0 ? 0.55 : 2.2; // slow sweep while docked, crisp correction under way
+    const step = d * (1 - Math.exp(-k * dt));
+    tr.yaw += step;
+    // bank out of the turn rate, exactly as the camera derives its roll from yaw velocity
+    const rollTarget = Math.max(-0.7, Math.min(0.7, -(step / Math.max(dt, 1e-4)) * 0.9));
+    tr.roll += (rollTarget - tr.roll) * (1 - Math.exp(-2.5 * dt));
+    _trEuler.set(-_tHead.y * 0.5, tr.yaw, tr.roll);
+    _trQuat.setFromEuler(_trEuler);
+    tr.mesh.quaternion.slerp(_trQuat, 1 - Math.exp(-4 * dt));
   }
 }
 function updateDebris(dt, t) {
