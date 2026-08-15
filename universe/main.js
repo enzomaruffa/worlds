@@ -2696,16 +2696,16 @@ function tick() {
   const burning = thrust || flyTarget || dive;
   if (flameMesh) {
     const target = burning ? 1.0 + Math.sin(t * 40) * 0.28 : 0.1;
-    flameMesh.scale.y += (target - flameMesh.scale.y) * Math.min(1, dt * 14);
-    innerFlame.scale.y += (target * 0.8 - innerFlame.scale.y) * Math.min(1, dt * 16);
+    flameMesh.scale.y += (target - flameMesh.scale.y) * (1 - Math.exp(-14 * dt));
+    innerFlame.scale.y += (target * 0.8 - innerFlame.scale.y) * (1 - Math.exp(-16 * dt));
     flameMesh.material.opacity = burning ? 0.55 : 0.0;
     innerFlame.material.opacity = burning ? 0.62 : 0.0;
   }
   if (engineGlow) { // core glow + cast light fully fade to 0 at rest so the ship reads clearly
-    engineGlow.material.opacity += ((burning ? 0.4 : 0.0) - engineGlow.material.opacity) * Math.min(1, dt * 9);
+    engineGlow.material.opacity += ((burning ? 0.4 : 0.0) - engineGlow.material.opacity) * (1 - Math.exp(-9 * dt));
     engineGlow.scale.setScalar(burning ? 0.8 : 0.25);
   }
-  if (engineLight) engineLight.intensity += ((burning ? 4 : 0.0) - engineLight.intensity) * Math.min(1, dt * 10);
+  if (engineLight) engineLight.intensity += ((burning ? 4 : 0.0) - engineLight.intensity) * (1 - Math.exp(-10 * dt));
   // navigation blinkers
   for (let i = 0; i < navLights.length; i++) {
     const on = (Math.sin(t * 3 + i * Math.PI) > 0.4) ? 1 : 0.06;
@@ -2732,7 +2732,7 @@ function tick() {
   if (starMat) {
     const targetWarp = ftlActive ? 0.95 : 0; // punchier streak tunnel during a jump
     const rate = flyFTL ? 8 : 6;
-    starMat.uniforms.uWarp.value += (targetWarp - starMat.uniforms.uWarp.value) * Math.min(1, dt * rate);
+    starMat.uniforms.uWarp.value += (targetWarp - starMat.uniforms.uWarp.value) * (1 - Math.exp(-rate * dt));
   }
   // follow badge: visible while trailing another pilot; clears if they leave
   if (following && pilots.get(following)) {
@@ -2798,17 +2798,17 @@ function tick() {
         gi = 0.3 + 0.4 * (1 - Math.min(Math.hypot(sp.x, sp.y) / 1.3, 1));
       }
     }
-    godrayPass.uniforms.uIntensity.value += (gi - godrayPass.uniforms.uIntensity.value) * Math.min(1, dt * 5);
+    godrayPass.uniforms.uIntensity.value += (gi - godrayPass.uniforms.uIntensity.value) * (1 - Math.exp(-5 * dt));
     godrayPass.enabled = godrayPass.uniforms.uIntensity.value > 0.003; // skip the 48-tap pass when no star is near
   }
 
   // ---- cinematic camera: speed-FOV, banking, shake, FTL punch ----
   // FTL jumps punch the FOV way out + shake the rig for a real hyperspace kick.
   const targetFov = 70 + Math.min(speed, 140) / 140 * 20 + (dive ? 30 : 0) + (ftlActive ? 18 : 0);
-  camera.fov += (targetFov - camera.fov) * Math.min(1, dt * (flyTarget ? 5 : 4));
+  camera.fov += (targetFov - camera.fov) * (1 - Math.exp(-(flyTarget ? 5 : 4) * dt));
   camera.updateProjectionMatrix();
   const dYaw = yaw - prevYaw; prevYaw = yaw;
-  bank += (Math.max(-0.5, Math.min(0.5, -dYaw * 9)) - bank) * Math.min(1, dt * 6);
+  bank += (Math.max(-0.5, Math.min(0.5, -dYaw * 9)) - bank) * (1 - Math.exp(-6 * dt));
   camShake = Math.max(camShake * Math.exp(-3 * dt), flyTarget ? 0.025 : (thrust && !introActive ? 0.04 : 0));
 
   if (introActive) {
