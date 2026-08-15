@@ -1247,9 +1247,11 @@ function buildBelt() {
   }
 
   // the mothership lazily circles hello.world
-  mothership = ASSETS.craft_cargoA.clone();
-  mothership.scale.setScalar(4.8);
-  scene.add(mothership);
+  if (ASSETS.craft_cargoA) {
+    mothership = ASSETS.craft_cargoA.clone();
+    mothership.scale.setScalar(4.8);
+    scene.add(mothership);
+  }
 }
 const belts = [];
 const beltRocks = []; // {group, local, r} — the individual rocks the ship can bump into
