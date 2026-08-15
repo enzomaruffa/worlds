@@ -871,8 +871,9 @@ function makePlanet(site) {
       else col.setHex(biome.high);
       colors[i * 3] = col.r; colors[i * 3 + 1] = col.g; colors[i * 3 + 2] = col.b;
     }
+    // No computeVertexNormals: terrainMat is flatShading, so the normal comes from screen-space
+    // derivatives and the attribute is never read. Recomputing it would change nothing on screen.
     geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-    geo.computeVertexNormals();
 
     // tree samples: random directions kept only on dry, non-polar, non-rocky land
     const treeSamples = [];
