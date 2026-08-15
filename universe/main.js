@@ -1292,10 +1292,11 @@ function buildStations() {
     g.add(glow);
     scene.add(g);
     stations.push({
-      group: g, c: sys.pos, r: sys.starR * 2.0 + 70, speed: 0.04 + rng() * 0.05,
+      group: g, key, sys, c: sys.pos, r: sys.starR * 2.0 + 70, speed: 0.04 + rng() * 0.05,
       phase: rng() * 6.283, tilt: (rng() - 0.5) * 1.0, spin: 0.1 + rng() * 0.12,
       bob: rng() * 6.283, dish,
     });
+    hitProxy(g, 22);
   }
 }
 function updateStations(dt, t) {
@@ -1340,7 +1341,8 @@ function buildGates() {
     glow.position.y = PY;
     g.add(glow);
     scene.add(g);
-    gates.push({ group: g, ring, portal, spin: 0.25 + rng() * 0.15 });
+    gates.push({ group: g, key, sys, ring, portal, spin: 0.25 + rng() * 0.15, lastZ: null, cool: 0, hot: 0 });
+    hitProxy(g, 26, PY);
   }
 }
 function updateGates(dt, t) {
@@ -1353,28 +1355,33 @@ function updateGates(dt, t) {
 // A few freighters cruising the lanes between systems — readable as ships in
 // transit, each trailing a faint engine light.
 function buildTraffic() {
-  const pts = Object.values(SYSTEMS).map((s) => s.pos);
+  const keys = Object.keys(SYSTEMS);
   const ships = ["craft_cargoB", "craft_miner", "craft_speederD", "craft_cargoA", "craft_speederB"];
   for (let i = 0; i < 5; i++) {
     const rng = mulberry32(hashStr("transit:" + i));
-    const ai = Math.floor(rng() * pts.length);
-    const bi = (ai + 1 + Math.floor(rng() * (pts.length - 1))) % pts.length;
-    const mesh = placedClone(ships[i % ships.length], scene, 12 + rng() * 6);
+    const ai = Math.floor(rng() * keys.length);
+    const bi = (ai + 1 + Math.floor(rng() * (keys.length - 1))) % keys.length;
+    const height = 12 + rng() * 6;
+    const mesh = placedClone(ships[i % ships.length], scene, height);
     if (!mesh) continue;
     const eng = new THREE.PointLight(0x9ad8ff, 60, 90, 2);
     eng.position.set(0, 0, 0);
     mesh.add(eng);
-    transit.push({
-      mesh, a: pts[ai].clone(), b: pts[bi].clone(), t: rng(),
+    // aKey/bKey, not just the positions: a hauler's story is the two places it runs between
+    const tr = {
+      mesh, aKey: keys[ai], bKey: keys[bi], leg: 0,
+      a: SYSTEMS[keys[ai]].pos.clone(), b: SYSTEMS[keys[bi]].pos.clone(), t: rng(),
       speed: 0.006 + rng() * 0.01, off: new THREE.Vector3((rng() - 0.5) * 90, (rng() - 0.5) * 70, (rng() - 0.5) * 90),
-    });
+    };
+    transit.push(tr);
+    hitProxy(mesh, 14 / mesh.scale.x);
   }
 }
 const _tA = new THREE.Vector3(), _tPrev = new THREE.Vector3();
 function updateTraffic(dt) {
   for (const tr of transit) {
     tr.t += tr.speed * dt * 10;
-    if (tr.t >= 1) { const tmp = tr.a; tr.a = tr.b; tr.b = tmp; tr.t = 0; } // bounce back along the lane
+    if (tr.t >= 1) { const tmp = tr.a; tr.a = tr.b; tr.b = tmp; tr.t = 0; tr.leg ^= 1; } // bounce back along the lane
     _tPrev.copy(tr.mesh.position);
     _tA.lerpVectors(tr.a, tr.b, tr.t).add(tr.off);
     tr.mesh.position.copy(_tA);
