@@ -2035,6 +2035,12 @@ const txPilot = () => {
 function showTx(text) { toast(`📡 <span style="color:#7dd3fc">intercepted transmission</span><br><span style="color:#cbd5e1">${esc(text)}</span>`, 6500, { wide: true }); }
 async function emitTransmission() {
   const names = [...planets.keys()];
+  // first choice is always something that actually happened out here
+  if (chronicle.length && Math.random() < 0.45) {
+    const e = chronicle[Math.floor(Math.random() * Math.min(chronicle.length, 12))];
+    const line = chronicleLine(e);
+    if (line) return showTx(line);
+  }
   // sometimes a fresh AI rumor linking two real worlds (relationship lore)
   if (names.length >= 2 && Math.random() < 0.22) {
     try {
@@ -2171,6 +2177,45 @@ function revealCodex(b) {
   });
 }
 
+// ---------- the chronicle: what has actually happened out here ----------
+// Every pilot appends to it and every pilot subscribes, so the galaxy keeps a shared
+// history instead of each session inventing its own. Transmissions draw from this first —
+// a real event beats a generated one, and it costs no AI call at all.
+const chronicleStore = worlds.db.collection("chronicle");
+const chronicle = []; // newest first
+const CHRONICLE_KEEP = 60;
+function noteEvent(kind, data) {
+  const e = { kind, at: Date.now(), ...data };
+  chronicleStore.create(e).catch(() => {}); // the subscribe below echoes it back to us
+}
+function pushChronicle(e) {
+  if (!e || !e.kind) return;
+  if (chronicle.some((x) => x.kind === e.kind && x.at === e.at && x.who === e.who && x.world === e.world)) return;
+  chronicle.unshift(e);
+  chronicle.length = Math.min(chronicle.length, CHRONICLE_KEEP);
+}
+// Rendered client-side from the event, never generated — these describe things that
+// demonstrably happened, so they must not be able to lie.
+function chronicleLine(e) {
+  const w = e.world ? `<b style="color:#e5a00d">${esc(e.world)}.world</b>` : null;
+  const p = e.who ? `<b style="color:#7dd3fc">@${esc(e.who)}</b>` : null;
+  switch (e.kind) {
+    case "launch": return w && `${w} came online${p ? ` — ${p} shipped it` : ""}`;
+    case "relic": return e.relic && p ? `${p} logged <b style="color:#9ad8ff">${esc(e.relic)}</b>${w ? ` out near ${w}` : ""}` : null;
+    case "arrive": return p && `${p} is out flying the lanes again`;
+    case "visit": return w && p && `${p} dropped in on ${w}`;
+    case "meet": return p && e.other ? `${p} and <b style="color:#7dd3fc">@${esc(e.other)}</b> crossed paths out past the belt` : null;
+    default: return null;
+  }
+}
+(async () => {
+  try {
+    const page = await chronicleStore.list({ sort: "-at", limit: 60 });
+    for (const it of page.items) pushChronicle(it.data);
+  } catch { /* db down — the curated pool still carries transmissions */ }
+  try { chronicleStore.subscribe((ev) => { if (ev.type !== "delete") pushChronicle(ev.doc?.data ?? ev.doc); }); } catch { /* no socket */ }
+})();
+
 // ---------- the voyager logbook: every handle that ever flew here is remembered ----------
 // Persisted in worlds.db so past pilots — even ones long gone — keep surfacing in the lore
 // (transmissions, rumors, and the names of drifting relics). Includes you, the moment you arrive.
@@ -2181,10 +2226,11 @@ function rememberVoyager(handle) {
   everJoined.push(handle);
   voyagerStore.create({ handle }).catch(() => {}); // best-effort; dupes are harmless
 }
+let myHandle = null;
 const randVoyager = () => (everJoined.length ? randOf(everJoined) : null);
 (async () => {
   try { for (const it of (await voyagerStore.list({ limit: 200 })).items) if (it.data?.handle) rememberVoyager(it.data.handle); } catch { /* db down */ }
-  try { const me = await worlds.me(); if (me?.handle) rememberVoyager(me.handle); } catch { /* identity unknown */ }
+  try { const me = await worlds.me(); if (me?.handle) { myHandle = me.handle; rememberVoyager(me.handle); } } catch { /* identity unknown */ }
 })();
 
 // ---------- drifting relics: named wandering objects whose AI lore ties a world to a voyager ----------
@@ -2241,7 +2287,7 @@ async function spawnRelic() {
   g.position.y += (Math.random() - 0.5) * 80;
   scene.add(g);
   const rid = "relic:" + relicSeq++;
-  relics.push({ group: g, body: g.children[0], coma, lbl, name: data.name, lore: data.lore, id: rid,
+  relics.push({ group: g, body: g.children[0], coma, lbl, name: data.name, lore: data.lore, id: rid, world,
     vel: randomUnit(Math.random).multiplyScalar(2 + Math.random() * 3.5), spin: 0.1 + Math.random() * 0.3, revealed: false });
   // relics already carry a name and a lore line — they just were never clickable
   hitProxy(g, sc * 2.4);
@@ -2264,6 +2310,7 @@ function updateRelics(dt, t) {
     if (!r.revealed && d < 55 && !introActive) {
       r.revealed = true;
       toast(`☄ <span style="color:#9ad8ff">${esc(r.name)}</span><br><span style="color:#cbd5e1">${esc(r.lore)}</span>`, 7000, { wide: true });
+      if (myHandle) noteEvent("relic", { who: myHandle, relic: r.name, world: r.world });
     }
     // drifted far from the pilot → retire it (keeps the count bounded; dispose what we own)
     if (d > 900) { unregisterAmbient(r.id); scene.remove(r.group); r.coma.geometry.dispose(); r.coma.material.dispose(); r.lbl.material.map?.dispose(); r.lbl.material.dispose(); relics.splice(i, 1); }
@@ -2305,6 +2352,7 @@ function startDive(group) {
   divePrompt.style.display = "none";
   warpSound();
   playSfx("thrust", 0.5, 0.8);
+  if (myHandle) noteEvent("visit", { who: myHandle, world: group.userData.site.name });
 }
 divePrompt.addEventListener("click", () => startDive(nearPlanet));
 document.getElementById("cardVisit").addEventListener("click", (e) => {
@@ -2343,6 +2391,7 @@ worlds.db.site("home").collection("sites").subscribe((ev) => {
     playSfx("warp", 0.6);
   }, 80);
   toast(`✦ <b style="color:#e5a00d">@${ev.doc.creator?.handle ?? "someone"}</b> just launched <b style="color:#e5a00d">${ev.doc.name}.world</b> — ${randOf(["the sky gained a star", "a new world ignites", "another light in the dark", "the galaxy just got bigger"])}`);
+  noteEvent("launch", { world: ev.doc.name, who: ev.doc.creator?.handle ?? null });
   // a beat later, the newborn world's first lore drifts in (reuses the cached AI civilization lore)
   setTimeout(() => {
     loadLore({ universe: null, ...ev.doc }).then((L) => {
@@ -3138,6 +3187,8 @@ function tick() {
       spawnNova(p.group.position.clone().lerp(ship.position, 0.5), p.color.getHex());
       playSfx("select", 0.5, 1.2);
       toast(`🤝 ${randOf(["high-five with", "fly-by salute to", "wings waggled at", "warp-five with"])} <b style="color:#7dd3fc">@${esc(p.group.userData.handle)}</b>`);
+      // both pilots detect this independently, so only the alphabetically-first writes it
+      if (myHandle && myHandle < p.group.userData.handle) noteEvent("meet", { who: myHandle, other: p.group.userData.handle });
     }
   }
   if (rosterDirty || t - lastRoster > 0.5) { updateRoster(); lastRoster = t; rosterDirty = false; }
