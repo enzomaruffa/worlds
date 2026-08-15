@@ -101,9 +101,13 @@
   #intro .eyebrow { font-family: var(--display); font-weight: 600; font-size: clamp(10px, 1.5vw, 13px);
     letter-spacing: .62em; text-transform: uppercase; color: #e5a00d; margin-bottom: clamp(16px, 3vw, 30px);
     opacity: 0; transform: translateY(6px); text-shadow: 0 0 18px rgba(229,160,13,.55); }
+  /* Only opacity and transform are animated below, so the title stays on the compositor and
+     rides out whatever the main thread is doing while the galaxy builds. letter-spacing would
+     re-layout the glyph run every frame and an animated filter would re-raster it; the glow is
+     a static shadow for the same reason. */
   #intro .word { font-family: var(--display); font-weight: 700; font-size: clamp(52px, 14vw, 168px); line-height: .94;
-    letter-spacing: .42em; color: #fff; opacity: 0; transform: scale(.9);
-    text-shadow: 0 0 36px rgba(229,160,13,.9), 0 0 90px rgba(229,160,13,.5), 0 0 140px rgba(124,114,255,.35); }
+    letter-spacing: .42em; color: #fff; opacity: 0; transform: scale(.9); will-change: transform, opacity;
+    text-shadow: 0 0 30px rgba(229,160,13,.9), 0 0 70px rgba(124,114,255,.4); }
   /* hairline sweep that wipes across the title as it settles */
   #intro .word::after { content: ""; position: absolute; left: -10%; right: -10%; top: 50%; height: 1px;
     background: linear-gradient(90deg, transparent, rgba(229,160,13,.0), rgba(229,160,13,.85), rgba(229,160,13,0), transparent);
@@ -116,15 +120,18 @@
   @keyframes introBlink { 50% { opacity: .25; } }
 
   #intro.go .eyebrow { animation: introEyebrow 1s cubic-bezier(.2,.7,.2,1) .15s forwards; }
+  #intro .word span { display: inline-block; will-change: transform; }
   #intro.go .word { animation: wordIn 2.4s cubic-bezier(.16,.84,.24,1) .35s forwards; }
+  #intro.go .word span { animation: letterIn 2.4s cubic-bezier(.16,.84,.24,1) .35s forwards; }
   #intro.go .word::after { animation: introSweep 1.1s cubic-bezier(.4,0,.1,1) 1.15s forwards; }
   #intro.go .tagline { animation: introTag 1.1s cubic-bezier(.2,.7,.2,1) 1.5s forwards; }
   #intro.go .sub { animation: subIn 1s ease 2s forwards; }
   @keyframes introEyebrow { to { opacity: 1; transform: translateY(0); } }
   @keyframes wordIn {
-    0%   { opacity: 0; transform: scale(.9); letter-spacing: 1.1em; filter: blur(8px); }
-    45%  { opacity: 1; filter: blur(0); }
-    100% { opacity: 1; transform: scale(1); letter-spacing: .42em; filter: blur(0); } }
+    0%   { opacity: 0; transform: scale(.9); }
+    45%  { opacity: 1; }
+    100% { opacity: 1; transform: scale(1); } }
+  @keyframes letterIn { from { transform: translateX(var(--dx)); } to { transform: translateX(0); } }
   @keyframes introSweep {
     0%   { opacity: 0; transform: translateY(-50%) scaleX(0); }
     35%  { opacity: 1; }
@@ -136,6 +143,7 @@
     #intro.go::before { animation: introHaze 1.4s ease forwards; }
     #intro.go .eyebrow, #intro.go .word, #intro.go .tagline, #intro.go .sub { animation: subIn .5s ease forwards; }
     #intro .word { letter-spacing: .42em; transform: none; filter: none; }
+    #intro.go .word span { animation: none; transform: none; }
   }
 
   /* ---------- mobile layout ---------- */
@@ -198,7 +206,11 @@
 <div id="intro">
   <div class="stage">
     <div class="eyebrow">welcome to the</div>
-    <div class="word">WORLDS</div>
+    <!-- per-letter spans so the tracking-in is transform-only; --dx is each letter's offset
+         at the widest tracking, measured from its settled position -->
+    <div class="word"><span style="--dx:-1.70em">W</span><span style="--dx:-1.02em">O</span><span
+      style="--dx:-.34em">R</span><span style="--dx:.34em">L</span><span
+      style="--dx:1.02em">D</span><span style="--dx:1.70em">S</span></div>
     <div class="tagline">every world we build · one sky</div>
   </div>
   <div class="sub">drift in <span class="dot">·</span> press anything to take the helm</div>
