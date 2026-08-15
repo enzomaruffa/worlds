@@ -1049,6 +1049,8 @@ function drainBuildQueue() {
     }
   } while (buildQueue.length && performance.now() < deadline);
   updatePilotCount();
+  // the worlds brought their own materials with them — pick up whatever variants are new
+  if (!buildQueue.length) warmUp();
 }
 
 function upsertPlanet(site) {
@@ -2401,6 +2403,31 @@ askForm.addEventListener("submit", async (e) => {
 });
 
 // assets first — planets plant Kenney forests at build time
+// Programs compile on first draw, which lands mid cold-open. Warm them up while the intro
+// overlay still hides the canvas — but bind one of the composer's targets first: three keys
+// programs on tone mapping and output colour space, and it only applies the renderer's own
+// values when the bound target is null. Warming against the default framebuffer would
+// compile a variant the composer never uses and every one would be recompiled anyway.
+async function warmUp() {
+  try {
+    if (composer) renderer.setRenderTarget(composer.renderTarget1);
+    await renderer.compileAsync(scene, camera);
+  } catch (e) {
+    console.warn("shader warm-up skipped:", e);
+  } finally {
+    renderer.setRenderTarget(null);
+  }
+  // The composer's passes compile on first use too, and these two are gated off at boot —
+  // without a forced frame the god rays compile as the intro starts and the radial blur
+  // waits until the first jump.
+  if (composer && godrayPass && warpBlurPass) {
+    const g = godrayPass.enabled, w = warpBlurPass.enabled;
+    godrayPass.enabled = true; warpBlurPass.enabled = true;
+    try { composer.render(); } catch (e) { console.warn("pass warm-up skipped:", e); }
+    godrayPass.enabled = g; warpBlurPass.enabled = w;
+  }
+}
+
 preload().then(() => {
   buildShip();
   buildBelt();
@@ -2409,7 +2436,7 @@ preload().then(() => {
   buildTraffic();
   buildEasterEggs();
   return load();
-});
+}).then(warmUp); // after the builders — they take the light count 6 → 28, and that's in the program key
 
 // ---------- cinematic cold open (once per session — diving navigates away & back) ----------
 const introEl = document.getElementById("intro");
