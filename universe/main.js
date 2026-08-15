@@ -1017,6 +1017,33 @@ function makePlanet(site) {
 
 const planets = new Map();
 
+// ---------- world build queue ----------
+// The API hands over every world at once and each one displaces a few thousand vertices,
+// which is most of a second of frozen main thread if built in a single loop. Drain a few
+// per frame instead; makePlanet starts each group at scale 0.001 and the tick loop eases
+// it up, so staggered arrival reads as worlds igniting one by one.
+const buildQueue = [];
+const queued = new Map();
+
+function enqueuePlanet(site) {
+  if (site.name === "universe" || planets.has(site.name)) return;
+  if (!queued.has(site.name)) buildQueue.push(site.name);
+  queued.set(site.name, site);
+}
+
+function drainBuildQueue() {
+  if (!buildQueue.length) return;
+  const deadline = performance.now() + (introHidden ? 8 : 4);
+  do {
+    const site = queued.get(buildQueue.shift());
+    if (site && !planets.has(site.name)) {
+      queued.delete(site.name);
+      planets.set(site.name, makePlanet(site));
+    }
+  } while (buildQueue.length && performance.now() < deadline);
+  updatePilotCount();
+}
+
 function upsertPlanet(site) {
   // the universe itself is the meta-world — it IS the black hole at the core,
   // not a planet orbiting inside itself.
@@ -1026,6 +1053,7 @@ function upsertPlanet(site) {
     existing.userData.site = site;
     return;
   }
+  queued.delete(site.name); // a live deploy overtakes its own queue slot
   planets.set(site.name, makePlanet(site));
   updatePilotCount();
 }
@@ -1963,7 +1991,12 @@ addEventListener("keydown", (e) => { if (e.code === "Enter" && nearPlanet && !di
 async function load() {
   const res = await fetch("/api/v1/universe", { headers: { "x-worlds-csrf": "1" } });
   if (!res.ok) return;
-  for (const site of (await res.json()).items) upsertPlanet(site);
+  // home first, then busiest — the cold open looks at the origin, where the misc worlds
+  // orbit, and within a system the busiest worlds are the physically largest.
+  const items = (await res.json()).items.slice()
+    .sort((a, b) => (a.category === "misc" ? 0 : 1) - (b.category === "misc" ? 0 : 1)
+      || (b.visits_30d ?? 0) - (a.visits_30d ?? 0));
+  for (const site of items) enqueuePlanet(site);
 }
 // the platform writes site metadata into home's "sites" collection;
 // any world may READ it cross-site — that's the whole public contract we need.
@@ -2809,6 +2842,8 @@ function tick() {
     }
     if (!composer) renderer.render(scene, camera);
   }
+  // after the render, so building overlaps the GPU working through the frame just submitted
+  drainBuildQueue();
   requestAnimationFrame(tick);
 }
 tick();
