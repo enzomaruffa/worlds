@@ -24,12 +24,10 @@ async function preload() {
     // belt rocks + drifting debris
     "meteor", "meteor_detailed", "meteor_half", "rock", "rock_largeA", "rock_largeB",
     "rocks_smallA", "rocks_smallB", "rock_crystalsLargeA", "rock_crystalsLargeB", "barrel", "barrels",
-    // orbital stations / structures around inhabited systems
-    "satelliteDish_detailed", "satelliteDish_large", "hangar_roundA", "hangar_roundGlass",
-    "hangar_smallA", "structure_detailed", "machine_generatorLarge", "machine_wireless",
-    "platform_large", "turret_single",
-    // warp gates (FTL beacons) + discoverable easter eggs
-    "gate_complex", "gate_simple", "astronautA", "astronautB", "alien", "rover",
+    // surface dish for busy worlds, plus drifting wreckage
+    "satelliteDish_detailed", "structure_detailed",
+    // discoverable astronauts / alien / rover adrift
+    "astronautA", "astronautB", "alien", "rover",
     // planet-surface foliage (Nature Kit) — trees …
     "tree_default", "tree_oak", "tree_palmTall", "tree_pineRoundA",
     "tree_default_fall", "tree_default_dark", "cactus_tall",
@@ -271,7 +269,7 @@ composer.addPass(new OutputPass()); // tone-maps + sRGB at the very end (single 
   warpBlurPass = null;
 }
 
-scene.add(new THREE.HemisphereLight(0x4a557a, 0x0a0a14, 1.9)); // lifts the shadowed side of ships/stations so Kenney models read against deep space
+scene.add(new THREE.HemisphereLight(0x4a557a, 0x0a0a14, 1.9)); // lifts the shadowed side of ships so Kenney models read against deep space
 
 // Shared bits for orbits: axes + a flat-ring quaternion + ONE material for every orbit
 // path (74 worlds → 1 material instead of 74). Reused by planet build + the tick loop.
@@ -1320,132 +1318,39 @@ const belts = [];
 const beltRocks = []; // {group, local, r} — the individual rocks the ship can bump into
 let mothership = null;
 
-// ---------- orbital stations, warp gates, transit freighters (Kenney Space Kit) ----------
-const stations = []; // { group, c, r, speed, phase, tilt, spin, bob, dish }
-const gates = [];    // { group, ring, portal, spin }
+// ---------- transit freighters, drifting wreckage, easter eggs (Kenney Space Kit) ----------
 const transit = [];  // { mesh, a, b, t, speed, off }
 const debris = [];   // { mesh, spin, orbR, orbA, orbS } — wreckage drifting in the home belt
 const eggs = [];     // { mesh, spin } — discoverable astronauts / alien / rover adrift
 const _tilt = new THREE.Vector3();
 
-// An inhabited outpost circling each star: a hangar with a scanning dish, a
-// generator and a turret, lit by a soft system-coloured glow.
-function buildStations() {
-  for (const [key, sys] of Object.entries(SYSTEMS)) {
-    const rng = mulberry32(hashStr("station:" + key));
-    const g = new THREE.Group();
-    const core = key === "misc" ? "hangar_roundGlass" : (rng() < 0.5 ? "hangar_roundA" : "hangar_smallA");
-    placedClone(core, g, 14, new THREE.Vector3(0, 0, 0), rng() * 6.283, 0.4);
-    const dish = placedClone("satelliteDish_large", g, 7, new THREE.Vector3(10, 2, -2), rng() * 6.283, 0.3);
-    placedClone("machine_generatorLarge", g, 8, new THREE.Vector3(-9, -2, 6), rng() * 6.283, 0.45);
-    placedClone("turret_single", g, 5, new THREE.Vector3(2, 7, 3), rng() * 6.283, 0.3);
-    const glow = new THREE.PointLight(sys.hot, 320, 240, 2);
-    glow.position.set(0, 5, 0);
-    g.add(glow);
-    scene.add(g);
-    stations.push({
-      group: g, key, sys, c: sys.pos, r: sys.starR * 2.0 + 70, speed: 0.04 + rng() * 0.05,
-      phase: rng() * 6.283, tilt: (rng() - 0.5) * 1.0, spin: 0.1 + rng() * 0.12,
-      bob: rng() * 6.283, dish,
-    });
-    hitProxy(g, 22);
-    const sid = "station:" + key, sname = STATION_NAMES[key] ?? "Station";
-    registerAmbient({
-      id: sid, kind: "station", hit: [g], anchor: g, radius: 22, accent: sys.hot, hold: true,
-      title: () => sname,
-      sub: () => `orbital station · ${sys.title}`,
-      lore: () => ambientLore(sid, "station",
-        `An orbital station called "${sname}" circles "${sys.title}" (${sys.tag}) in a playful sci-fi galaxy. `
-        + `Write 1-2 vivid in-universe sentences about what its crew do up there. No preamble, no quotes.`),
-    });
-  }
-}
-function updateStations(dt, t) {
-  for (const st of stations) {
-    const a = st.phase + t * st.speed;
-    const x = Math.cos(a) * st.r, z = Math.sin(a) * st.r;
-    // tilt the orbital plane around X so stations don't all share one disc
-    const ty = -z * Math.sin(st.tilt), tz = z * Math.cos(st.tilt);
-    st.group.position.set(st.c.x + x, st.c.y + ty + Math.sin(t * 0.5 + st.bob) * 3, st.c.z + tz);
-    st.group.rotation.y += st.spin * dt;
-    if (st.dish) st.dish.rotation.y += 0.5 * dt;
-  }
-}
-
-// Glowing warp gates straddling the route between home and each outer system —
-// a Kenney arch wrapped around an additive portal ring + colour light.
-function buildGates() {
-  for (const [key, sys] of Object.entries(SYSTEMS)) {
-    if (key === "misc") continue;
-    const rng = mulberry32(hashStr("gate:" + key));
-    const g = new THREE.Group();
-    const dir = sys.pos.clone().normalize();          // home is the origin
-    const pos = sys.pos.clone().sub(dir.multiplyScalar(sys.starR + 200));
-    pos.y += 16;
-    g.position.copy(pos);
-    g.lookAt(0, pos.y, 0);                             // arch opening faces home
-    placedClone("gate_complex", g, 56, new THREE.Vector3(0, -20, 0), 0, 0.3);
-    const PY = 8;                                      // arch opening centre after scaling
-    const ring = new THREE.Mesh(
-      new THREE.TorusGeometry(19, 1.4, 16, 90),
-      new THREE.MeshBasicMaterial({ color: sys.hot, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false }),
-    );
-    ring.position.y = PY;
-    g.add(ring);
-    const portal = new THREE.Mesh(
-      new THREE.CircleGeometry(18, 48),
-      new THREE.MeshBasicMaterial({ color: sys.hot, transparent: true, opacity: 0.1, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false }),
-    );
-    portal.position.y = PY;
-    g.add(portal);
-    const glow = new THREE.PointLight(sys.hot, 420, 380, 2);
-    glow.position.y = PY;
-    g.add(glow);
-    scene.add(g);
-    const ga = { group: g, key, sys, ring, portal, spin: 0.25 + rng() * 0.15, lastZ: null, cool: 0, hot: 0 };
-    gates.push(ga);
-    hitProxy(g, 26, PY);
-    const gid = "gate:" + key, gname = GATE_NAMES[key] ?? "warp arch";
-    registerAmbient({
-      id: gid, kind: "gate", hit: [g], anchor: g, radius: 26, accent: sys.hot, hold: false, solid: false,
-      title: () => gname,
-      sub: () => `warp arch · fly through for ${sys.title}`,
-      action: { label: "engage ⟟", run: () => gateJump(ga, true) },
-      lore: () => ambientLore(gid, "gate",
-        `A warp arch called "${gname}" hangs on the run between hello.world and "${sys.title}" (${sys.tag}) `
-        + `in a playful sci-fi galaxy. Write 1-2 vivid in-universe sentences about it. No preamble, no quotes.`),
-    });
-  }
-}
-function updateGates(dt, t) {
-  for (const ga of gates) {
-    ga.ring.rotation.z += ga.spin * dt;
-    // brighten as you line up on the aperture, so it reads as arming before you commit
-    ga.portal.material.opacity = 0.08 + 0.06 * (0.5 + 0.5 * Math.sin(t * 1.3)) + ga.hot * 0.42;
-    ga.ring.material.opacity = 0.85 + ga.hot * 0.15;
-  }
-}
-
 // A few freighters cruising the lanes between systems — readable as ships in
 // transit, each trailing a faint engine light.
 function buildTraffic() {
   const keys = Object.keys(SYSTEMS);
-  const ships = ["craft_cargoB", "craft_miner", "craft_speederD", "craft_cargoA", "craft_speederB"];
-  for (let i = 0; i < 5; i++) {
+  const ships = ["craft_cargoB", "craft_miner", "craft_speederD", "craft_cargoA", "craft_speederB", "craft_racer", "craft_speederC"];
+  for (let i = 0; i < FREIGHTER_NAMES.length; i++) {
     const rng = mulberry32(hashStr("transit:" + i));
     const ai = Math.floor(rng() * keys.length);
     const bi = (ai + 1 + Math.floor(rng() * (keys.length - 1))) % keys.length;
-    const height = 12 + rng() * 6;
-    const mesh = placedClone(ships[i % ships.length], scene, height);
+    const height = 5 + rng() * 3;
+    // emissive, like every other ambient prop: a hauler mid-lane is nowhere near a star,
+    // so lit by the scene alone it reads as a black cut-out
+    const mesh = placedClone(ships[i % ships.length], scene, height, null, 0, 0.3);
     if (!mesh) continue;
     const eng = new THREE.PointLight(0x9ad8ff, 60, 90, 2);
     eng.position.set(0, 0, 0);
     mesh.add(eng);
+    // Lane endpoints stand off each star rather than sitting on it — the raw positions run
+    // the route straight through the photosphere.
+    const A = SYSTEMS[keys[ai]], B = SYSTEMS[keys[bi]];
+    const lane = new THREE.Vector3().subVectors(B.pos, A.pos).normalize();
     // aKey/bKey, not just the positions: a hauler's story is the two places it runs between
     const tr = {
       mesh, aKey: keys[ai], bKey: keys[bi], leg: 0,
-      a: SYSTEMS[keys[ai]].pos.clone(), b: SYSTEMS[keys[bi]].pos.clone(), t: rng(),
-      speed: 0.006 + rng() * 0.01, off: new THREE.Vector3((rng() - 0.5) * 90, (rng() - 0.5) * 70, (rng() - 0.5) * 90),
+      a: A.pos.clone().addScaledVector(lane, A.starR * 2.2),
+      b: B.pos.clone().addScaledVector(lane, -B.starR * 2.2), t: rng(),
+      speed: 0.0018 + rng() * 0.0026, off: new THREE.Vector3((rng() - 0.5) * 90, (rng() - 0.5) * 70, (rng() - 0.5) * 90),
     };
     transit.push(tr);
     const id = "freighter:" + i;
@@ -1455,9 +1360,9 @@ function buildTraffic() {
     const from = () => SYSTEMS[tr.leg ? tr.bKey : tr.aKey];
     const to = () => SYSTEMS[tr.leg ? tr.aKey : tr.bKey];
     const cargoFor = (k) => { const c = CARGO_BY[k] ?? CARGO_BY.misc; return c[hashStr(id + k) % c.length]; };
-    hitProxy(mesh, 14 / mesh.scale.x);
+    hitProxy(mesh, 11 / mesh.scale.x); // generous target: they're small, distant and moving
     registerAmbient({
-      id, kind: "freighter", hit: [mesh], anchor: mesh, radius: 14, accent: 0x9ad8ff, hold: true,
+      id, kind: "freighter", hit: [mesh], anchor: mesh, radius: 7, accent: 0x9ad8ff, hold: true,
       title: () => name,
       sub: () => `hauling ${cargoFor(tr.leg ? tr.aKey : tr.bKey)} · ${from().title} → ${to().title}`,
       // the prompt names both ends without a direction, so the one cached line stays true
@@ -1947,42 +1852,6 @@ function wormholeJump() {
   toast(`🌀 <b>${randOf(["spaghettified", "folded sideways", "unwound", "compressed", "politely disassembled"])}</b> — the wormhole spits you out at the home star`);
 }
 
-// ---------- warp gates ----------
-// A gate sits on the home→star line facing home, so which side you cross from IS the
-// direction of travel: outbound to its system, or back to hello.world.
-const _gl = new THREE.Vector3();
-const GATE_PY = 8, GATE_APERTURE = 22;
-function gateJump(ga, outbound) {
-  const sys = outbound ? ga.sys : SYSTEMS.misc;
-  initAudio();
-  flyFTL = true;
-  flyTarget = { position: sys.pos.clone(), offset: new THREE.Vector3(0, 16, sys.starR * 6) };
-  focusTarget = null; following = null;
-  if (cardSite || cardObj) { card.style.display = "none"; cardSite = null; cardObj = null; }
-  if (typeof flashEl !== "undefined" && flashEl) {
-    flashEl.style.opacity = "1";
-    setTimeout(() => { flashEl.style.opacity = "0"; }, 90);
-  }
-  warpSound();
-  ga.cool = 2.5;
-  toast(`⟟ <b style="color:#${new THREE.Color(ga.sys.hot).getHexString()}">${GATE_NAMES[ga.key] ?? "the arch"}</b> — transit engaged · <b>${sys.title}</b>`);
-}
-function updateGateTransit(dt) {
-  if (dive || introActive) return;
-  for (const ga of gates) {
-    ga.cool = Math.max(0, ga.cool - dt);
-    ga.group.worldToLocal(_gl.copy(ship.position));
-    const z = _gl.z, r = Math.hypot(_gl.x, _gl.y - GATE_PY), prev = ga.lastZ;
-    ga.lastZ = z;
-    ga.hot = r < GATE_APERTURE * 2.2 && Math.abs(z) < 120 ? 1 - Math.min(r / (GATE_APERTURE * 2.2), 1) : 0;
-    if (prev === null || ga.cool > 0 || flyTarget) continue;
-    // crossed the portal plane, inside the aperture, in one plausible step — the step
-    // guard rejects an FTL jump that teleported the ship straight past the gate
-    if (r < GATE_APERTURE && Math.sign(z) !== Math.sign(prev) && Math.abs(z - prev) < 80) {
-      gateJump(ga, z > prev);
-    }
-  }
-}
 
 // ---------- toasts ----------
 // opts.wide → a roomier, wrapping card (sits just under the compass) for multi-line
@@ -2116,12 +1985,12 @@ async function cachedAI(store, cache, key, rec, prompt, maxTokens = 50) {
 const ambientStore = worlds.db.collection("ambient"), ambientCache = new Map();
 
 const AMBIENT_LOCAL = {
-  station: ["Three shifts, one kettle, and a dish that has never once been aimed at nothing.",
-    "They log every passing hull and file most of the reports eventually."],
   freighter: ["The crew have run this lane so long they steer by argument.",
-    "Manifest signed, seals intact, arrival time optimistic as ever."],
-  gate: ["The arch remembers every ship that ever fell through it, and says so, loudly.",
-    "Calibrated last cycle. Recalibrated twice since, by hand, in the dark."],
+    "Manifest signed, seals intact, arrival time optimistic as ever.",
+    "Two pilots, one bunk, and a rota nobody has ever fully agreed to.",
+    "Runs dark and quiet between stars — the coffee is the only thing kept hot.",
+    "Insured for everything except what it is actually carrying.",
+    "Has never once arrived early, and has never once been blamed for it."],
   belt: ["Claim-marked, surveyed twice, and mined by precisely nobody.",
     "Every rock here is somebody's retirement plan, filed and forgotten."],
   junk: ["Jettisoned in a hurry. The paperwork caught up years later.",
@@ -2139,7 +2008,10 @@ function ambientLore(id, kind, prompt) {
     .then((t) => t || localAmbient(kind, id));
 }
 
-const FREIGHTER_NAMES = ["MV Slow Tuesday", "the Ledger Moth", "Longhaul Nine", "MV Second Draft", "the Patient Kettle"];
+// one per hauler, and the fleet size is this list's length — add a name, get a ship
+const FREIGHTER_NAMES = ["MV Slow Tuesday", "the Ledger Moth", "Longhaul Nine", "MV Second Draft",
+  "the Patient Kettle", "MV Rounding Error", "the Long Way Home", "Freight of Mind",
+  "MV Nearly There", "the Unpaid Invoice"];
 // manifests read off the DESTINATION's category, so a run always carries something the
 // place it's heading for would actually want
 const CARGO_BY = {
@@ -2149,11 +2021,9 @@ const CARGO_BY = {
   tools: ["replacement brackets", "a forge core, still warm", "industrial-grade tape"],
   experiments: ["sealed physics", "a prototype that is still humming", "something the lab wants back"],
 };
-const STATION_NAMES = { misc: "Hearthwatch", games: "High Score", work: "Checklist Actual", tools: "The Anvil", experiments: "Containment Nine" };
-const GATE_NAMES = { games: "the Arcade Arch", work: "the Control Gate", tools: "the Workshop Ring", experiments: "the Lab Door" };
 const KIND_LABEL = {
-  station: "orbital station", freighter: "cargo hauler", gate: "warp arch", belt: "asteroid field",
-  junk: "drifting wreckage", mothership: "colony ship", egg: "someone out here", relic: "drifting relic",
+  freighter: "cargo hauler", belt: "asteroid field", junk: "drifting wreckage",
+  mothership: "colony ship", egg: "someone out here", relic: "drifting relic",
 };
 
 // AI-deepened star-system codex (falls back to the hand-written blurb if AI is unavailable)
@@ -2763,8 +2633,6 @@ async function warmUp() {
 preload().then(() => {
   buildShip();
   buildBelt();
-  buildStations();
-  buildGates();
   buildTraffic();
   buildEasterEggs();
   return load();
@@ -2855,8 +2723,6 @@ function tick() {
     mothership.lookAt(Math.cos(ma - 0.01) * 118, 8, Math.sin(ma - 0.01) * 118);
   }
   if (coreDisk) coreDisk.rotation.z += dt * 0.12;
-  updateStations(dt, t);
-  updateGates(dt, t);
   updateTraffic(dt);
   updateDebris(dt, t);
   updateEasterEggs(dt);
@@ -2968,7 +2834,6 @@ function tick() {
 
   // cross the event horizon → wormhole jump to the home star (a shortcut, not death)
   if (!dive && ship.position.distanceTo(CORE_POS) < EH_R + shipRadius) wormholeJump();
-  updateGateTransit(dt);
   updateHover();
 
   // soft collisions: every body is wrapped in a cushion shell — a repulsor field that
