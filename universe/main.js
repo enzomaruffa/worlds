@@ -629,12 +629,12 @@ function atmosphere(radius, colorHex, scale, intensity) {
   );
 }
 
-function oceanShell(radius, colorHex, lava) {
+function oceanShell(radius, colorHex, lava, sunPos) {
   return new THREE.Mesh(
     new THREE.SphereGeometry(radius * 1.003, 48, 48),
     new THREE.ShaderMaterial({
       transparent: true,
-      uniforms: { uTime, uColor: { value: new THREE.Color(lava ? 0xff5a1e : colorHex) }, uLava: { value: lava ? 1 : 0 } },
+      uniforms: { uTime, uColor: { value: new THREE.Color(lava ? 0xff5a1e : colorHex) }, uLava: { value: lava ? 1 : 0 }, uSun: { value: sunPos } },
       vertexShader: `
         ${GLSL_NOISE}
         uniform float uTime; varying vec3 vN; varying vec3 vW;
@@ -646,7 +646,7 @@ function oceanShell(radius, colorHex, lava) {
         }`,
       fragmentShader: `
         ${GLSL_NOISE}
-        uniform float uTime; uniform vec3 uColor; uniform float uLava; varying vec3 vN; varying vec3 vW;
+        uniform float uTime; uniform vec3 uColor; uniform float uLava; uniform vec3 uSun; varying vec3 vN; varying vec3 vW;
         void main(){
           vec3 v = normalize(cameraPosition - vW);
           float sparkle = smoothstep(0.72, 1.0, vnoise(vW*1.4 + uTime*0.7));
@@ -656,7 +656,7 @@ function oceanShell(radius, colorHex, lava) {
             gl_FragColor = vec4(lc * (1.1 + 0.5*sparkle), 0.94);
             return;
           }
-          vec3 lightDir = normalize(-vW);                 // the sun sits at the origin
+          vec3 lightDir = normalize(uSun - vW);           // lit by the star this world orbits
           float fres = pow(1.0 - abs(dot(vN, v)), 2.0);
           float spec = pow(max(dot(reflect(-lightDir, vN), v), 0.0), 40.0);
           vec3 col = uColor * (0.55 + 0.45 * max(dot(vN, lightDir), 0.0));
@@ -794,13 +794,13 @@ function paletteFor(kind, base, rng) {
   return { sea: j(src.sea), beach: j(src.beach), mid: j(src.mid), high: j(src.high), peak: j(src.peak), atmo: j(src.atmo), ocean: src.ocean, treeDensity: src.treeDensity };
 }
 // a banded gas giant: horizontal cloud belts + a storm oval, lit from the origin star
-function makeGasGiant(radius, pal, rng) {
+function makeGasGiant(radius, pal, rng, sunPos) {
   const seed = rng() * 12.0, stormLat = (rng() - 0.5) * 0.8, stormLon = rng() * 6.283;
   return new THREE.Mesh(new THREE.SphereGeometry(radius * 1.12, 56, 56), new THREE.ShaderMaterial({
-    uniforms: { uTime, uC1: { value: new THREE.Color(pal.mid) }, uC2: { value: new THREE.Color(pal.high) }, uC3: { value: new THREE.Color(pal.peak) }, uStorm: { value: new THREE.Vector2(stormLon, stormLat) }, uSeed: { value: seed } },
+    uniforms: { uTime, uC1: { value: new THREE.Color(pal.mid) }, uC2: { value: new THREE.Color(pal.high) }, uC3: { value: new THREE.Color(pal.peak) }, uStorm: { value: new THREE.Vector2(stormLon, stormLat) }, uSeed: { value: seed }, uSun: { value: sunPos } },
     vertexShader: `varying vec3 vN; varying vec3 vW; varying vec3 vP; void main(){ vec4 wp=modelMatrix*vec4(position,1.0); vW=wp.xyz; vN=normalize(mat3(modelMatrix)*normal); vP=normalize(position); gl_Position=projectionMatrix*viewMatrix*wp; }`,
     fragmentShader: `${GLSL_NOISE}
-      uniform float uTime,uSeed; uniform vec3 uC1,uC2,uC3; uniform vec2 uStorm; varying vec3 vN; varying vec3 vW; varying vec3 vP;
+      uniform float uTime,uSeed; uniform vec3 uC1,uC2,uC3,uSun; uniform vec2 uStorm; varying vec3 vN; varying vec3 vW; varying vec3 vP;
       void main(){
         float lat = vP.y;
         float warp = vnoise(vec3(uSeed, lat*5.0, vP.x*2.0)) * 0.5;
@@ -813,7 +813,7 @@ function makeGasGiant(radius, pal, rng) {
         float dlat = (lat - uStorm.y), dlon = mod(lon - uStorm.x + 3.14159, 6.2832) - 3.14159;
         float storm = smoothstep(0.26, 0.0, sqrt(dlat*dlat*3.0 + dlon*dlon*0.6));
         col = mix(col, vec3(0.96,0.55,0.42), storm*0.85);
-        float lit = 0.32 + 0.68*max(dot(vN, normalize(-vW)), 0.0);
+        float lit = 0.32 + 0.68*max(dot(vN, normalize(uSun - vW)), 0.0);
         gl_FragColor = vec4(col*lit, 1.0);
       }`,
   }));
@@ -846,7 +846,7 @@ function makePlanet(site) {
   spinner.rotation.z = tilt;
 
   if (kind === "gas") {
-    spinner.add(makeGasGiant(radius, biome, kRng)); // banded body — no terrain/ocean/trees
+    spinner.add(makeGasGiant(radius, biome, kRng, sys.pos)); // banded body — no terrain/ocean/trees
     group.add(spinner);
   } else {
     // terrain mesh — displacing 2940 vertices and rejection-sampling tree spots is the
@@ -925,7 +925,7 @@ function makePlanet(site) {
     }
     const terrain = new THREE.Mesh(geo, terrainMat);
     spinner.add(terrain);
-    if (kind !== "barren") spinner.add(oceanShell(radius, biome.sea, kind === "lava")); // barren is bone-dry; lava gets a molten sea
+    if (kind !== "barren") spinner.add(oceanShell(radius, biome.sea, kind === "lava", sys.pos)); // barren is bone-dry; lava gets a molten sea
     if (kind === "terran" || kind === "ocean") plantForest(spinner, treeSamples, biomeName, rng, radius); // only living worlds grow forests
 
     // busy worlds earn a satellite dish, seated on real land
