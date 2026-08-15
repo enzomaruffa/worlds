@@ -1418,6 +1418,38 @@ function updateEasterEggs(dt) {
   }
 }
 
+// ---------- interactables: everything out here has a story and a hitbox ----------
+// One array, one raycast, one collider list. `id` has to stay stable across sessions —
+// it's the key the lore is cached under, so an array index would re-roll every reload.
+const interactables = [];
+
+function registerAmbient(rec) {
+  for (const o of rec.hit) o.userData.ambientId = rec.id;
+  interactables.push(rec);
+  return rec;
+}
+function unregisterAmbient(id) {
+  const i = interactables.findIndex((r) => r.id === id);
+  if (i >= 0) interactables.splice(i, 1);
+}
+function ambientById(id) {
+  return interactables.find((r) => r.id === id) ?? null;
+}
+
+// An invisible sphere that widens a small, distant, moving model into something you can
+// actually hit. The raycaster tests it but the renderer skips it, so it costs no draw call
+// and never shows up in bloom or the god rays.
+// Radius is in the PARENT's units — placedClone returns a scaled clone, so divide by that.
+const HIT_MAT = new THREE.MeshBasicMaterial({ visible: false });
+function hitProxy(parent, radius, y = 0) {
+  const m = new THREE.Mesh(new THREE.SphereGeometry(radius, 8, 6), HIT_MAT);
+  m.position.y = y;
+  m.visible = false;
+  m.frustumCulled = false;
+  parent.add(m);
+  return m;
+}
+
 const TRAIL_N = 90;
 const trailPos = new Float32Array(TRAIL_N * 3);
 const trailAge = new Float32Array(TRAIL_N).fill(1);
