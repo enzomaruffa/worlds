@@ -2771,6 +2771,7 @@ const _pq = new THREE.Quaternion(), _back = new THREE.Vector3();
 const _euler = new THREE.Euler(0, 0, 0, "YXZ"), _quat = new THREE.Quaternion();
 const _accel = new THREE.Vector3(), _to = new THREE.Vector3(), _push = new THREE.Vector3(), _collTmp = new THREE.Vector3();
 const _goal = new THREE.Vector3(), _engTmp = new THREE.Vector3(), _tmpv = new THREE.Vector3(), _rockPos = new THREE.Vector3();
+const _camClear = new THREE.Vector3();
 function tick() {
   const dt = Math.min(clock.getDelta(), 0.05);
   simT += dt;
@@ -3145,6 +3146,18 @@ function tick() {
     _camGoal.copy(ship.position).addScaledVector(forward, dive ? -8 : -14);
     _camGoal.y += 4.5;
     if (camShake > 0.001) _camGoal.x += (Math.random() - 0.5) * camShake * 6, _camGoal.y += (Math.random() - 0.5) * camShake * 6, _camGoal.z += (Math.random() - 0.5) * camShake * 6;
+    // The chase position trails the ship, so pinning against a surface would otherwise put
+    // the camera inside the world you just landed on. Lift it back out along the surface normal.
+    if (!dive) {
+      const clearCam = (pos, surf) => {
+        _camClear.subVectors(_camGoal, pos);
+        const d2 = _camClear.lengthSq();
+        if (d2 >= surf * surf) return;
+        _camGoal.copy(pos).addScaledVector(_camClear.normalize(), surf);
+      };
+      for (const b of starBodies) clearCam(b.pos, b.r * 1.1 + 6);
+      for (const g of planets.values()) clearCam(g.position, g.userData.bodyR + 6);
+    }
     camera.position.lerp(_camGoal, 1 - Math.exp(-(dive ? 9 : flyTarget ? 13 : 6) * dt)); // track the ship hard during the fast FTL dash so it stays the centerpiece
     const ft = !thrust ? (focusTarget || flyTarget) : null;
     if (ft && ft.position) camera.lookAt(ft.position); // keep the world we're flying to / holding dead-centre
