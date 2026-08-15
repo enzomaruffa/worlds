@@ -1557,9 +1557,11 @@ function hitProxy(parent, radius, y = 0) {
 }
 
 const TRAIL_N = 90;
+const TRAIL_STEP = 1.6; // world units between dots
 const trailPos = new Float32Array(TRAIL_N * 3);
 const trailAge = new Float32Array(TRAIL_N).fill(1);
 let trailHead = 0;
+const lastTrail = new THREE.Vector3();
 const trailGeo = new THREE.BufferGeometry();
 trailGeo.setAttribute("position", new THREE.BufferAttribute(trailPos, 3));
 trailGeo.setAttribute("age", new THREE.BufferAttribute(trailAge, 1));
@@ -3049,13 +3051,23 @@ function tick() {
   // engine trail from the actual nozzle
   const eng = _engTmp.copy(enginePoint).applyQuaternion(ship.quaternion).add(ship.position);
   for (let i = 0; i < TRAIL_N; i++) trailAge[i] = Math.min(trailAge[i] + dt * 1.2, 1);
-  if (thrust || vel.lengthSq() > 6 || flyTarget) {
-    trailPos.set([eng.x, eng.y, eng.z], trailHead * 3);
-    trailAge[trailHead] = 0;
-    trailHead = (trailHead + 1) % TRAIL_N;
+  // one dot per TRAIL_STEP of travel, not per frame — otherwise the trail is half as long
+  // at 120fps as at 60, because the ring buffer fills twice as fast over the same distance
+  let emitted = false;
+  const gap = lastTrail.distanceTo(eng);
+  if (!(thrust || vel.lengthSq() > 6 || flyTarget) || gap > TRAIL_STEP * TRAIL_N) {
+    lastTrail.copy(eng); // idle, or just warped — don't stitch a line across the galaxy
+  } else {
+    for (let left = gap; left > TRAIL_STEP; left -= TRAIL_STEP) {
+      lastTrail.lerp(eng, TRAIL_STEP / left);
+      trailPos.set([lastTrail.x, lastTrail.y, lastTrail.z], trailHead * 3);
+      trailAge[trailHead] = 0;
+      trailHead = (trailHead + 1) % TRAIL_N;
+      emitted = true;
+    }
   }
-  trailGeo.attributes.position.needsUpdate = true;
   trailGeo.attributes.age.needsUpdate = true;
+  if (emitted) trailGeo.attributes.position.needsUpdate = true;
 
   // thruster flame layers + engine light follow thrust
   const burning = thrust || flyTarget || dive;
