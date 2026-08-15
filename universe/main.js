@@ -2177,6 +2177,43 @@ function revealCodex(b) {
   });
 }
 
+// ---------- your logbook ----------
+// Collections are site-scoped rather than per-user, so entries carry `who` and are filtered
+// on read. It's a private-ish record, not a secret one — the point is a reason to go and
+// look at the corners nobody has been to.
+const logStore = worlds.db.collection("logbook");
+const logged = { world: new Set(), relic: new Set(), pilot: new Set() };
+function logIt(kind, key) {
+  if (!myHandle || !key || logged[kind]?.has(key)) return;
+  logged[kind].add(key);
+  logStore.create({ who: myHandle, kind, key, at: Date.now() }).catch(() => {});
+  updateLogbook();
+}
+const logEl = document.createElement("div");
+logEl.id = "logbook";
+logEl.style.cssText = "position:absolute;right:14px;top:auto;bottom:120px;width:196px;background:rgba(16,16,18,.78);"
+  + "border:1px solid #3f3f46;border-radius:10px;padding:8px 10px;font:11px ui-monospace,monospace;color:#a1a1aa;display:none";
+// parented in the async init below, not here — `hud` is declared much further down the file
+function updateLogbook() {
+  const total = planets.size;
+  if (!myHandle || !total) { logEl.style.display = "none"; return; }
+  logEl.style.display = "block";
+  logEl.innerHTML = `<div style="font-family:var(--display);font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:#71717a;margin-bottom:5px">logbook</div>`
+    + `<div>worlds &nbsp;<b style="color:#e5a00d">${logged.world.size}</b> <span style="color:#52525b">/ ${total}</span></div>`
+    + `<div>relics &nbsp;<b style="color:#9ad8ff">${logged.relic.size}</b></div>`
+    + `<div>pilots &nbsp;<b style="color:#7dd3fc">${logged.pilot.size}</b></div>`;
+}
+(async () => {
+  (document.getElementById("hud") ?? document.body).appendChild(logEl);
+  try {
+    const me = await worlds.me();
+    if (!me?.handle) return;
+    const page = await logStore.list({ filter: { who: me.handle }, limit: 100 });
+    for (const it of page.items) logged[it.data?.kind]?.add(it.data?.key);
+  } catch { /* db down — the logbook just starts empty */ }
+  updateLogbook();
+})();
+
 // ---------- discovery trails: the routes pilots have actually flown ----------
 // There is no visit history on the server — visits_30d is a lifetime counter with no
 // timestamps — so the map records its own. One doc per journey, heavily downsampled;
@@ -2357,6 +2394,7 @@ function updateRelics(dt, t) {
       r.revealed = true;
       toast(`☄ <span style="color:#9ad8ff">${esc(r.name)}</span><br><span style="color:#cbd5e1">${esc(r.lore)}</span>`, 7000, { wide: true });
       if (myHandle) noteEvent("relic", { who: myHandle, relic: r.name, world: r.world });
+      logIt("relic", r.name);
     }
     // drifted far from the pilot → retire it (keeps the count bounded; dispose what we own)
     if (d > 900) { unregisterAmbient(r.id); scene.remove(r.group); r.coma.geometry.dispose(); r.coma.material.dispose(); r.lbl.material.map?.dispose(); r.lbl.material.dispose(); relics.splice(i, 1); }
@@ -2399,6 +2437,7 @@ function startDive(group) {
   warpSound();
   playSfx("thrust", 0.5, 0.8);
   if (myHandle) noteEvent("visit", { who: myHandle, world: group.userData.site.name });
+  logIt("world", group.userData.site.name);
 }
 divePrompt.addEventListener("click", () => startDive(nearPlanet));
 document.getElementById("cardVisit").addEventListener("click", (e) => {
@@ -3236,6 +3275,7 @@ function tick() {
       toast(`🤝 ${randOf(["high-five with", "fly-by salute to", "wings waggled at", "warp-five with"])} <b style="color:#7dd3fc">@${esc(p.group.userData.handle)}</b>`);
       // both pilots detect this independently, so only the alphabetically-first writes it
       if (myHandle && myHandle < p.group.userData.handle) noteEvent("meet", { who: myHandle, other: p.group.userData.handle });
+      logIt("pilot", p.group.userData.handle);
     }
   }
   if (rosterDirty || t - lastRoster > 0.5) { updateRoster(); lastRoster = t; rosterDirty = false; }
