@@ -1588,6 +1588,7 @@ addEventListener("keyup", (e) => keys.delete(e.code));
 let dragging = null;
 renderer.domElement.addEventListener("pointerdown", (e) => { initAudio(); dragging = { x: e.clientX, y: e.clientY, moved: 0 }; });
 addEventListener("pointermove", (e) => {
+  hoverX = e.clientX; hoverY = e.clientY;   // captured before the drag early-out below
   if (!dragging) return;
   yaw -= (e.clientX - dragging.x) * 0.003;
   pitch = Math.max(Math.min(pitch - (e.clientY - dragging.y) * 0.003, 1.2), -1.2);
@@ -1621,6 +1622,48 @@ const joy = { x: 0, y: 0, active: false };
 
 // ---------- picking + card ----------
 const raycaster = new THREE.Raycaster();
+
+// ---------- hover ----------
+// A chip and a cursor change, never a material tweak: placedClone shares materials with the
+// GLB template, and craft_cargoA is both the mothership and a freighter — tinting one would
+// light up the other.
+let hoverX = -1, hoverY = -1, hovered = null;
+const _ndc = new THREE.Vector2(), _hv = new THREE.Vector3();
+const hoverChip = document.createElement("div");
+hoverChip.style.cssText = "position:fixed;transform:translate(-50%,-160%);padding:3px 8px;border-radius:6px;"
+  + "background:rgba(9,9,11,.82);font:10px var(--display,monospace);letter-spacing:.14em;"
+  + "text-transform:uppercase;pointer-events:none;display:none;z-index:9;white-space:nowrap";
+document.body.appendChild(hoverChip);
+
+function updateHover() {
+  if (introActive || hoverX < 0 || (dragging && dragging.moved >= 6) || matchMedia("(pointer: coarse)").matches) {
+    if (hovered) { hovered = null; hoverChip.style.display = "none"; renderer.domElement.style.cursor = ""; }
+    return;
+  }
+  _ndc.set((hoverX / innerWidth) * 2 - 1, -(hoverY / innerHeight) * 2 + 1);
+  raycaster.setFromCamera(_ndc, camera);
+  // proxies only — belts are InstancedMesh with hundreds of instances each, far too
+  // expensive to sweep every frame, so they stay click-only
+  const probes = [];
+  for (const rec of interactables) if (rec.anchor) probes.push(...rec.hit);
+  const hit = probes.length ? raycaster.intersectObjects(probes, true)[0] : null;
+  let rec = null;
+  if (hit) {
+    let o = hit.object;
+    while (o && !o.userData.ambientId) o = o.parent;
+    if (o) rec = ambientById(o.userData.ambientId);
+  }
+  hovered = rec;
+  renderer.domElement.style.cursor = rec ? "pointer" : "";
+  if (!rec || !rec.anchor) { hoverChip.style.display = "none"; return; }
+  _hv.copy(rec.anchor.position).project(camera);
+  if (_hv.z > 1) { hoverChip.style.display = "none"; return; }
+  hoverChip.textContent = `${rec.title()} · ${Math.round(ship.position.distanceTo(rec.anchor.position))}u`;
+  hoverChip.style.left = `${(_hv.x * 0.5 + 0.5) * innerWidth}px`;
+  hoverChip.style.top = `${(-_hv.y * 0.5 + 0.5) * innerHeight}px`;
+  hoverChip.style.color = `#${new THREE.Color(rec.accent).getHexString()}`;
+  hoverChip.style.display = "block";
+}
 const card = document.getElementById("card");
 let flyTarget = null;
 let flyFTL = false;              // is the active fly a long-range hyperspace jump (vs a short glide)?
@@ -2920,6 +2963,7 @@ function tick() {
   // cross the event horizon → wormhole jump to the home star (a shortcut, not death)
   if (!dive && ship.position.distanceTo(CORE_POS) < EH_R + shipRadius) wormholeJump();
   updateGateTransit(dt);
+  updateHover();
 
   // soft collisions: every body is wrapped in a cushion shell — a repulsor field that
   // eases you to a stop before the surface — instead of a hard wall that snaps your
