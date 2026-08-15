@@ -56,6 +56,13 @@ function modelHeight(name) {
   const b = ASSET_BOX[name];
   return Math.max(b.max.y - b.min.y, 1e-3);
 }
+// Widest native dimension. Belt rocks are instanced at raw GLB scale, so this is what
+// turns their scale factor into the radius they actually occupy.
+function modelSpan(name) {
+  const b = ASSET_BOX[name];
+  if (!b) return 1;
+  return Math.max(b.max.x - b.min.x, b.max.y - b.min.y, b.max.z - b.min.z, 1e-3);
+}
 function randomUnit(rng) {
   const th = rng() * 6.283185, z = 2 * rng() - 1, r = Math.sqrt(Math.max(0, 1 - z * z));
   return new THREE.Vector3(r * Math.cos(th), z, r * Math.sin(th));
@@ -1191,7 +1198,7 @@ function buildBelt() {
       const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(rng() * 6, rng() * 6, rng() * 6));
       const s = new THREE.Vector3().setScalar(0.8 + rng() * 2.6);
       matrices.push(new THREE.Matrix4().compose(p, q, s));
-      beltRocks.push({ group: beltGroup, local: p.clone(), r: s.x * 0.95 }); // collidable
+      beltRocks.push({ group: beltGroup, local: p.clone(), r: s.x * modelSpan(name) * 0.5 }); // collidable
     }
     instancedFromGLB(ASSETS[name], matrices, beltGroup);
     beltGroup.userData.spin = 0.008 + (k % 3) * 0.003;
@@ -1207,7 +1214,7 @@ function buildBelt() {
       const p = new THREE.Vector3(Math.cos(a) * r, (rng() - 0.5) * 22, Math.sin(a) * r);
       const s = new THREE.Vector3().setScalar(2.4 + rng() * 2);
       matrices.push(new THREE.Matrix4().compose(p, new THREE.Quaternion().setFromEuler(new THREE.Euler(rng() * 6, rng() * 6, rng() * 6)), s));
-      beltRocks.push({ group: rocks, local: p.clone(), r: s.x * 1.15 });
+      beltRocks.push({ group: rocks, local: p.clone(), r: s.x * modelSpan(cn) * 0.6 });
     }
     instancedFromGLB(ASSETS[cn], matrices, rocks);
     rocks.userData.spin = -0.006;
@@ -1237,7 +1244,7 @@ function buildBelt() {
         const p = new THREE.Vector3(Math.cos(a) * r, (rng() - 0.5) * 16, Math.sin(a) * r);
         const sc = new THREE.Vector3().setScalar(1.0 + rng() * 3.4);
         mats.push(new THREE.Matrix4().compose(p, new THREE.Quaternion().setFromEuler(new THREE.Euler(rng() * 6, rng() * 6, rng() * 6)), sc));
-        beltRocks.push({ group: bg, local: p.clone(), r: sc.x * 0.95 });
+        beltRocks.push({ group: bg, local: p.clone(), r: sc.x * modelSpan(kind) * 0.5 });
       }
       instancedFromGLB(ASSETS[kind], mats, bg);
       bg.userData.spin = 0.008 + rng() * 0.006;
