@@ -2373,10 +2373,23 @@ if (introActive) {
   requestAnimationFrame(() => introEl.classList.add("go"));
 } else {
   introEl.classList.add("done");
+  introEl.style.display = "none";
 }
+// Once faded, take it out of the document — its starfield and blinking dot are CSS
+// animations that otherwise keep ticking over for the whole session behind the canvas.
+introEl.addEventListener("transitionend", () => { introEl.style.display = "none"; });
+// #intro is an opaque full-viewport sheet above the canvas, so nothing drawn during the
+// cold open reaches a pixel. Keep ticking (introT drives the timing, and the sim must stay
+// live) but draw only occasionally — enough to warm shaders and textures progressively,
+// while the title animation and the world build get the rest of the budget.
+// If #intro ever stops being opaque, this has to go.
+let introHidden = introActive;
+const INTRO_DRAW_MS = 250;
+let lastDraw = 0;
 function endIntro() {
   if (!introActive || introT < 1.4) return; // ignore stray load-time events
   introActive = false;
+  introHidden = false; // full rate for the 1.1s fade, not after it
   introEl.classList.add("done");
 }
 addEventListener("keydown", endIntro);
@@ -2785,11 +2798,15 @@ function tick() {
   updateBubbles();
   updateCompass(forward);
 
-  if (composer) {
-    try { composer.render(); }
-    catch (e) { console.warn("composer.render failed — switching to plain render:", e); composer = null; }
+  const nowMs = performance.now();
+  if (!introHidden || nowMs - lastDraw > INTRO_DRAW_MS) {
+    lastDraw = nowMs;
+    if (composer) {
+      try { composer.render(); }
+      catch (e) { console.warn("composer.render failed — switching to plain render:", e); composer = null; }
+    }
+    if (!composer) renderer.render(scene, camera);
   }
-  if (!composer) renderer.render(scene, camera);
   requestAnimationFrame(tick);
 }
 tick();
