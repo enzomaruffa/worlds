@@ -983,11 +983,13 @@ function makePlanet(site) {
   }
 
   // big worlds — especially gas giants — can wear a banded Saturn ring; rare elsewhere
+  let ringed = false;
   if ((kind === "gas" || radius > 18) && rng() < (kind === "gas" ? 0.65 : 0.4)) {
     const ring = makePlanetRing(radius, biome.atmo);
     ring.rotation.x = Math.PI / 2 + (rng() - 0.5) * 0.6;
     ring.rotation.y = (rng() - 0.5) * 0.4;
     group.add(ring);
+    ringed = true;
   }
 
   const moons = Math.min((site.contributors?.length ?? 1) - 1, 3);
@@ -1011,7 +1013,9 @@ function makePlanet(site) {
   const inc = (rng() - 0.5) * 1.1;  // orbital tilt, up to ~±31°
   const node = rng() * Math.PI * 2; // which way the tilt leans (ascending node)
   const orbitQuat = new THREE.Quaternion().setFromAxisAngle(_Y, node).multiply(new THREE.Quaternion().setFromAxisAngle(_X, inc));
-  group.userData = { site, sys, orbitR, angle, orbitQuat, speed: 0.016 / Math.sqrt(orbitR / 40), spin: 0.08 + rng() * 0.16, scaleIn: 0, spinner, clouds, bodyR: radius * 1.3, mass: radius * 1.4 };
+  // kind/ringed/moons are what the pilot can actually SEE — carried so lore can describe
+  // the world in front of them rather than just its metadata
+  group.userData = { site, sys, orbitR, angle, orbitQuat, speed: 0.016 / Math.sqrt(orbitR / 40), spin: 0.08 + rng() * 0.16, scaleIn: 0, spinner, clouds, bodyR: radius * 1.3, mass: radius * 1.4, kind, ringed, moons };
   group.scale.setScalar(0.001);
 
   // the orbit path, tilted to match the plane the planet actually rides (shared material)
@@ -1818,6 +1822,20 @@ function parseLore(text) {
   return { civ: lines[0], lore: lines[1], custom: lines[2] || "" };
 }
 
+// What the pilot can see of a world, phrased for a prompt. The planet's archetype, rings
+// and moons are decided client-side from its seed, so without this the model is writing
+// about a name and a category while the pilot is looking at a ringed gas giant.
+const KIND_LOOK = { gas: "a banded gas giant", ocean: "an ocean world", lava: "a molten volcanic world", barren: "a dead airless rock", terran: "a green-and-blue land world" };
+function lookOf(site) {
+  const d = planets.get(site.name)?.userData;
+  if (!d) return "";
+  const bits = [KIND_LOOK[d.kind] ?? "a rocky world"];
+  if (d.ringed) bits.push("wearing a wide ring");
+  if (d.moons === 1) bits.push("with a single moon");
+  else if (d.moons > 1) bits.push(`with ${d.moons} moons`);
+  return ` It looks like ${bits.join(", ")}.`;
+}
+
 async function loadLore(site) {
   if (loreCache.has(site.name)) return loreCache.get(site.name);
   const desc = site.description || "";
@@ -1839,7 +1857,7 @@ async function loadLore(site) {
   try {
     const biome = site.universe?.biome || "lush";
     const res = await worlds.ai.complete({
-      prompt: `Invent lore for a planet representing an internal tool, on a ${biome} world. Name: ${site.name}. Category: ${site.category}. About: ${desc || "unknown"}.\nReturn exactly three lines, no labels, no numbering, no quotes:\n1) the civilization's name (2-4 words, evocative)\n2) one vivid, playful sci-fi sentence about them (max 18 words)\n3) one quirky local custom (max 12 words)`,
+      prompt: `Invent lore for a planet representing an internal tool, on a ${biome} world. Name: ${site.name}. Category: ${site.category}. About: ${desc || "unknown"}.${lookOf(site)}\nReturn exactly three lines, no labels, no numbering, no quotes:\n1) the civilization's name (2-4 words, evocative)\n2) one vivid, playful sci-fi sentence about them (max 18 words)\n3) one quirky local custom (max 12 words)`,
       model: "fast", max_tokens: 110,
     });
     lore = parseLore(res.text || "");
@@ -2195,6 +2213,7 @@ async function relicLore(world, pilot) {
 }
 
 const relics = [];
+let relicSeq = 0;
 const RELIC_MAX = 6;
 async function spawnRelic() {
   const names = [...planets.keys()];
@@ -2221,8 +2240,17 @@ async function spawnRelic() {
   g.position.copy(ship.position).addScaledVector(dir, 240 + Math.random() * 160);
   g.position.y += (Math.random() - 0.5) * 80;
   scene.add(g);
-  relics.push({ group: g, body: g.children[0], coma, lbl, name: data.name, lore: data.lore,
+  const rid = "relic:" + relicSeq++;
+  relics.push({ group: g, body: g.children[0], coma, lbl, name: data.name, lore: data.lore, id: rid,
     vel: randomUnit(Math.random).multiplyScalar(2 + Math.random() * 3.5), spin: 0.1 + Math.random() * 0.3, revealed: false });
+  // relics already carry a name and a lore line — they just were never clickable
+  hitProxy(g, sc * 2.4);
+  registerAmbient({
+    id: rid, kind: "relic", hit: [g], anchor: g, radius: sc * 2.2, accent: 0x9ad8ff, hold: true,
+    title: () => data.name,
+    sub: () => `adrift near ${world}.world`,
+    lore: () => Promise.resolve(data.lore), // spawnRelic already paid for this one
+  });
 }
 let nextRelic = 18 + Math.random() * 18; // first relic drifts in ~18–36s after launch
 function updateRelics(dt, t) {
@@ -2238,7 +2266,7 @@ function updateRelics(dt, t) {
       toast(`☄ <span style="color:#9ad8ff">${esc(r.name)}</span><br><span style="color:#cbd5e1">${esc(r.lore)}</span>`, 7000, { wide: true });
     }
     // drifted far from the pilot → retire it (keeps the count bounded; dispose what we own)
-    if (d > 900) { scene.remove(r.group); r.coma.geometry.dispose(); r.coma.material.dispose(); r.lbl.material.map?.dispose(); r.lbl.material.dispose(); relics.splice(i, 1); }
+    if (d > 900) { unregisterAmbient(r.id); scene.remove(r.group); r.coma.geometry.dispose(); r.coma.material.dispose(); r.lbl.material.map?.dispose(); r.lbl.material.dispose(); relics.splice(i, 1); }
   }
 }
 
