@@ -2054,9 +2054,13 @@ function pilotShip(handle, key) {
   const color = new THREE.Color().setHSL(hue / 360, 0.75, 0.6);
   speeder.traverse((c) => { if (c.isMesh) { c.material = c.material.clone(); c.material.color.offsetHSL(hue / 360, 0.15, 0); } });
   g.add(speeder);
+  // Additive glow rather than a PointLight: the light count is part of every lit material's
+  // program key, so one per pilot means the whole scene recompiles each time somebody joins.
   const glow = new THREE.Mesh(new THREE.SphereGeometry(0.2, 10, 10), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending }));
   glow.position.set(0, 0, 1.4);
-  g.add(glow, new THREE.PointLight(color, 6, 16, 2));
+  const halo = new THREE.Mesh(new THREE.SphereGeometry(0.9, 12, 12), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.22, blending: THREE.AdditiveBlending, depthWrite: false }));
+  halo.position.copy(glow.position);
+  g.add(glow, halo);
   const nameSprite = screenLabel(`@${handle}`, color.getHex());
   g.add(nameSprite);
   g.userData.pilotKey = key; g.userData.handle = handle; g.userData.color = color;
