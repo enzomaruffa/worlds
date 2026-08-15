@@ -1185,6 +1185,7 @@ let shieldMesh = null;
 function buildBelt() {
   const rng = mulberry32(777);
   const beltR = 140;
+  const homeBeltMeshes = [];
   // rock species available for belts — only those that actually loaded
   const ROCKS = ["meteor", "meteor_detailed", "meteor_half", "rock", "rock_largeA",
     "rock_largeB", "rocks_smallA", "rocks_smallB"].filter((n) => ASSETS[n]);
@@ -1206,6 +1207,19 @@ function buildBelt() {
     beltGroup.userData.spin = 0.008 + (k % 3) * 0.003;
     belts.push(beltGroup);
     scene.add(beltGroup);
+    homeBeltMeshes.push(...beltGroup.children);
+  }
+  // one record for the whole home field — a belt is the unit that has a story, not a rock
+  if (homeBeltMeshes.length) {
+    registerAmbient({
+      id: "belt:home", kind: "belt", hit: homeBeltMeshes, anchor: null, radius: 0,
+      accent: 0xd4d4d8, hold: false,
+      title: () => "the Home Claim",
+      sub: () => `asteroid field · ${beltRocks.length} surveyed rocks`,
+      lore: () => ambientLore("belt:home", "belt",
+        `An asteroid belt ringing the home star of a playful sci-fi galaxy, staked out in mining claims. `
+        + `Write 1-2 vivid in-universe sentences about it. No preamble, no quotes.`),
+    });
   }
   // crystal clusters drifting closer in
   for (const cn of ["rock_crystalsLargeA", "rock_crystalsLargeB"].filter((n) => ASSETS[n])) {
@@ -1229,7 +1243,18 @@ function buildBelt() {
     const a = rng() * 6.283, r = beltR + (rng() - 0.5) * 30;
     const m = placedClone(junk[i % junk.length], scene, 3 + rng() * 4,
       new THREE.Vector3(Math.cos(a) * r, (rng() - 0.5) * 14, Math.sin(a) * r), rng() * 6.283);
-    if (m) debris.push({ mesh: m, spin: new THREE.Vector3((rng() - 0.5) * 0.4, (rng() - 0.5) * 0.4, (rng() - 0.5) * 0.4), orbR: r, orbA: a, orbS: 0.01 + rng() * 0.01 });
+    if (!m) continue;
+    debris.push({ mesh: m, spin: new THREE.Vector3((rng() - 0.5) * 0.4, (rng() - 0.5) * 0.4, (rng() - 0.5) * 0.4), orbR: r, orbA: a, orbS: 0.01 + rng() * 0.01 });
+    const jid = "junk:" + i;
+    hitProxy(m, 7 / m.scale.x);
+    registerAmbient({
+      id: jid, kind: "junk", hit: [m], anchor: m, radius: 7, accent: 0xdff1ff, hold: false,
+      title: () => `wreck ${(hashStr(jid) % 46656).toString(36).toUpperCase().padStart(3, "0")}`,
+      sub: () => "drifting wreckage · home belt",
+      lore: () => ambientLore(jid, "junk",
+        `A piece of jettisoned cargo drifting in an asteroid belt in a playful sci-fi galaxy. `
+        + `Write 1-2 vivid in-universe sentences about how it got there. No preamble, no quotes.`),
+    });
   }
   // belts ringing the outer systems too — each with its own rock mix
   for (const key of ["games", "tools", "experiments", "work"]) {
@@ -1239,6 +1264,7 @@ function buildBelt() {
     // at the old 4.2 the two bands overlapped and planets swept straight through the rocks.
     const r0 = s.starR * 5.6 + 60;
     const kinds = ROCKS.length ? [ROCKS[hashStr(key) % ROCKS.length], ROCKS[(hashStr(key) + 3) % ROCKS.length]] : [];
+    const outerMeshes = [];
     for (const kind of kinds) {
       const mats = [];
       const bg = new THREE.Group();
@@ -1254,7 +1280,19 @@ function buildBelt() {
       bg.userData.spin = 0.008 + rng() * 0.006;
       belts.push(bg);
       scene.add(bg);
+      outerMeshes.push(...bg.children);
     }
+    if (!outerMeshes.length) continue;
+    const bid = "belt:" + key;
+    registerAmbient({
+      id: bid, kind: "belt", hit: outerMeshes, anchor: null, radius: 0,
+      accent: s.hot, hold: false,
+      title: () => `the ${s.title} Reach`,
+      sub: () => `asteroid field · outer ${s.title}`,
+      lore: () => ambientLore(bid, "belt",
+        `An asteroid belt ringing "${s.title}" (${s.tag}) in a playful sci-fi galaxy. `
+        + `Write 1-2 vivid in-universe sentences about it. No preamble, no quotes.`),
+    });
   }
 
   // the mothership lazily circles hello.world
@@ -1262,6 +1300,16 @@ function buildBelt() {
     mothership = ASSETS.craft_cargoA.clone();
     mothership.scale.setScalar(4.8);
     scene.add(mothership);
+    hitProxy(mothership, 14 / 4.8);
+    registerAmbient({
+      id: "mothership", kind: "mothership", hit: [mothership], anchor: mothership,
+      radius: 14, accent: 0xffd84d, hold: true,
+      title: () => "the Long Way Round",
+      sub: () => "colony ship · one lap of hello.world",
+      lore: () => ambientLore("mothership", "mothership",
+        `A huge slow colony ship making an endless circuit of the home star in a playful sci-fi galaxy. `
+        + `Write 1-2 vivid in-universe sentences about the people aboard. No preamble, no quotes.`),
+    });
   }
 }
 const belts = [];
@@ -1297,6 +1345,15 @@ function buildStations() {
       bob: rng() * 6.283, dish,
     });
     hitProxy(g, 22);
+    const sid = "station:" + key, sname = STATION_NAMES[key] ?? "Station";
+    registerAmbient({
+      id: sid, kind: "station", hit: [g], anchor: g, radius: 22, accent: sys.hot, hold: true,
+      title: () => sname,
+      sub: () => `orbital station · ${sys.title}`,
+      lore: () => ambientLore(sid, "station",
+        `An orbital station called "${sname}" circles "${sys.title}" (${sys.tag}) in a playful sci-fi galaxy. `
+        + `Write 1-2 vivid in-universe sentences about what its crew do up there. No preamble, no quotes.`),
+    });
   }
 }
 function updateStations(dt, t) {
@@ -1341,14 +1398,27 @@ function buildGates() {
     glow.position.y = PY;
     g.add(glow);
     scene.add(g);
-    gates.push({ group: g, key, sys, ring, portal, spin: 0.25 + rng() * 0.15, lastZ: null, cool: 0, hot: 0 });
+    const ga = { group: g, key, sys, ring, portal, spin: 0.25 + rng() * 0.15, lastZ: null, cool: 0, hot: 0 };
+    gates.push(ga);
     hitProxy(g, 26, PY);
+    const gid = "gate:" + key, gname = GATE_NAMES[key] ?? "warp arch";
+    registerAmbient({
+      id: gid, kind: "gate", hit: [g], anchor: g, radius: 26, accent: sys.hot, hold: false, solid: false,
+      title: () => gname,
+      sub: () => `warp arch · fly through for ${sys.title}`,
+      action: { label: "engage ⟟", run: () => gateJump(ga, true) },
+      lore: () => ambientLore(gid, "gate",
+        `A warp arch called "${gname}" hangs on the run between hello.world and "${sys.title}" (${sys.tag}) `
+        + `in a playful sci-fi galaxy. Write 1-2 vivid in-universe sentences about it. No preamble, no quotes.`),
+    });
   }
 }
 function updateGates(dt, t) {
   for (const ga of gates) {
     ga.ring.rotation.z += ga.spin * dt;
-    ga.portal.material.opacity = 0.08 + 0.06 * (0.5 + 0.5 * Math.sin(t * 1.3));
+    // brighten as you line up on the aperture, so it reads as arming before you commit
+    ga.portal.material.opacity = 0.08 + 0.06 * (0.5 + 0.5 * Math.sin(t * 1.3)) + ga.hot * 0.42;
+    ga.ring.material.opacity = 0.85 + ga.hot * 0.15;
   }
 }
 
@@ -1374,7 +1444,25 @@ function buildTraffic() {
       speed: 0.006 + rng() * 0.01, off: new THREE.Vector3((rng() - 0.5) * 90, (rng() - 0.5) * 70, (rng() - 0.5) * 90),
     };
     transit.push(tr);
+    const id = "freighter:" + i;
+    const name = FREIGHTER_NAMES[i % FREIGHTER_NAMES.length];
+    // leg flips on every bounce, so read the endpoints live — the card must name the
+    // direction it's going right now, not the one it launched on
+    const from = () => SYSTEMS[tr.leg ? tr.bKey : tr.aKey];
+    const to = () => SYSTEMS[tr.leg ? tr.aKey : tr.bKey];
+    const cargoFor = (k) => { const c = CARGO_BY[k] ?? CARGO_BY.misc; return c[hashStr(id + k) % c.length]; };
     hitProxy(mesh, 14 / mesh.scale.x);
+    registerAmbient({
+      id, kind: "freighter", hit: [mesh], anchor: mesh, radius: 14, accent: 0x9ad8ff, hold: true,
+      title: () => name,
+      sub: () => `hauling ${cargoFor(tr.leg ? tr.aKey : tr.bKey)} · ${from().title} → ${to().title}`,
+      // the prompt names both ends without a direction, so the one cached line stays true
+      // on the return leg too
+      lore: () => ambientLore(id, "freighter",
+        `A cargo freighter called "${name}" works the lane between "${SYSTEMS[tr.aKey].title}" (${SYSTEMS[tr.aKey].tag}) `
+        + `and "${SYSTEMS[tr.bKey].title}" (${SYSTEMS[tr.bKey].tag}) in a playful sci-fi galaxy. `
+        + `Write 1-2 vivid in-universe sentences about this run and the crew who fly it. No preamble, no quotes.`),
+    });
   }
 }
 const _tA = new THREE.Vector3(), _tPrev = new THREE.Vector3();
@@ -1415,6 +1503,17 @@ function buildEasterEggs() {
     mesh.position.y = (rng() - 0.5) * 220;
     mesh.add(new THREE.PointLight(it.glow, 26, 70, 2));
     eggs.push({ mesh, spin: new THREE.Vector3((rng() - 0.5) * 0.3, (rng() - 0.5) * 0.5, (rng() - 0.5) * 0.3) });
+    const eid = "egg:" + i;
+    hitProxy(mesh, 8 / mesh.scale.x);
+    registerAmbient({
+      id: eid, kind: "egg", hit: [mesh], anchor: mesh, radius: 8, accent: it.glow, hold: true,
+      title: () => (it.n.startsWith("astronaut") ? "a drifting spacewalker" : it.n === "alien" ? "something friendly" : it.n === "rover" ? "an abandoned rover" : "a lost barrel"),
+      sub: () => "out past the lanes",
+      lore: () => ambientLore(eid, "egg",
+        `${it.n === "alien" ? "A small friendly alien" : it.n === "rover" ? "An abandoned surface rover" : it.n === "barrel" ? "A stray barrel" : "A spacewalking astronaut"} `
+        + `drifting alone far off the shipping lanes in a playful sci-fi galaxy. `
+        + `Write 1-2 vivid in-universe sentences about them. No preamble, no quotes.`),
+    });
   });
 }
 function updateEasterEggs(dt) {
@@ -1540,11 +1639,23 @@ function pick(cx, cy) {
       if (o) { following = o.userData.pilotKey; flyTarget = null; toast(`▸ following <b style="color:#7dd3fc">@${o.userData.handle}</b> — click empty space to break off`); blip(); return; }
     }
   }
-  const hits = raycaster.intersectObjects([...planets.values()], true);
-  if (!hits.length) { following = null; return; } // clicking the void stops following
-  let o = hits[0].object;
-  while (o && !o.userData.site) o = o.parent; // walk up to the planet group
-  if (!o) return;
+  // Planets and ambient objects go through ONE raycast so depth decides the winner —
+  // a freighter crossing in front of a world should take the click.
+  const targets = [...planets.values()];
+  for (const rec of interactables) targets.push(...rec.hit);
+  const hits = raycaster.intersectObjects(targets, true);
+  for (const h of hits) {
+    let o = h.object;
+    while (o && !o.userData.site && !o.userData.ambientId) o = o.parent;
+    if (!o) continue;
+    if (o.userData.ambientId) { pickAmbient(ambientById(o.userData.ambientId), h.point); return; }
+    pickPlanet(o);
+    return;
+  }
+  following = null; // clicking the void stops following
+}
+
+function pickPlanet(o) {
   // clicking is for approaching a world you're already near — not teleporting across the
   // map. For a distant system, warp to it via the sidebar (that's the hyperspace jump).
   if (ship.position.distanceTo(o.position) > MAX_PICK_DIST) {
@@ -1563,6 +1674,29 @@ function pick(cx, cy) {
   flyTarget = o;
   focusTarget = o;       // glide in, then hold facing it
   flyFTL = false;        // a local approach → smooth glide, no hyperspace
+  blip();
+}
+
+function pickAmbient(rec, point) {
+  if (!rec) return;
+  following = null;
+  const anchor = rec.anchor;
+  const dist = anchor ? ship.position.distanceTo(anchor.position) : ship.position.distanceTo(point);
+  showAmbientCard(rec, dist);
+  // Hold with focusTarget, never flyTarget: flyTarget clears on arrival, and against a
+  // freighter doing 200u/s the goal moves faster than the glide closes, so it would never
+  // clear. focusTarget just holds — which reads as matching velocity anyway.
+  if (rec.hold && anchor && dist <= MAX_PICK_DIST) {
+    const off = new THREE.Vector3().subVectors(ship.position, anchor.position);
+    if (off.lengthSq() < 1e-3) off.set(0, 0, 1);
+    off.normalize().multiplyScalar(rec.radius + shipRadius + 18);
+    off.y += rec.radius * 0.3;
+    // userData is not optional: the focus branch reads focusTarget.userData.bodyR before
+    // it ever checks for an offset
+    focusTarget = { position: anchor.position, offset: off, userData: { bodyR: rec.radius } };
+  } else if (rec.hold && anchor) {
+    toast(`▸ <b>${esc(rec.title())}</b> is far off — reading its transponder only`);
+  }
   blip();
 }
 
@@ -1701,13 +1835,37 @@ function showCard(site) {
       (L.custom ? `<span class="loreCustom">⚙ ${esc(L.custom)}</span>` : "");
   });
 }
+// Ambient objects reuse the card element but not showCard(): cardSite doubles as the
+// "a world is open" flag for the codex, transmissions, the dive prompt and the visit
+// button, and none of those should fire behind a freighter's manifest.
+let cardObj = null;
+function showAmbientCard(rec, dist) {
+  cardSite = null; cardObj = rec;
+  card.style.display = "block";
+  const c = `#${new THREE.Color(rec.accent).getHexString()}`;
+  const nameEl = document.getElementById("cardName");
+  nameEl.textContent = rec.title();
+  nameEl.style.color = c;
+  document.getElementById("cardMeta").textContent = rec.sub();
+  document.getElementById("cardDesc").textContent = `${KIND_LABEL[rec.kind] ?? rec.kind} · ${Math.round(dist)}u out`;
+  const v = document.getElementById("cardVisit");
+  if (rec.action) { v.style.display = ""; v.textContent = rec.action.label; v.removeAttribute("href"); }
+  else v.style.display = "none";
+  const loreEl = document.getElementById("cardLore");
+  loreEl.textContent = "✦ pulling the manifest…";
+  rec.lore().then((text) => {
+    if (cardObj !== rec) return; // pilot moved on
+    loreEl.innerHTML = `<span class="loreCiv">${esc(rec.title())}</span>✦ ${esc(text)}`;
+  }).catch(() => {});
+}
+
 // Release a focused world. shove=true (LEAVING — thrust away) turns the ship OUTWARD
 // and pushes off so you sail away instead of straight back into the surface. shove=false
 // (CLOSING the card) just dismisses the panel and lets free-flight resume where you are —
 // no kick, no reorient (per design: closing ≠ leaving).
 function releaseFocus(shove = true) {
   card.style.display = "none";
-  cardSite = null;
+  cardSite = null; cardObj = null;
   const p = focusTarget;
   focusTarget = null;
   if (!p || !shove) return;
@@ -1740,6 +1898,43 @@ function wormholeJump() {
   toast(`🌀 <b>${randOf(["spaghettified", "folded sideways", "unwound", "compressed", "politely disassembled"])}</b> — the wormhole spits you out at the home star`);
 }
 
+// ---------- warp gates ----------
+// A gate sits on the home→star line facing home, so which side you cross from IS the
+// direction of travel: outbound to its system, or back to hello.world.
+const _gl = new THREE.Vector3();
+const GATE_PY = 8, GATE_APERTURE = 22;
+function gateJump(ga, outbound) {
+  const sys = outbound ? ga.sys : SYSTEMS.misc;
+  initAudio();
+  flyFTL = true;
+  flyTarget = { position: sys.pos.clone(), offset: new THREE.Vector3(0, 16, sys.starR * 6) };
+  focusTarget = null; following = null;
+  if (cardSite || cardObj) { card.style.display = "none"; cardSite = null; cardObj = null; }
+  if (typeof flashEl !== "undefined" && flashEl) {
+    flashEl.style.opacity = "1";
+    setTimeout(() => { flashEl.style.opacity = "0"; }, 90);
+  }
+  warpSound();
+  ga.cool = 2.5;
+  toast(`⟟ <b style="color:#${new THREE.Color(ga.sys.hot).getHexString()}">${GATE_NAMES[ga.key] ?? "the arch"}</b> — transit engaged · <b>${sys.title}</b>`);
+}
+function updateGateTransit(dt) {
+  if (dive || introActive) return;
+  for (const ga of gates) {
+    ga.cool = Math.max(0, ga.cool - dt);
+    ga.group.worldToLocal(_gl.copy(ship.position));
+    const z = _gl.z, r = Math.hypot(_gl.x, _gl.y - GATE_PY), prev = ga.lastZ;
+    ga.lastZ = z;
+    ga.hot = r < GATE_APERTURE * 2.2 && Math.abs(z) < 120 ? 1 - Math.min(r / (GATE_APERTURE * 2.2), 1) : 0;
+    if (prev === null || ga.cool > 0 || flyTarget) continue;
+    // crossed the portal plane, inside the aperture, in one plausible step — the step
+    // guard rejects an FTL jump that teleported the ship straight past the gate
+    if (r < GATE_APERTURE && Math.sign(z) !== Math.sign(prev) && Math.abs(z - prev) < 80) {
+      gateJump(ga, z > prev);
+    }
+  }
+}
+
 // ---------- toasts ----------
 // opts.wide → a roomier, wrapping card (sits just under the compass) for multi-line
 // lore like codex entries and intercepted transmissions; default is the slim ellipsised pill.
@@ -1767,7 +1962,7 @@ function updateCodex() {
   const key = inRange?.title ?? null;
   if (key === nearSystem) return;
   nearSystem = key;
-  if (inRange && inRange.codex && !introActive && !cardSite) revealCodex(inRange);
+  if (inRange && inRange.codex && !introActive && !cardSite && !cardObj) revealCodex(inRange);
 }
 
 // ---------- ambient "intercepted transmissions": flavor chatter that drifts in over time ----------
@@ -1839,7 +2034,7 @@ async function emitTransmission() {
 }
 let nextTx = 35 + Math.random() * 30; // first transmission lands ~35–65s in
 function updateTransmissions(dt) {
-  if (introActive || cardSite || nearSystem) return; // don't talk over the intro / a card / a codex
+  if (introActive || cardSite || cardObj || nearSystem) return; // don't talk over the intro / a card / a codex
   nextTx -= dt;
   if (nextTx > 0) return;
   nextTx = 55 + Math.random() * 45; // then every ~55–100s
@@ -1863,6 +2058,54 @@ async function cachedAI(store, cache, key, rec, prompt, maxTokens = 50) {
   if (text) { cache.set(key, text); store.create({ ...rec, text }).catch(() => {}); }
   return text;
 }
+
+// ---------- ambient lore ----------
+// Anything you can literally see — a hauler's two endpoints, a station's star, a rock's
+// claim number — is derived, never generated, so a card can't lie about what's in front of
+// you. Only the flavour line comes from the model, and that's cached against the object's
+// stable id, so it's fetched once ever and reads the same for everyone.
+const ambientStore = worlds.db.collection("ambient"), ambientCache = new Map();
+
+const AMBIENT_LOCAL = {
+  station: ["Three shifts, one kettle, and a dish that has never once been aimed at nothing.",
+    "They log every passing hull and file most of the reports eventually."],
+  freighter: ["The crew have run this lane so long they steer by argument.",
+    "Manifest signed, seals intact, arrival time optimistic as ever."],
+  gate: ["The arch remembers every ship that ever fell through it, and says so, loudly.",
+    "Calibrated last cycle. Recalibrated twice since, by hand, in the dark."],
+  belt: ["Claim-marked, surveyed twice, and mined by precisely nobody.",
+    "Every rock here is somebody's retirement plan, filed and forgotten."],
+  junk: ["Jettisoned in a hurry. The paperwork caught up years later.",
+    "Still sealed, still labelled, still nobody's problem."],
+  mothership: ["Four thousand souls, one very slow lap, and no plans to stop."],
+  egg: ["Off-shift, off-tether, and in no particular rush about it.",
+    "Waved at a passing freighter once. Still waiting on a reply."],
+};
+function localAmbient(kind, id) {
+  const pool = AMBIENT_LOCAL[kind] ?? AMBIENT_LOCAL.junk;
+  return pool[hashStr(id) % pool.length];
+}
+function ambientLore(id, kind, prompt) {
+  return cachedAI(ambientStore, ambientCache, id, { obj: id }, prompt, 70)
+    .then((t) => t || localAmbient(kind, id));
+}
+
+const FREIGHTER_NAMES = ["MV Slow Tuesday", "the Ledger Moth", "Longhaul Nine", "MV Second Draft", "the Patient Kettle"];
+// manifests read off the DESTINATION's category, so a run always carries something the
+// place it's heading for would actually want
+const CARGO_BY = {
+  misc: ["unfiled cargo", "a container marked 'assorted'", "mail nobody has claimed"],
+  games: ["arcade tokens", "twelve crates of loaded dice", "one unclaimed trophy"],
+  work: ["quarterly paperwork", "a pallet of blank checklists", "a very heavy roadmap"],
+  tools: ["replacement brackets", "a forge core, still warm", "industrial-grade tape"],
+  experiments: ["sealed physics", "a prototype that is still humming", "something the lab wants back"],
+};
+const STATION_NAMES = { misc: "Hearthwatch", games: "High Score", work: "Checklist Actual", tools: "The Anvil", experiments: "Containment Nine" };
+const GATE_NAMES = { games: "the Arcade Arch", work: "the Control Gate", tools: "the Workshop Ring", experiments: "the Lab Door" };
+const KIND_LABEL = {
+  station: "orbital station", freighter: "cargo hauler", gate: "warp arch", belt: "asteroid field",
+  junk: "drifting wreckage", mothership: "colony ship", egg: "someone out here", relic: "drifting relic",
+};
 
 // AI-deepened star-system codex (falls back to the hand-written blurb if AI is unavailable)
 const codexStore = worlds.db.collection("codex"), codexCache = new Map();
@@ -2026,7 +2269,7 @@ function startDive(group) {
   dive = { group, t: 0 };
   flyTarget = null;
   focusTarget = null;
-  card.style.display = "none"; cardSite = null;   // "walk in" closes the modal
+  card.style.display = "none"; cardSite = null; cardObj = null;   // "walk in" closes the modal
   divePrompt.style.display = "none";
   warpSound();
   playSfx("thrust", 0.5, 0.8);
@@ -2034,6 +2277,7 @@ function startDive(group) {
 divePrompt.addEventListener("click", () => startDive(nearPlanet));
 document.getElementById("cardVisit").addEventListener("click", (e) => {
   e.preventDefault();
+  if (cardObj) { cardObj.action?.run(); return; }
   const g = cardSite && planets.get(cardSite.name);
   if (g) startDive(g); else if (cardSite) window.open(cardSite.url, "_blank");
 });
@@ -2674,6 +2918,7 @@ function tick() {
 
   // cross the event horizon → wormhole jump to the home star (a shortcut, not death)
   if (!dive && ship.position.distanceTo(CORE_POS) < EH_R + shipRadius) wormholeJump();
+  updateGateTransit(dt);
 
   // soft collisions: every body is wrapped in a cushion shell — a repulsor field that
   // eases you to a stop before the surface — instead of a hard wall that snaps your
@@ -2712,6 +2957,11 @@ function tick() {
     // asteroid belt: bump off individual rocks while flying through the field (the belt
     // rings the origin ~r48–79). Culled to when you're actually inside the band, and
     // skipped mid-FTL so a jump isn't yanked out of warp by a pebble.
+    // everything else out there is solid too — same cushion, same slide. Gates opt out:
+    // the whole point of an arch is flying through the middle of it.
+    for (const rec of interactables) {
+      if (rec.solid !== false && rec.anchor) resolve(rec.anchor.position, rec.radius + shipRadius);
+    }
     if (!flyTarget) { // resolve() early-outs for far rocks, so checking them all is cheap
       for (const rk of beltRocks) {
         _rockPos.copy(rk.local).applyAxisAngle(_Y, rk.group.rotation.y).add(rk.group.position);
@@ -2728,7 +2978,7 @@ function tick() {
   if (shieldMesh) shieldMesh.material.uniforms.uHit.value *= Math.exp(-6 * dt);
 
   // dive proximity prompt
-  if (!dive && !flyTarget && !focusTarget && !cardSite && !introActive && planets.size) {
+  if (!dive && !flyTarget && !focusTarget && !cardSite && !cardObj && !introActive && planets.size) {
     let best = Infinity, bp = null;
     for (const g of planets.values()) {
       const d = ship.position.distanceTo(g.position) - g.userData.bodyR;
