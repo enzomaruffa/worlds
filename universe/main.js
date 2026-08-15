@@ -838,44 +838,6 @@ function makePlanet(site) {
   const capLat = (kind === "barren" || kind === "lava") ? 1.1 : 0.92 - kRng() * 0.22 - (biomeName === "ice" ? 0.16 : 0); // ice→big caps; barren/lava→none
   const tilt = (kRng() - 0.5) * 1.7; // axial tilt — some worlds roll on their side
 
-  // terrain mesh
-  const geo = new THREE.IcosahedronGeometry(radius, 6);
-  const posAttr = geo.getAttribute("position");
-  const colors = new Float32Array(posAttr.count * 3);
-  const v = new THREE.Vector3();
-  const col = new THREE.Color();
-  for (let i = 0; i < posAttr.count; i++) {
-    v.fromBufferAttribute(posAttr, i);
-    const dir = v.clone().normalize();
-    const e = elevation(noise, dir, tp);
-    v.copy(dir).multiplyScalar(heightAt(radius, e, sea));
-    posAttr.setXYZ(i, v.x, v.y, v.z);
-    const lf = landFrac(e, sea);
-    const polar = Math.abs(dir.y) > capLat; // ice caps sized per-world (none on barren/lava)
-    if (e < sea) col.setHex(biome.sea).multiplyScalar(0.7 + 0.3 * (e / sea)); // depth shading
-    else if (lf < 0.05) col.setHex(biome.beach);
-    else if (polar || lf > 0.72) col.setHex(biome.peak);
-    else if (lf < 0.45) col.setHex(biome.mid);
-    else col.setHex(biome.high);
-    colors[i * 3] = col.r; colors[i * 3 + 1] = col.g; colors[i * 3 + 2] = col.b;
-  }
-  geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-  geo.computeVertexNormals();
-
-  // tree samples: random directions kept only on dry, non-polar, non-rocky land
-  const treeSamples = [];
-  const tRng = mulberry32((u.seed ^ 0x9e3779b9) >>> 0);
-  const wanted = Math.floor(200 * biome.treeDensity * (0.55 + activity));
-  for (let a = 0; treeSamples.length < wanted && a < wanted * 8; a++) {
-    const dir = randomUnit(tRng);
-    const e = elevation(noise, dir, tp);
-    if (e < sea) continue;                       // never on water
-    const lf = landFrac(e, sea);
-    if (lf < 0.07 || lf > 0.6) continue;         // skip beaches' edge and rocky peaks
-    if (Math.abs(dir.y) > 0.78) continue;        // skip ice caps
-    treeSamples.push({ dir, point: dir.clone().multiplyScalar(heightAt(radius, e, sea)) });
-  }
-
   const group = new THREE.Group();
   group.userData.site = site;
 
@@ -887,6 +849,45 @@ function makePlanet(site) {
     spinner.add(makeGasGiant(radius, biome, kRng)); // banded body — no terrain/ocean/trees
     group.add(spinner);
   } else {
+    // terrain mesh — displacing 2940 vertices and rejection-sampling tree spots is the
+    // most expensive thing a world does, so it lives in here where the result is used.
+    const geo = new THREE.IcosahedronGeometry(radius, 6);
+    const posAttr = geo.getAttribute("position");
+    const colors = new Float32Array(posAttr.count * 3);
+    const v = new THREE.Vector3();
+    const col = new THREE.Color();
+    for (let i = 0; i < posAttr.count; i++) {
+      v.fromBufferAttribute(posAttr, i);
+      const dir = v.clone().normalize();
+      const e = elevation(noise, dir, tp);
+      v.copy(dir).multiplyScalar(heightAt(radius, e, sea));
+      posAttr.setXYZ(i, v.x, v.y, v.z);
+      const lf = landFrac(e, sea);
+      const polar = Math.abs(dir.y) > capLat; // ice caps sized per-world (none on barren/lava)
+      if (e < sea) col.setHex(biome.sea).multiplyScalar(0.7 + 0.3 * (e / sea)); // depth shading
+      else if (lf < 0.05) col.setHex(biome.beach);
+      else if (polar || lf > 0.72) col.setHex(biome.peak);
+      else if (lf < 0.45) col.setHex(biome.mid);
+      else col.setHex(biome.high);
+      colors[i * 3] = col.r; colors[i * 3 + 1] = col.g; colors[i * 3 + 2] = col.b;
+    }
+    geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+    geo.computeVertexNormals();
+
+    // tree samples: random directions kept only on dry, non-polar, non-rocky land
+    const treeSamples = [];
+    const tRng = mulberry32((u.seed ^ 0x9e3779b9) >>> 0);
+    const wanted = Math.floor(200 * biome.treeDensity * (0.55 + activity));
+    for (let a = 0; treeSamples.length < wanted && a < wanted * 8; a++) {
+      const dir = randomUnit(tRng);
+      const e = elevation(noise, dir, tp);
+      if (e < sea) continue;                       // never on water
+      const lf = landFrac(e, sea);
+      if (lf < 0.07 || lf > 0.6) continue;         // skip beaches' edge and rocky peaks
+      if (Math.abs(dir.y) > 0.78) continue;        // skip ice caps
+      treeSamples.push({ dir, point: dir.clone().multiplyScalar(heightAt(radius, e, sea)) });
+    }
+
     const terrainMat = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: kind === "barren" ? 1.0 : 0.92 });
     if (kind === "lava") {
       // molten worlds glow from their darkest, lowest crust (day or night), pulsing
