@@ -2607,11 +2607,12 @@ function tick() {
   let softHit = 0, hardHit = false;
   if (!dive) {
     const resolve = (pos, surf) => {
-      _push.subVectors(ship.position, pos);
-      const dist = _push.length() || 1e-3;
       const cushion = Math.max(4, Math.min(30, surf * 0.18)); // soft shell thickness
       const soft = surf + cushion;
-      if (dist >= soft) return;
+      _push.subVectors(ship.position, pos);
+      const d2 = _push.lengthSq();
+      if (d2 >= soft * soft) return;           // most bodies are far away — don't pay for a root
+      const dist = Math.sqrt(d2) || 1e-3;
       _push.multiplyScalar(1 / dist);          // outward unit normal
       const pen = (soft - dist) / cushion;     // 0 at shell edge → 1 at surface → >1 inside
       const into = vel.dot(_push);             // < 0 ⇒ heading into the body
