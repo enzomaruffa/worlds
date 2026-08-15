@@ -1233,7 +1233,9 @@ function buildBelt() {
   for (const key of ["games", "tools", "experiments", "work"]) {
     const s = SYSTEMS[key];
     if (!s) continue;
-    const r0 = s.starR * 4.2 + 60;
+    // Worlds orbit out to ~340 (see orbitR in makePlanet), so keep the belt beyond that —
+    // at the old 4.2 the two bands overlapped and planets swept straight through the rocks.
+    const r0 = s.starR * 5.6 + 60;
     const kinds = ROCKS.length ? [ROCKS[hashStr(key) % ROCKS.length], ROCKS[(hashStr(key) + 3) % ROCKS.length]] : [];
     for (const kind of kinds) {
       const mats = [];
