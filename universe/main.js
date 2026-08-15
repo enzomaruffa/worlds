@@ -2443,6 +2443,10 @@ renderer.domElement.addEventListener("pointerdown", endIntro);
 
 // ---------- loop ----------
 const clock = new THREE.Clock();
+// One clock for the whole scene. dt is clamped below, so anything sampling the wall clock
+// directly would pull ahead of everything integrating dt — planets drifting behind their
+// own moons after a stall or a backgrounded tab. Accumulating the clamped dt keeps them together.
+let simT = 0;
 let lastThud = 0;
 let wasThrust = false;
 let wasFly = false;
@@ -2455,8 +2459,9 @@ const _accel = new THREE.Vector3(), _to = new THREE.Vector3(), _push = new THREE
 const _goal = new THREE.Vector3(), _engTmp = new THREE.Vector3(), _tmpv = new THREE.Vector3(), _rockPos = new THREE.Vector3();
 function tick() {
   const dt = Math.min(clock.getDelta(), 0.05);
-  uTime.value = clock.elapsedTime;
-  const t = clock.elapsedTime;
+  simT += dt;
+  uTime.value = simT;
+  const t = simT;
 
   for (const g of planets.values()) {
     const d = g.userData;
