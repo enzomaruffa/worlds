@@ -783,7 +783,7 @@ const BARREN_PAL = { sea: 0x3a3a40, beach: 0x6b6b73, mid: 0x8a8a93, high: 0x5555
 
 function pickKind(rng, biomeName, radius, activity) {
   const r = rng();
-  if (radius > 19 && r < 0.55) return "gas";                 // the biggest worlds → gas giants
+  if (radius > 25 && r < 0.55) return "gas";                 // the biggest worlds → gas giants. radius spans 21–52, so keep this inside that band or the test goes dead
   if (biomeName === "volcanic" && r < 0.6) return "lava";    // volcanic worlds often run molten
   if (activity < 0.04 && rng() < 0.5) return "barren";       // long-dormant worlds → dead rock
   if ((biomeName === "archipelago" || biomeName === "lush") && rng() < 0.22) return "ocean";
