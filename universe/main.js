@@ -210,7 +210,9 @@ warpBlurPass = new ShaderPass({
     }`,
 });
 composer.addPass(warpBlurPass);
-composer.addPass(new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.8, 0.8, 0.78));
+// threshold sits high enough that only genuinely hot pixels bloom — a star fills the frame
+// when you get close, and at a lower cut the whole sphere blows out into one white disc
+composer.addPass(new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.55, 0.8, 0.86));
 
 // shader-based volumetric god rays (radial light scatter from the nearest star)
 godrayPass = new ShaderPass({
@@ -546,7 +548,9 @@ function makeStar(sys, name) {
     scene.add(sub);
   }
 
-  const light = new THREE.PointLight(sys.hot, 5200, 0, 1.8);
+  // range is finite so a star stops lighting geometry on the far side of the galaxy —
+  // five overlapping infinite lights is what washed everything out
+  const light = new THREE.PointLight(sys.hot, 3400, 2600, 1.8);
   light.position.copy(sys.pos);
   scene.add(light);
 
