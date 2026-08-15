@@ -2177,6 +2177,52 @@ function revealCodex(b) {
   });
 }
 
+// ---------- discovery trails: the routes pilots have actually flown ----------
+// There is no visit history on the server — visits_30d is a lifetime counter with no
+// timestamps — so the map records its own. One doc per journey, heavily downsampled;
+// drawn faintly, so well-travelled corridors emerge and nobody has been to the dark parts.
+const trailStore = worlds.db.collection("trails");
+const TRAIL_SAMPLE = 90;   // world units between recorded waypoints
+const TRAIL_MAX_PTS = 40;  // keeps a journey doc tiny
+const TRAIL_MIN_PTS = 4;   // a journey shorter than this isn't a route, it's a wobble
+const journey = [];
+const _jLast = new THREE.Vector3();
+let trailGroup = null;
+
+function recordJourney() {
+  if (journey.length < TRAIL_MIN_PTS) { journey.length = 0; return; }
+  const pts = journey.map((v) => [Math.round(v.x), Math.round(v.y), Math.round(v.z)]);
+  trailStore.create({ who: myHandle ?? "somebody", at: Date.now(), pts }).catch(() => {});
+  journey.length = 0;
+}
+function sampleJourney() {
+  if (_jLast.distanceToSquared(ship.position) < TRAIL_SAMPLE * TRAIL_SAMPLE) return;
+  _jLast.copy(ship.position);
+  journey.push(_jLast.clone());
+  if (journey.length >= TRAIL_MAX_PTS) recordJourney();
+}
+function drawTrail(pts) {
+  if (!Array.isArray(pts) || pts.length < 2) return;
+  const g = new THREE.BufferGeometry();
+  const a = new Float32Array(pts.length * 3);
+  for (let i = 0; i < pts.length; i++) { a[i * 3] = pts[i][0]; a[i * 3 + 1] = pts[i][1]; a[i * 3 + 2] = pts[i][2]; }
+  g.setAttribute("position", new THREE.BufferAttribute(a, 3));
+  // additive and unlit, so overlapping routes literally add up — the more pilots have flown
+  // a corridor, the brighter it burns, with no per-segment bookkeeping
+  trailGroup.add(new THREE.Line(g, trailMat));
+}
+const trailMat = new THREE.LineBasicMaterial({ color: 0x4c6b8a, transparent: true, opacity: 0.16, blending: THREE.AdditiveBlending, depthWrite: false });
+(async () => {
+  trailGroup = new THREE.Group();
+  scene.add(trailGroup);
+  try {
+    const page = await trailStore.list({ sort: "-at", limit: 60 });
+    for (const it of page.items) drawTrail(it.data?.pts);
+  } catch { /* db down — no trails, no harm */ }
+  try { trailStore.subscribe((ev) => { if (ev.type === "create") drawTrail((ev.doc?.data ?? ev.doc)?.pts); }); } catch { /* no socket */ }
+})();
+addEventListener("pagehide", recordJourney);
+
 // ---------- the chronicle: what has actually happened out here ----------
 // Every pilot appends to it and every pilot subscribes, so the galaxy keeps a shared
 // history instead of each session inventing its own. Transmissions draw from this first —
@@ -2997,6 +3043,7 @@ function tick() {
   // cross the event horizon → wormhole jump to the home star (a shortcut, not death)
   if (!dive && ship.position.distanceTo(CORE_POS) < EH_R + shipRadius) wormholeJump();
   updateHover();
+  if (!introActive) sampleJourney();
 
   // soft collisions: every body is wrapped in a cushion shell — a repulsor field that
   // eases you to a stop before the surface — instead of a hard wall that snaps your
