@@ -1342,7 +1342,8 @@ function buildTraffic() {
     eng.position.set(0, 0, 0);
     mesh.add(eng);
     // Lane endpoints stand off each star rather than sitting on it — the raw positions run
-    // the route straight through the photosphere.
+    // the route straight through the photosphere. A route between two real worlds replaces
+    // this the first time one can be found (see routeFor).
     const A = SYSTEMS[keys[ai]], B = SYSTEMS[keys[bi]];
     const lane = new THREE.Vector3().subVectors(B.pos, A.pos).normalize();
     // aKey/bKey, not just the positions: a hauler's story is the two places it runs between
@@ -1351,21 +1352,25 @@ function buildTraffic() {
       a: A.pos.clone().addScaledVector(lane, A.starR * 2.2),
       b: B.pos.clone().addScaledVector(lane, -B.starR * 2.2), t: rng(),
       speed: 0.0018 + rng() * 0.0026, off: new THREE.Vector3((rng() - 0.5) * 90, (rng() - 0.5) * 70, (rng() - 0.5) * 90),
-      hold: 0, yaw: 0, roll: 0,
+      hold: 0, yaw: 0, roll: 0, id: "freighter:" + i, trip: 0, aSite: null, bSite: null,
     };
     transit.push(tr);
-    const id = "freighter:" + i;
+    const id = tr.id;
     const name = FREIGHTER_NAMES[i % FREIGHTER_NAMES.length];
     // leg flips on every bounce, so read the endpoints live — the card must name the
     // direction it's going right now, not the one it launched on
-    const from = () => SYSTEMS[tr.leg ? tr.bKey : tr.aKey];
-    const to = () => SYSTEMS[tr.leg ? tr.aKey : tr.bKey];
+    // once it's running a real route the card names the two worlds; until then, the systems
+    const from = () => (tr.aSite ? `${tr.aSite}.world` : SYSTEMS[tr.leg ? tr.bKey : tr.aKey].title);
+    const to = () => (tr.bSite ? `${tr.bSite}.world` : SYSTEMS[tr.leg ? tr.aKey : tr.bKey].title);
+    const destCat = () => planets.get(tr.bSite)?.userData.site?.category ?? (tr.leg ? tr.aKey : tr.bKey);
     const cargoFor = (k) => { const c = CARGO_BY[k] ?? CARGO_BY.misc; return c[hashStr(id + k) % c.length]; };
     hitProxy(mesh, 11 / mesh.scale.x); // generous target: they're small, distant and moving
     registerAmbient({
       id, kind: "freighter", hit: [mesh], anchor: mesh, radius: 7, accent: 0x9ad8ff, hold: true,
       title: () => name,
-      sub: () => `hauling ${cargoFor(tr.leg ? tr.aKey : tr.bKey)} · ${from().title} → ${to().title}`,
+      sub: () => (tr.hold > 0
+        ? `docked at ${to()} · ${cargoFor(destCat())} aboard`
+        : `hauling ${cargoFor(destCat())} · ${from()} → ${to()}`),
       // the prompt names both ends without a direction, so the one cached line stays true
       // on the return leg too
       lore: () => ambientLore(id, "freighter",
@@ -1375,6 +1380,46 @@ function buildTraffic() {
     });
   }
 }
+// Haulers run between real worlds once there are any — two by the same person if we can
+// find a pair, since that's the one relationship in the payload that's actually true.
+// (universe.pos looks like a semantic layout but the projection throws away magnitude and
+// there's no flag saying whether a given world got a real embedding or a name hash.)
+function assignRoute(tr) {
+  const names = [...planets.keys()];
+  if (names.length < 2) { tr.aSite = tr.bSite = null; return; }
+  const rng = mulberry32(hashStr(tr.id + ":" + tr.trip++));
+  const creatorOf = (n) => planets.get(n)?.userData.site?.creator?.handle;
+  const pairs = [];
+  for (const n of names) {
+    const c = creatorOf(n);
+    if (!c) continue;
+    for (const m of names) if (m !== n && creatorOf(m) === c) pairs.push([n, m]);
+  }
+  const [a, b] = pairs.length
+    ? pairs[Math.floor(rng() * pairs.length)]
+    : (() => { const x = names[Math.floor(rng() * names.length)]; let y = names[Math.floor(rng() * names.length)];
+        for (let i = 0; y === x && i < 6; i++) y = names[Math.floor(rng() * names.length)];
+        return [x, y]; })();
+  if (a === b) { tr.aSite = tr.bSite = null; return; }
+  tr.aSite = a; tr.bSite = b;
+}
+
+// Endpoints resolve live, because worlds orbit — a hauler flies an intercept course rather
+// than aiming where its destination used to be. Stood off the surface so it parks alongside.
+const _rA = new THREE.Vector3(), _rB = new THREE.Vector3(), _rOff = new THREE.Vector3();
+function laneEnds(tr) {
+  const pa = tr.aSite && planets.get(tr.aSite), pb = tr.bSite && planets.get(tr.bSite);
+  _rA.copy(pa ? pa.position : tr.a);
+  _rB.copy(pb ? pb.position : tr.b);
+  if (pa || pb) {
+    _rOff.subVectors(_rB, _rA);
+    const len = _rOff.length() || 1;
+    _rOff.multiplyScalar(1 / len);
+    if (pa) _rA.addScaledVector(_rOff, (pa.userData.bodyR ?? 20) + 26);
+    if (pb) _rB.addScaledVector(_rOff, -((pb.userData.bodyR ?? 20) + 26));
+  }
+}
+
 // A hauler flies a leg, slows into its destination, sits a while, then banks around and
 // runs the other way. Heading is a quaternion it steers toward — NOT lookAt, which
 // rebuilds orientation from scratch every frame and so can never hold a roll.
@@ -1384,9 +1429,15 @@ const DOCK_MIN = 6, DOCK_VAR = 6;
 function updateTraffic(dt) {
   for (const tr of transit) {
     // ---- along the lane ----
+    if (!tr.aSite && planets.size >= 2 && tr.hold <= 0 && tr.t < 0.02) assignRoute(tr); // worlds arrived after boot
+    laneEnds(tr);
     if (tr.hold > 0) {
       tr.hold -= dt; // parked alongside; the turn below runs while it sits
-      if (tr.hold <= 0) { const tmp = tr.a; tr.a = tr.b; tr.b = tmp; tr.leg ^= 1; tr.t = 0; }
+      if (tr.hold <= 0) {
+        const tmp = tr.a; tr.a = tr.b; tr.b = tmp;
+        const ts = tr.aSite; tr.aSite = tr.bSite; tr.bSite = ts;
+        tr.leg ^= 1; tr.t = 0;
+      }
     } else {
       // ease off on approach and back up on departure, so arrivals and launches read
       const approach = Math.min(1, (1 - tr.t) / 0.16);
@@ -1395,15 +1446,15 @@ function updateTraffic(dt) {
       tr.t += tr.speed * dt * 10 * throttle;
       if (tr.t >= 1) { tr.t = 1; tr.hold = DOCK_MIN + Math.random() * DOCK_VAR; }
     }
-    _tA.lerpVectors(tr.a, tr.b, tr.t).add(tr.off);
+    _tA.lerpVectors(_rA, _rB, tr.t).add(tr.off);
     tr.mesh.position.copy(_tA);
 
     // ---- heading ----
     // Parked, it aims back down the lane it came up — so the 180° is swept over the whole
     // stop instead of snapped. The a/b swap only happens when the hold ends, which keeps
     // position continuous (t=1 on the old lane is the same point as t=0 on the new one).
-    if (tr.hold > 0) _tHead.subVectors(tr.a, tr.b).normalize();
-    else _tHead.subVectors(tr.b, tr.a).normalize();
+    if (tr.hold > 0) _tHead.subVectors(_rA, _rB).normalize();
+    else _tHead.subVectors(_rB, _rA).normalize();
     const yaw = Math.atan2(_tHead.x, -_tHead.z);
     let d = yaw - tr.yaw;
     while (d > Math.PI) d -= 2 * Math.PI;
