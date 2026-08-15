@@ -2471,7 +2471,8 @@ function tick() {
   if (mothership) {
     const ma = t * 0.05;
     mothership.position.set(Math.cos(ma) * 118, 8, Math.sin(ma) * 118); // orbit clear of the bigger home star, inside its belt
-    mothership.rotation.y = -ma - Math.PI / 2;
+    // Aim the tail at the arc behind it — lookAt points +Z, and these hulls nose along -Z.
+    mothership.lookAt(Math.cos(ma - 0.01) * 118, 8, Math.sin(ma - 0.01) * 118);
   }
   if (coreDisk) coreDisk.rotation.z += dt * 0.12;
   updateStations(dt, t);
