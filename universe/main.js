@@ -1368,9 +1368,12 @@ function buildTraffic() {
     const to = () => (tr.bSite ? `${tr.bSite}.world` : SYSTEMS[tr.leg ? tr.aKey : tr.bKey].title);
     const destCat = () => planets.get(tr.bSite)?.userData.site?.category ?? (tr.leg ? tr.aKey : tr.bKey);
     const cargoFor = (k) => { const c = CARGO_BY[k] ?? CARGO_BY.misc; return c[hashStr(id + k) % c.length]; };
-    hitProxy(mesh, 11 / mesh.scale.x); // generous target: they're small, distant and moving
+    // collider from the hull's real longest dimension rather than a guess — a speeder is far
+    // longer than it is tall, and `height` only normalises Y
+    const hullR = modelSpan(ships[i % ships.length]) * mesh.scale.x * 0.5;
+    hitProxy(mesh, (hullR * 1.7) / mesh.scale.x); // generous target: small, distant and moving
     registerAmbient({
-      id, kind: "freighter", hit: [mesh], anchor: mesh, radius: 7, accent: 0x9ad8ff, hold: true,
+      id, kind: "freighter", hit: [mesh], anchor: mesh, radius: hullR, accent: 0x9ad8ff, hold: true,
       title: () => name,
       sub: () => (tr.hold > 0
         ? `docked at ${to()} · ${cargoFor(destCat())} aboard`
@@ -2493,6 +2496,7 @@ const pilots = new Map(); // cid -> {group, label, target:{p,q}, seen}
 // fan-out instead of every pilot blasting every other on a raw channel.
 const shipsNet = worlds.actors("ships", { rate: 8 });
 
+const PILOT_R = 3.5; // remote hulls are the same speeder at scale 1.5
 const PILOT_CRAFT = ["craft_speederA", "craft_speederB", "craft_speederC", "craft_speederD", "craft_racer", "craft_miner"];
 function pilotShip(handle, key) {
   const g = new THREE.Group();
@@ -2810,47 +2814,6 @@ function updateNav() {
   }
 }
 
-// ---------- AI navigator: "ask the universe" (dogfoods worlds.ai) ----------
-function localMatch(query, catalog) {
-  const terms = query.toLowerCase().split(/\W+/).filter((w) => w.length > 2);
-  let best = null, bestScore = -1;
-  for (const s of catalog) {
-    const hay = `${s.name} ${s.category} ${s.description}`.toLowerCase();
-    let score = 0;
-    for (const t of terms) if (hay.includes(t)) score += hay.includes(` ${t}`) || s.name.includes(t) ? 2 : 1;
-    if (s.category && terms.some((t) => s.category.includes(t))) score += 2;
-    if (score > bestScore) { bestScore = score; best = s; }
-  }
-  return bestScore > 0 ? best : catalog[Math.floor(Math.random() * catalog.length)];
-}
-
-const askForm = document.getElementById("ask");
-const askInput = document.getElementById("askInput");
-askForm.addEventListener("submit", async (e) => {
-  e.preventDefault();
-  initAudio();
-  const q = askInput.value.trim();
-  if (!q || !planets.size) return;
-  const catalog = [...planets.values()].map((g) => g.userData.site).map((s) => ({ name: s.name, category: s.category, description: s.description || "" }));
-  askInput.disabled = true;
-  askInput.value = "✦ consulting the universe…";
-
-  let target = null, why = "";
-  try {
-    const prompt = `You navigate an internal website universe. Available worlds:\n${catalog.map((s) => `- ${s.name} [${s.category}]: ${s.description}`).join("\n")}\n\nThe pilot asks: "${q}"\nReply with ONLY JSON {"site":"<exact world name from the list>","why":"<reason, max 8 words>"}.`;
-    const res = await worlds.ai.complete({ prompt, model: "fast", max_tokens: 90 });
-    const m = res.text.match(/\{[\s\S]*\}/);
-    if (m) { const j = JSON.parse(m[0]); target = catalog.find((s) => s.name === j.site); why = (j.why || "").slice(0, 60); }
-  } catch { /* AI not configured or failed — fall back to local search */ }
-  if (!target) { target = localMatch(q, catalog); why = why || "closest match"; }
-
-  askInput.disabled = false;
-  askInput.value = "";
-  askInput.blur();
-  const g = planets.get(target.name);
-  if (g) { flyFTL = ship.position.distanceTo(g.position) > MAX_PICK_DIST; flyTarget = g; focusTarget = g; showCard(g.userData.site); warpSound(); toast(`▸ navigating to <b style="color:#e5a00d">${target.name}.world</b> — ${why}`); }
-});
-
 // assets first — planets plant Kenney forests at build time
 // Programs compile on first draw, which lands mid cold-open. Warm them up while the intro
 // overlay still hides the canvas — but bind one of the composer's targets first: three keys
@@ -3121,11 +3084,12 @@ function tick() {
     // asteroid belt: bump off individual rocks while flying through the field (the belt
     // rings the origin ~r48–79). Culled to when you're actually inside the band, and
     // skipped mid-FTL so a jump isn't yanked out of warp by a pebble.
-    // everything else out there is solid too — same cushion, same slide. Gates opt out:
-    // the whole point of an arch is flying through the middle of it.
+    // everything else out there is solid too — same cushion, same slide
     for (const rec of interactables) {
       if (rec.solid !== false && rec.anchor) resolve(rec.anchor.position, rec.radius + shipRadius);
     }
+    // and so is everyone else flying — you can nudge another pilot, not fly through them
+    for (const p of pilots.values()) resolve(p.group.position, PILOT_R + shipRadius);
     if (!flyTarget) { // resolve() early-outs for far rocks, so checking them all is cheap
       for (const rk of beltRocks) {
         _rockPos.copy(rk.local).applyAxisAngle(_Y, rk.group.rotation.y).add(rk.group.position);
