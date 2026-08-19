@@ -78,8 +78,8 @@ and skips its own sign-in. The proxy must protect every host, including `*.<your
 
 Sites and uploads live under `WORLDS_DATA_DIR` via a `BlobStore` abstraction (local
 filesystem by default). Set `WORLDS_S3_BUCKET` (+ `WORLDS_S3_REGION` / `WORLDS_S3_ENDPOINT`,
-AWS creds via the standard `AWS_*` env) to store deploys + uploads in S3 (or any
-S3-compatible store like R2/MinIO) — reads fall through to the local bundle, so the
+AWS creds via the standard `AWS_*` env, or automatically from EKS Pod Identity) to store
+deploys + uploads in S3 (or any S3-compatible store like R2/MinIO) — reads fall through to the local bundle, so the
 shipped apps (the universe) stay local while user sites persist remotely. The realtime
 change-feed is in-process today (single instance); fan out via Postgres `LISTEN/NOTIFY`
 before scaling out.
