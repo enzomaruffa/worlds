@@ -2,6 +2,7 @@ import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { config } from "./config";
+import { awsCreds } from "./awscreds";
 
 // Durability for the SQLite backend without a volume: the database file lives on the
 // pod's disk (which may be ephemeral) and its consistent snapshot lives in the same S3
@@ -15,19 +16,22 @@ import { config } from "./config";
 
 const KEY = "db/worlds.sqlite";
 
-function client(): Bun.S3Client | null {
+async function client(): Promise<Bun.S3Client | null> {
   if (!config.s3Bucket) return null;
+  // Rebuilt per call, so a credential refresh is picked up for free.
+  const c = await awsCreds();
   return new Bun.S3Client({
     bucket: config.s3Bucket,
     ...(config.s3Region ? { region: config.s3Region } : {}),
     ...(config.s3Endpoint ? { endpoint: config.s3Endpoint } : {}),
+    ...(c ? { accessKeyId: c.accessKeyId, secretAccessKey: c.secretAccessKey, sessionToken: c.sessionToken } : {}),
   });
 }
 
 // Pull the snapshot down before the database is opened. A local file always wins: it is
 // either newer than the snapshot or the snapshot does not exist yet.
 export async function restoreSqlite(file: string): Promise<void> {
-  const s3 = client();
+  const s3 = await client();
   if (!s3) return;
   try {
     if (await Bun.file(file).exists()) return;
@@ -47,7 +51,7 @@ let inFlight = false;
 // VACUUM INTO, not a copy of the live file: it writes a consistent database even while
 // the WAL has uncommitted frames, and it compacts on the way out.
 async function snapshot(sql: { unsafe(text: string): Promise<unknown> }, file: string): Promise<void> {
-  const s3 = client();
+  const s3 = await client();
   if (!s3 || inFlight) return;
   inFlight = true;
   const tmp = join(tmpdir(), `worlds-snap-${crypto.randomUUID()}.sqlite`);
