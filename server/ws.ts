@@ -16,13 +16,41 @@ export interface SocketData {
   // Doc subscriptions keep the document name, not the room: the room a document lives in
   // can change under a socket (an owner pod dies and it is re-homed), so it is looked up
   // in the registry on every use.
-  subs: Map<string, { kind: "db" | "channel" | "actors" | "doc"; key: string; cid?: string; doc?: string; client?: DocClient }>;
+  subs: Map<string, SubEntry>;
   fanout?: { tokens: number; at: number }; // broadcast budget, created on first pub/aevent
   proxy?: WebSocket; // set for a site backend passthrough — the upstream client socket
   peer?: string; // set for a pod-to-pod link (cluster.ts) — the dialing pod's id
 }
 
+// What an actors subscription asked for, kept so the member can be re-joined if the pod
+// hosting its room goes away.
+interface ActorJoin {
+  channel: string;
+  zone: string;
+  rate: number;
+  meta: Record<string, unknown>;
+  observer: boolean;
+}
+
+interface SubEntry {
+  kind: "db" | "channel" | "actors" | "doc";
+  key: string;
+  cid?: string;
+  doc?: string;
+  client?: DocClient;
+  remote?: string; // actors: the pod hosting this room when it isn't us
+  join?: ActorJoin;
+}
+
 type WS = ServerWebSocket<SocketData>;
+
+// The slice of a socket the actors code touches. A real ServerWebSocket satisfies it, and
+// so does the stand-in an owner pod keeps for a member whose socket is on another pod.
+interface ActorSink {
+  readonly readyState: number;
+  send(data: string): void;
+  data: { site: string; who: Identity; subs: Map<string, SubEntry>; fanout?: { tokens: number; at: number } };
+}
 
 // `set` is safe by construction — it's last-value state drained by the room's flush
 // timer, so a faster publisher only overwrites itself. `pub` and `aevent` fan out on
@@ -32,7 +60,7 @@ type WS = ServerWebSocket<SocketData>;
 const FANOUT_BURST = 120;
 const FANOUT_PER_SEC = 40;
 
-function allowFanout(ws: WS): boolean {
+function allowFanout(ws: ActorSink): boolean {
   const now = Date.now();
   const b = (ws.data.fanout ??= { tokens: FANOUT_BURST, at: now });
   b.tokens = Math.min(FANOUT_BURST, b.tokens + ((now - b.at) / 1000) * FANOUT_PER_SEC);
@@ -53,7 +81,7 @@ const MAX_SUBS_PER_SOCKET = 100;
 // at a fixed flush rate — turning per-tick N² fan-out into N·(zone size). Joiners get
 // an immediate in-zone snapshot; nobody can melt a room by publishing faster.
 interface ActorEntry {
-  ws: WS;
+  ws: ActorSink;
   cid: string; // stable per-tab id — the actor's identity to its peers
   who: Identity;
   zone: string;
@@ -170,7 +198,7 @@ function deliverPub(key: string, base: Record<string, unknown>): void {
   }
 }
 
-function sendErr(ws: WS, id: string | undefined, code: string, message: string): void {
+function sendErr(ws: { send(data: string): void }, id: string | undefined, code: string, message: string): void {
   ws.send(JSON.stringify({ op: "error", id, error: { code, message } }));
 }
 
@@ -182,7 +210,7 @@ function hasKeys(o: Record<string, unknown> | undefined): boolean {
 
 // The actors sub ids a given socket holds for this room (a socket can hold more
 // than one, though games use one) — used to stamp the right `id` on each frame.
-function actorSubIds(ws: WS, key: string): string[] {
+function actorSubIds(ws: ActorSink, key: string): string[] {
   const ids: string[] = [];
   for (const [subId, sub] of ws.data.subs) {
     if (sub.kind === "actors" && sub.key === key) ids.push(subId);
@@ -192,7 +220,7 @@ function actorSubIds(ws: WS, key: string): string[] {
 
 // Send `ws` the current state of every OTHER member in `zone` — the last-value
 // snapshot a joiner (or zone-switcher) gets so it sees the world immediately.
-function sendActorSnapshot(ws: WS, key: string, subId: string, zone: string, selfCid: string): void {
+function sendActorSnapshot(ws: ActorSink, key: string, subId: string, zone: string, selfCid: string): void {
   const room = actorRooms.get(key);
   if (!room) return;
   const actors = [];
@@ -261,7 +289,7 @@ function ensureActorTimer(key: string): void {
 }
 
 // Remove a member and stop the room's flush timer once it empties.
-function dropActor(ws: WS, key: string, cid: string): void {
+function dropActor(ws: ActorSink, key: string, cid: string): void {
   const room = actorRooms.get(key);
   if (!room) return;
   const e = room.members.get(cid);
@@ -272,8 +300,182 @@ function dropActor(ws: WS, key: string, cid: string): void {
   if (room.members.size === 0) {
     if (room.timer) clearInterval(room.timer);
     actorRooms.delete(key);
+    void cluster.release(`actors:${key}`);
   }
 }
+
+// ── actors across pods ──
+// An actors room lives on one pod (a lease keyed `actors:<site>/<channel>`). A member whose
+// socket is on another pod is relayed: its pod forwards the member's frames to the owner and
+// hands the owner's frames back to the socket. On the owner the member is an ActorEntry like
+// any other, with a stand-in sink instead of a socket.
+
+class RemoteActorSink implements ActorSink {
+  readonly readyState = 1;
+  data: ActorSink["data"];
+  constructor(readonly pod: string, readonly key: string, readonly cid: string, subId: string, site: string, who: Identity) {
+    this.data = { site, who, subs: new Map([[subId, { kind: "actors", key, cid }]]) };
+  }
+  send(raw: string): void {
+    cluster.push(this.pod, "actor.out", { key: this.key, cid: this.cid, raw });
+  }
+}
+
+const remoteMembers = new Map<string, RemoteActorSink>(); // `${pod}|${key}|${cid}` on the owner
+const relayed = new Map<string, { ws: WS; subId: string }>(); // `${key}|${cid}` on the relaying pod
+
+function remoteFor(ws: WS, key: string, cid: string): string | null {
+  for (const sub of ws.data.subs.values()) {
+    if (sub.kind === "actors" && sub.key === key && sub.cid === cid) return sub.remote ?? null;
+  }
+  return null;
+}
+
+// Join on this pod's own room.
+function joinLocal(ws: ActorSink, id: string, key: string, cid: string, join: ActorJoin): void {
+  let room = actorRooms.get(key);
+  if (!room) {
+    // The first subscriber fixes the flush rate (clamped) — a later fast joiner
+    // can't push the room past the cap.
+    room = { members: new Map(), rate: join.rate, timer: null };
+    actorRooms.set(key, room);
+  }
+  // cid comes from the client, so without this an entry could be taken over: the
+  // victim's own set/ameta/aevent stop matching (wrong socket) and their disconnect
+  // refuses to clean up, leaving the stolen actor in the zone after they're gone.
+  // A still-open holder blocks the claim; a dead one doesn't, because a reconnecting
+  // tab re-subscribes with the same cid and may beat its own close event here.
+  const held = room.members.get(cid);
+  if (held && held.ws !== ws && held.ws.readyState === 1) {
+    ws.data.subs.delete(id);
+    sendErr(ws, id, "conflict", `actor id "${cid}" is already in use`);
+    return;
+  }
+  const meta = join.observer ? {} : join.meta;
+  room.members.set(cid, { ws, cid, who: ws.data.who, zone: join.zone, state: undefined, meta, stateDirty: false, metaDirty: hasKeys(meta), observer: join.observer });
+  ensureActorTimer(key);
+  ws.send(JSON.stringify({ op: "ack", id }));
+  sendActorSnapshot(ws, key, id, join.zone, cid); // instant last-value snapshot of the zone
+}
+
+async function joinActors(ws: WS, id: string, key: string, cid: string, join: ActorJoin): Promise<void> {
+  let owner: string;
+  try {
+    owner = await cluster.acquire(`actors:${key}`);
+  } catch (e) {
+    const err = asWorldsError(e);
+    sendErr(ws, id, err.code, err.message);
+    return;
+  }
+  if (owner === cluster.podId) {
+    ws.data.subs.set(id, { kind: "actors", key, cid, join });
+    joinLocal(ws, id, key, cid, join);
+    return;
+  }
+  ws.data.subs.set(id, { kind: "actors", key, cid, join, remote: owner });
+  relayed.set(`${key}|${cid}`, { ws, subId: id });
+  cluster.push(owner, "actor.join", { key, cid, subId: id, site: ws.data.site, who: ws.data.who, join });
+}
+
+function leaveActors(ws: WS, sub: SubEntry): void {
+  if (!sub.cid) return;
+  if (sub.remote) {
+    relayed.delete(`${sub.key}|${sub.cid}`);
+    cluster.push(sub.remote, "actor.leave", { key: sub.key, cid: sub.cid });
+    return;
+  }
+  dropActor(ws, sub.key, sub.cid);
+}
+
+// Owner side.
+cluster.onPush("actor.join", (p: { key: string; cid: string; subId: string; site: string; who: Identity; join: ActorJoin }, from) => {
+  if (!cluster.isOwner(`actors:${p.key}`)) {
+    cluster.push(from, "actor.rehome", { key: p.key, cid: p.cid });
+    return;
+  }
+  const sink = new RemoteActorSink(from, p.key, p.cid, p.subId, p.site, p.who);
+  remoteMembers.set(`${from}|${p.key}|${p.cid}`, sink);
+  joinLocal(sink, p.subId, p.key, p.cid, p.join);
+});
+cluster.onPush("actor.set", (p: { key: string; cid: string; frame: Record<string, unknown> }, from) => {
+  const sink = remoteMembers.get(`${from}|${p.key}|${p.cid}`);
+  if (sink) handleSet(sink, p.frame);
+});
+cluster.onPush("actor.meta", (p: { key: string; cid: string; frame: Record<string, unknown> }, from) => {
+  const sink = remoteMembers.get(`${from}|${p.key}|${p.cid}`);
+  if (sink) handleSetMeta(sink, p.frame);
+});
+cluster.onPush("actor.event", (p: { key: string; cid: string; frame: Record<string, unknown> }, from) => {
+  const sink = remoteMembers.get(`${from}|${p.key}|${p.cid}`);
+  if (sink) handleActorEvent(sink, p.frame);
+});
+cluster.onPush("actor.leave", (p: { key: string; cid: string }, from) => {
+  const sink = remoteMembers.get(`${from}|${p.key}|${p.cid}`);
+  if (!sink) return;
+  remoteMembers.delete(`${from}|${p.key}|${p.cid}`);
+  dropActor(sink, p.key, p.cid);
+});
+
+// Relay side.
+cluster.onPush("actor.out", (p: { key: string; cid: string; raw: string }) => {
+  relayed.get(`${p.key}|${p.cid}`)?.ws.send(p.raw);
+});
+cluster.onPush("actor.rehome", (p: { key: string; cid: string }) => {
+  const r = relayed.get(`${p.key}|${p.cid}`);
+  if (r) void rejoinActors(r.ws, r.subId);
+});
+
+// The room's pod is gone: run ownership again once its lease has expired and join wherever
+// the room lands (possibly here). Peers see the member again on its next `set`.
+async function rejoinActors(ws: WS, subId: string, attempt = 0): Promise<void> {
+  const sub = ws.data.subs.get(subId);
+  if (!sub || sub.kind !== "actors" || !sub.cid || !sub.join) return;
+  if (ws.readyState !== 1) return;
+  const dead = sub.remote;
+  let owner: string;
+  try {
+    owner = await cluster.acquire(`actors:${sub.key}`);
+  } catch {
+    owner = dead ?? "";
+  }
+  if (dead && owner === dead) {
+    if (attempt < 60) setTimeout(() => void rejoinActors(ws, subId, attempt + 1), 500);
+    return;
+  }
+  relayed.delete(`${sub.key}|${sub.cid}`);
+  await joinActors(ws, subId, sub.key, sub.cid, sub.join);
+}
+
+cluster.onPeerLost((pod) => {
+  for (const [k, sink] of remoteMembers) {
+    if (!k.startsWith(`${pod}|`)) continue;
+    remoteMembers.delete(k);
+    dropActor(sink, sink.key, sink.cid);
+  }
+  for (const [, r] of relayed) {
+    const sub = r.ws.data.subs.get(r.subId);
+    if (sub?.remote === pod) void rejoinActors(r.ws, r.subId);
+  }
+});
+
+// We lost the lease while alive: the room here is no longer authoritative. Every member —
+// local sockets and relayed ones — rejoins wherever the room now lives.
+cluster.onLeaseLost((leaseKey) => {
+  if (!leaseKey.startsWith("actors:")) return;
+  const key = leaseKey.slice("actors:".length);
+  const room = actorRooms.get(key);
+  if (!room) return;
+  if (room.timer) clearInterval(room.timer);
+  actorRooms.delete(key);
+  for (const e of room.members.values()) {
+    if (e.ws instanceof RemoteActorSink) {
+      remoteMembers.delete(`${e.ws.pod}|${key}|${e.cid}`);
+      cluster.push(e.ws.pod, "actor.rehome", { key, cid: e.cid });
+    } else {
+      for (const subId of actorSubIds(e.ws, key)) void rejoinActors(e.ws as WS, subId);
+    }
+  }
+});
 
 async function handleSub(ws: WS, id: string, frame: Record<string, unknown>): Promise<void> {
   if (ws.data.subs.size >= MAX_SUBS_PER_SOCKET && !ws.data.subs.has(id)) {
@@ -319,35 +521,18 @@ async function handleSub(ws: WS, id: string, frame: Record<string, unknown>): Pr
     return;
   }
   if (frame.kind === "actors") {
-    const key = presenceKey(ws.data.site, String(frame.channel ?? ""));
+    const channel = String(frame.channel ?? "");
+    const key = presenceKey(ws.data.site, channel);
     const cid = typeof frame.cid === "string" && frame.cid ? frame.cid : id;
-    const zone = typeof frame.zone === "string" ? frame.zone : "";
-    ws.data.subs.set(id, { kind: "actors", key, cid });
-    let room = actorRooms.get(key);
-    if (!room) {
-      // The first subscriber fixes the flush rate (clamped) — a later fast joiner
-      // can't push the room past the cap.
-      const rate = Math.max(1, Math.min(MAX_ACTOR_RATE, Number(frame.rate) || 15));
-      room = { members: new Map(), rate, timer: null };
-      actorRooms.set(key, room);
-    }
-    // cid comes from the client, so without this an entry could be taken over: the
-    // victim's own set/ameta/aevent stop matching (wrong socket) and their disconnect
-    // refuses to clean up, leaving the stolen actor in the zone after they're gone.
-    // A still-open holder blocks the claim; a dead one doesn't, because a reconnecting
-    // tab re-subscribes with the same cid and may beat its own close event here.
-    const held = room.members.get(cid);
-    if (held && held.ws !== ws && held.ws.readyState === 1) {
-      ws.data.subs.delete(id);
-      sendErr(ws, id, "conflict", `actor id "${cid}" is already in use`);
-      return;
-    }
     const observer = frame.observer === true;
-    const meta = !observer && frame.meta && typeof frame.meta === "object" ? (frame.meta as Record<string, unknown>) : {};
-    room.members.set(cid, { ws, cid, who: ws.data.who, zone, state: undefined, meta, stateDirty: false, metaDirty: hasKeys(meta), observer });
-    ensureActorTimer(key);
-    ws.send(JSON.stringify({ op: "ack", id }));
-    sendActorSnapshot(ws, key, id, zone, cid); // instant last-value snapshot of the zone
+    const join: ActorJoin = {
+      channel,
+      zone: typeof frame.zone === "string" ? frame.zone : "",
+      rate: Math.max(1, Math.min(MAX_ACTOR_RATE, Number(frame.rate) || 15)),
+      meta: !observer && frame.meta && typeof frame.meta === "object" ? (frame.meta as Record<string, unknown>) : {},
+      observer,
+    };
+    await joinActors(ws, id, key, cid, join);
     return;
   }
   if (frame.kind === "doc") {
@@ -424,7 +609,7 @@ async function handleDocUpdate(ws: WS, id: string, frame: Record<string, unknown
 // `set` updates the caller's own last-value state (and zone). No ack — it runs at
 // frame rate; the coalescing flush delivers it. A zone change leaves the old zone
 // (peers get actors_leave) and snapshots the new one back to the mover.
-function handleSet(ws: WS, frame: Record<string, unknown>): void {
+function handleSet(ws: ActorSink, frame: Record<string, unknown>): void {
   const cid = typeof frame.cid === "string" ? frame.cid : null;
   if (!cid) return;
   if (JSON.stringify(frame.state ?? null).length > LIMITS.wsPayloadBytes) {
@@ -432,6 +617,7 @@ function handleSet(ws: WS, frame: Record<string, unknown>): void {
     return;
   }
   const key = presenceKey(ws.data.site, String(frame.channel ?? ""));
+  if (relayFrame(ws, key, cid, "actor.set", frame)) return;
   const room = actorRooms.get(key);
   if (!room) return; // not subscribed (or a stale race) — ignore
   const e = room.members.get(cid);
@@ -449,7 +635,7 @@ function handleSet(ws: WS, frame: Record<string, unknown>): void {
 
 // `ameta` shallow-merges a metadata patch — infrequent per-member fields (team,
 // level, status) kept apart from the frame-rate `state` so they don't resync every tick.
-function handleSetMeta(ws: WS, frame: Record<string, unknown>): void {
+function handleSetMeta(ws: ActorSink, frame: Record<string, unknown>): void {
   const cid = typeof frame.cid === "string" ? frame.cid : null;
   if (!cid) return;
   const patch = frame.meta && typeof frame.meta === "object" ? (frame.meta as Record<string, unknown>) : null;
@@ -458,7 +644,9 @@ function handleSetMeta(ws: WS, frame: Record<string, unknown>): void {
     sendErr(ws, undefined, "payload_too_large", "actor metadata over 16KB");
     return;
   }
-  const room = actorRooms.get(presenceKey(ws.data.site, String(frame.channel ?? "")));
+  const key = presenceKey(ws.data.site, String(frame.channel ?? ""));
+  if (relayFrame(ws, key, cid, "actor.meta", frame)) return;
+  const room = actorRooms.get(key);
   const e = room && room.members.get(cid);
   if (!e || e.ws !== ws || e.observer) return;
   e.meta = { ...e.meta, ...patch };
@@ -468,7 +656,7 @@ function handleSetMeta(ws: WS, frame: Record<string, unknown>): void {
 // `aevent` is a discrete one-off event (a horn, a hit, a ping) — fanned out to
 // in-zone peers immediately (no coalescing, no storage). The flexible-payload tier
 // on top of last-value state, so games stop pairing actors with a second channel.
-function handleActorEvent(ws: WS, frame: Record<string, unknown>): void {
+function handleActorEvent(ws: ActorSink, frame: Record<string, unknown>): void {
   const cid = typeof frame.cid === "string" ? frame.cid : null;
   if (!cid) return;
   if (JSON.stringify(frame.payload ?? null).length > LIMITS.wsPayloadBytes) {
@@ -480,6 +668,7 @@ function handleActorEvent(ws: WS, frame: Record<string, unknown>): void {
     return;
   }
   const key = presenceKey(ws.data.site, String(frame.channel ?? ""));
+  if (relayFrame(ws, key, cid, "actor.event", frame)) return;
   const room = actorRooms.get(key);
   const e = room && room.members.get(cid);
   if (!e || e.ws !== ws || e.observer) return;
@@ -490,6 +679,15 @@ function handleActorEvent(ws: WS, frame: Record<string, unknown>): void {
       peer.ws.send(JSON.stringify({ op: "actor_event", id: subId, from, payload: frame.payload }));
     }
   }
+}
+
+// A member whose room is on another pod: forward the frame there instead of handling it.
+function relayFrame(ws: ActorSink, key: string, cid: string, kind: string, frame: Record<string, unknown>): boolean {
+  if (ws instanceof RemoteActorSink) return false; // already on the owner, arrived by relay
+  const remote = remoteFor(ws as WS, key, cid);
+  if (!remote) return false;
+  cluster.push(remote, kind, { key, cid, frame });
+  return true;
 }
 
 // Leave a document without opening it: only a room already in the registry needs to hear it.
@@ -508,7 +706,7 @@ function handleUnsub(ws: WS, id: string): void {
       broadcastPresence(sub.key);
     }
   }
-  if (sub?.kind === "actors" && sub.cid) dropActor(ws, sub.key, sub.cid);
+  if (sub?.kind === "actors") leaveActors(ws, sub);
   if (sub?.kind === "doc" && sub.doc && sub.client) leaveDoc(ws.data.site, sub.doc, sub.client);
 }
 
@@ -594,7 +792,7 @@ export const websocket = {
         dropFromScope(channelMembers, sub.key, ws);
         touched.add(sub.key);
       }
-      if (sub.kind === "actors" && sub.cid) dropActor(ws, sub.key, sub.cid);
+      if (sub.kind === "actors") leaveActors(ws, sub);
       if (sub.kind === "doc" && sub.doc && sub.client) leaveDoc(ws.data.site, sub.doc, sub.client);
     }
     for (const key of touched) broadcastPresence(key);

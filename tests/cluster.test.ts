@@ -223,6 +223,33 @@ describe("two pods", () => {
     b.close();
   }, 20000);
 
+  test("actors rooms span pods: state, events and leave cross over", async () => {
+    const a = await socket(A, "alice@localhost");
+    const b = await socket(B, "bob@localhost");
+    a.send({ op: "sub", id: "x", kind: "actors", channel: "arena", cid: "a1", zone: "z", rate: 20 });
+    b.send({ op: "sub", id: "x", kind: "actors", channel: "arena", cid: "b1", zone: "z", rate: 20 });
+    await a.next((f) => f.op === "ack");
+    await b.next((f) => f.op === "ack");
+    a.send({ op: "set", id: "x", channel: "arena", cid: "a1", state: { x: 1 } });
+    const upd = await b.next((f) => f.op === "actors" && f.updates.some((u: any) => u.id === "a1"));
+    expect(upd.updates.find((u: any) => u.id === "a1").state).toEqual({ x: 1 });
+    expect(upd.updates.find((u: any) => u.id === "a1").handle).toBe("alice");
+    b.send({ op: "aevent", id: "x", channel: "arena", cid: "b1", payload: { honk: true } });
+    const ev = await a.next((f) => f.op === "actor_event");
+    expect(ev.from.id).toBe("b1");
+    expect(ev.payload).toEqual({ honk: true });
+    // a late joiner on either pod gets the zone snapshot with alice's state
+    const c = await socket(B, "carol@localhost");
+    c.send({ op: "sub", id: "x", kind: "actors", channel: "arena", cid: "c1", zone: "z" });
+    const snap = await c.next((f) => f.op === "actors_snapshot");
+    expect(snap.actors.map((x: any) => x.id).sort()).toEqual(["a1"]);
+    a.close();
+    const left = await b.next((f) => f.op === "actors_leave");
+    expect(left.ids).toEqual(["a1"]);
+    b.close();
+    c.close();
+  }, 20000);
+
   test("when the owner pod dies, the survivor re-homes the document and keeps every acked edit", async () => {
     const name = "plan-failover";
     const a = await docClient(A, name, "alice@localhost");

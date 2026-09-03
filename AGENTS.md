@@ -131,9 +131,9 @@ shared `WORLDS_CLUSTER_SECRET`; `WORLDS_POD_ID` defaults to the hostname. Pods r
 events, channel messages and presence are relayed over the links, and each `worlds.doc` document
 is hosted by exactly one pod through a lease in `room_leases` (other pods forward to it; when the
 owner dies the document is re-homed once the lease expires, `WORLDS_LEASE_TTL_MS`, default 15 s).
-`worlds.actors` rooms are still per pod — a game with players on two pods does not work yet, so
-keep actors-heavy deployments at one replica. `tests/cluster.test.ts` runs two pods against the
-dev Postgres.
+`worlds.actors` rooms use the same lease (`actors:<site>/<channel>`): the owning pod runs the
+room and other pods relay their members' frames to it. `tests/cluster.test.ts` runs two pods
+against the dev Postgres.
 
 ### Two-repo + deploy model
 
