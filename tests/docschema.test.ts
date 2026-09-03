@@ -125,6 +125,40 @@ describe("doc schema", () => {
     }))?.rule).toBeOneOf(["limit", "nesting"]);
   });
 
+  test("object attributes: a nested Y.Map of node state is checked key by key", () => {
+    const withState = {
+      ...schema,
+      nodes: {
+        ...schema.nodes,
+        root: { children: ["chart"] },
+        chart: { attrs: { __state: { type: "object", props: { "chart-spec": { type: "json", maxLen: 20 }, "chart-title": { maxLen: 10, nullable: true } } } } },
+      },
+    } as DocSchema;
+    const chart = (state: Record<string, unknown>) =>
+      doc((root) => {
+        const el = new Y.XmlElement();
+        root.insertEmbed(root.length, el);
+        el.setAttribute("__type", "chart");
+        const m = new Y.Map();
+        el.setAttribute("__state", m as never);
+        for (const [k, v] of Object.entries(state)) m.set(k, v);
+      });
+    expect(validateTree(chart({ "chart-spec": '{"mark":"bar"}' }), withState).violation).toBeNull();
+    expect(validateTree(chart({ "chart-spec": "not json" }), withState).violation?.message).toContain("__state.chart-spec");
+    expect(validateTree(chart({ "chart-spec": "{}", evil: 1 }), withState).violation?.message).toContain('undeclared key "evil"');
+    expect(validateTree(chart({ "chart-spec": '{"mark":"bar","x":"a very long value"}' }), withState).violation?.rule).toBe("attr");
+    // a plain JSON object works the same way, and `open` admits extra keys
+    const open = { ...withState, nodes: { ...withState.nodes, chart: { attrs: { __state: { type: "object", open: true, props: {} } } } } } as DocSchema;
+    expect(validateTree(chart({ anything: "goes" }), open).violation).toBeNull();
+    const plain = doc((root) => {
+      const el = new Y.XmlElement();
+      root.insertEmbed(root.length, el);
+      el.setAttribute("__type", "chart");
+      el.setAttribute("__state", { "chart-spec": "{}" } as never);
+    });
+    expect(validateTree(plain, withState).violation).toBeNull();
+  });
+
   test("a stray top-level shared type is refused", () => {
     const d = new Y.Doc();
     d.get("root", Y.XmlText);
@@ -149,5 +183,9 @@ describe(".world.json docs section", () => {
     expect(() => parseManifestPolicies({ docs: { x: { nodes: { root: { children: ["ghost"] } } } } })).toThrow(/undeclared type "ghost"/);
     expect(() => parseManifestPolicies({ docs: { x: { nodes: { paragraph: {} } } } })).toThrow(/declare the root node/);
     expect(() => parseManifestPolicies({ docs: { x: { nodes: { root: { attrs: { a: { type: "float" } } } } } } })).toThrow(/type must be one of/);
+    const withProps = parseManifestPolicies({ docs: { x: { nodes: { root: { attrs: { __state: { type: "object", props: { k: { maxLen: 3 } } } } } } } } });
+    expect(withProps.docs.x!.nodes.root!.attrs!.__state!.props!.k!.maxLen).toBe(3);
+    expect(() => parseManifestPolicies({ docs: { x: { nodes: { root: { attrs: { s: { type: "object" } } } } } } })).toThrow(/needs props or open/);
+    expect(() => parseManifestPolicies({ docs: { x: { nodes: { root: { attrs: { s: { props: { k: {} } } } } } } } })).toThrow(/needs type "object"/);
   });
 });

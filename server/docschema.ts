@@ -24,7 +24,7 @@ import { sitePolicies } from "./policies";
 //   }, "limits": {"depth": 20, "bytes": 4194304, "perType": {"decision": 100}}}}
 
 export interface AttrRule {
-  type?: "string" | "int" | "number" | "bool" | "json" | "any";
+  type?: "string" | "int" | "number" | "bool" | "json" | "object" | "any";
   enum?: (string | number | boolean | null)[];
   maxLen?: number;
   min?: number;
@@ -32,6 +32,10 @@ export interface AttrRule {
   urlPrefix?: string[];
   ref?: string; // a document id in this site collection
   nullable?: boolean;
+  // type "object": a nested Y.Map or plain object (Lexical keeps a node's state in one such
+  // attribute, `__state`); each key gets its own rule, unknown keys are refused unless `open`.
+  props?: Record<string, AttrRule>;
+  open?: boolean;
 }
 
 export interface NodeRule {
@@ -107,12 +111,37 @@ function typeOf(attrs: Record<string, unknown>, schema: DocSchema): string | nul
   return typeof t === "string" ? t : null;
 }
 
+// Attribute values Lexical writes as nested shared types (a Y.Map of node state) and plain
+// JSON objects are both walked as key → value.
+function entriesOf(value: unknown): [string, unknown][] | null {
+  if (value instanceof Y.Map) return [...value.entries()];
+  if (typeof value === "object" && value !== null && !Array.isArray(value) && !(value instanceof Y.AbstractType)) {
+    return Object.entries(value as Record<string, unknown>);
+  }
+  return null;
+}
+
 function checkAttr(path: string, name: string, value: unknown, rule: AttrRule, w: Walk): Violation | null {
   const at = `${path} attribute "${name}"`;
   if (value === null || value === undefined) {
     if (rule.nullable || (rule.enum && rule.enum.includes(null))) return null;
     return { rule: "attr", message: `${at} must not be null` };
   }
+  if (rule.type === "object") {
+    const entries = entriesOf(value);
+    if (!entries) return { rule: "attr", message: `${at} must be an object` };
+    for (const [key, v] of entries) {
+      const sub = rule.props?.[key];
+      if (!sub) {
+        if (rule.open) continue;
+        return { rule: "attr", message: `${at} has an undeclared key "${key}"` };
+      }
+      const violation = checkAttr(path, `${name}.${key}`, v, sub, w);
+      if (violation) return violation;
+    }
+    return null;
+  }
+  if (value instanceof Y.AbstractType) return { rule: "attr", message: `${at} must be a scalar` };
   if (rule.enum) {
     if (!rule.enum.includes(value as never)) return { rule: "attr", message: `${at} must be one of ${rule.enum.map(String).join(", ")}` };
     return null;

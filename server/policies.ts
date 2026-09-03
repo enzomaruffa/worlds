@@ -48,8 +48,8 @@ function bad(msg: string): never {
 
 // A broken policy fails the deploy. Dropping it silently would leave a collection the
 // owner believes is protected wide open.
-const ATTR_RULE_KEYS = new Set(["type", "enum", "maxLen", "min", "max", "urlPrefix", "ref", "nullable"]);
-const ATTR_TYPES = new Set(["string", "int", "number", "bool", "json", "any"]);
+const ATTR_RULE_KEYS = new Set(["type", "enum", "maxLen", "min", "max", "urlPrefix", "ref", "nullable", "props", "open"]);
+const ATTR_TYPES = new Set(["string", "int", "number", "bool", "json", "object", "any"]);
 
 function parseAttrRule(where: string, raw: unknown): AttrRule {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) bad(`${where} must be an object`);
@@ -84,6 +84,17 @@ function parseAttrRule(where: string, raw: unknown): AttrRule {
     if (typeof r.nullable !== "boolean") bad(`${where}.nullable must be a boolean`);
     rule.nullable = r.nullable;
   }
+  if (r.props !== undefined) {
+    if (typeof r.props !== "object" || r.props === null || Array.isArray(r.props)) bad(`${where}.props must be an object of key → rule`);
+    if (rule.type !== "object") bad(`${where}.props needs type "object"`);
+    rule.props = {};
+    for (const [key, sub] of Object.entries(r.props as Record<string, unknown>)) rule.props[key] = parseAttrRule(`${where}.props.${key}`, sub);
+  }
+  if (r.open !== undefined) {
+    if (typeof r.open !== "boolean") bad(`${where}.open must be a boolean`);
+    rule.open = r.open;
+  }
+  if (rule.type === "object" && !rule.props && !rule.open) bad(`${where} of type "object" needs props or open: true`);
   return rule;
 }
 

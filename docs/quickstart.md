@@ -117,9 +117,11 @@ rule is rejected and the sender resyncs, nobody else notices.
 - Lexical's base attributes (`__format`, `__style`, `__indent`, `__dir`, `__textFormat`,
   `__textStyle`, `__mode`, `__detail`) are allowed on every node with sane bounds; add or
   override under `commonAttrs`.
-- Attribute rules: `type` (`string|int|number|bool|json|any`), `enum`, `maxLen`, `min`, `max`,
+- Attribute rules: `type` (`string|int|number|bool|json|object|any`), `enum`, `maxLen`, `min`, `max`,
   `urlPrefix`, `nullable`, and `ref` — the value must be the id of a document in that
-  collection of this site, checked at commit. Anything not declared is a violation.
+  collection of this site, checked at commit. `object` walks a nested map (Lexical keeps a
+  node's state in one `__state` attribute) key by key through `props`, refusing undeclared
+  keys unless `open: true`. Anything not declared is a violation.
 - `children` lists what may sit directly beneath a node; absent means the node is a leaf.
   `maxText` caps the characters directly inside one node.
 - `limits`: `depth`, `bytes` (Yjs state), `nodes`, `textChars`, `perType`.
