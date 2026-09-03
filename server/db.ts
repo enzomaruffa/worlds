@@ -129,6 +129,31 @@ async function migratePostgres(): Promise<void> {
       at         timestamptz NOT NULL DEFAULT now()
     )`;
   await sql`CREATE INDEX IF NOT EXISTS events_scope ON events (site, collection, seq)`;
+  // Collaborative documents (docs.ts): one snapshot per doc plus the log of committed
+  // updates since it, per epoch.
+  await sql`
+    CREATE TABLE IF NOT EXISTS docs (
+      site         text NOT NULL,
+      name         text NOT NULL,
+      epoch        int NOT NULL DEFAULT 1,
+      snapshot     bytea NOT NULL,
+      snapshot_seq bigint NOT NULL DEFAULT 0,
+      bytes        int NOT NULL DEFAULT 0,
+      created_at   timestamptz NOT NULL DEFAULT now(),
+      updated_at   timestamptz NOT NULL DEFAULT now(),
+      PRIMARY KEY (site, name)
+    )`;
+  await sql`
+    CREATE TABLE IF NOT EXISTS doc_updates (
+      site   text NOT NULL,
+      name   text NOT NULL,
+      epoch  int NOT NULL,
+      seq    bigint NOT NULL,
+      "update" bytea NOT NULL,
+      by     text NOT NULL,
+      at     timestamptz NOT NULL DEFAULT now(),
+      PRIMARY KEY (site, name, epoch, seq)
+    )`;
 }
 
 // Same shape, SQLite spelling: JSON lives in TEXT, timestamps are ISO-8601 strings
@@ -194,6 +219,29 @@ async function migrateSqlite(): Promise<void> {
       at         TEXT NOT NULL DEFAULT (${NOW})
     )`);
   await sql.unsafe(`CREATE INDEX IF NOT EXISTS events_scope ON events (site, collection, seq)`);
+  await sql.unsafe(`
+    CREATE TABLE IF NOT EXISTS docs (
+      site         TEXT NOT NULL,
+      name         TEXT NOT NULL,
+      epoch        INTEGER NOT NULL DEFAULT 1,
+      snapshot     BLOB NOT NULL,
+      snapshot_seq INTEGER NOT NULL DEFAULT 0,
+      bytes        INTEGER NOT NULL DEFAULT 0,
+      created_at   TEXT NOT NULL DEFAULT (${NOW}),
+      updated_at   TEXT NOT NULL DEFAULT (${NOW}),
+      PRIMARY KEY (site, name)
+    )`);
+  await sql.unsafe(`
+    CREATE TABLE IF NOT EXISTS doc_updates (
+      site   TEXT NOT NULL,
+      name   TEXT NOT NULL,
+      epoch  INTEGER NOT NULL,
+      seq    INTEGER NOT NULL,
+      "update" BLOB NOT NULL,
+      by     TEXT NOT NULL,
+      at     TEXT NOT NULL DEFAULT (${NOW}),
+      PRIMARY KEY (site, name, epoch, seq)
+    )`);
 }
 
 // SQLite has no ADD COLUMN IF NOT EXISTS; a database created before the column existed

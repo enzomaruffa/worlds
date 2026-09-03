@@ -8,6 +8,7 @@ import { handleDeploy, handleDeployFolder } from "./deploy";
 import { serveSite, siteNotFound } from "./staticsite";
 import { getSiteOr404, listSites, publicSite, siteUrl, bumpVisit, getSite } from "./sites";
 import * as dbapi from "./dbapi";
+import * as docs from "./docs";
 import * as uploads from "./uploads";
 import * as ai from "./ai";
 import { notifySlack } from "./notify";
@@ -186,6 +187,40 @@ async function api(req: Request, url: URL, site: string): Promise<Response> {
     if (method === "DELETE" && p[1]) return uploads.deleteUpload(req, site, p[1]);
   }
 
+  // Collaborative documents over HTTP — for services and agents; browsers use the socket.
+  if (p[0] === "docs") {
+    if (method !== "GET") requireCsrf(req);
+    const who = identityFrom(req);
+    if (p.length === 1 && method === "GET") return json({ items: await docs.listDocs(site), next_cursor: null });
+    const name = p[1]!;
+    if (p.length === 2 && method === "GET") {
+      const room = await docs.getRoom(site, name);
+      const s = room.state();
+      return json({ name, epoch: s.epoch, seq: s.seq, state: docs.b64(s.state), bytes: room.stateBytes });
+    }
+    if (p.length === 3 && p[2] === "updates") {
+      const room = await docs.getRoom(site, name);
+      if (method === "GET") {
+        const epoch = Number(url.searchParams.get("epoch"));
+        const since = Number(url.searchParams.get("since"));
+        const tail = Number.isFinite(epoch) && Number.isFinite(since) ? await room.updatesSince(epoch, since) : null;
+        if (!tail) throw new WorldsError("replay_expired", "epoch or seq too old — fetch the state", undefined, { epoch: room.epoch, seq: room.seq });
+        return json({ epoch: room.epoch, seq: room.seq, updates: tail.map(docs.b64) });
+      }
+      if (method === "POST") {
+        const body = (await req.json().catch(() => ({}))) as { epoch?: unknown; update?: unknown };
+        const seq = await room.submit(who, Number(body.epoch), docs.fromB64(body.update), null, null);
+        return json({ epoch: room.epoch, seq });
+      }
+    }
+    if (p.length === 3 && p[2] === "rotate" && method === "POST") {
+      const room = await docs.getRoom(site, name);
+      const body = (await req.json().catch(() => ({}))) as { epoch?: unknown; state?: unknown };
+      const s = await room.rotate(who, Number(body.epoch), docs.fromB64(body.state));
+      return json({ name, epoch: s.epoch, seq: s.seq, bytes: room.stateBytes });
+    }
+  }
+
   if (p[0] === "ai") {
     if (p[1] === "complete" && method === "POST") return ai.complete(req);
     if (p[1] === "embed" && method === "POST") return ai.embed(req);
@@ -331,6 +366,13 @@ const server = Bun.serve<SocketData, never>({
   },
   websocket,
 });
+
+// Open documents snapshot on the way out so a restart replays nothing.
+for (const signal of ["SIGTERM", "SIGINT"] as const) {
+  process.on(signal, () => {
+    docs.closeAllRooms().finally(() => process.exit(0));
+  });
+}
 
 const authLabel = config.dev ? "dev-stub" : config.authMode;
 // publicOrigin when set, so the logged URL is the one people actually open rather than a

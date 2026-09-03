@@ -1,15 +1,19 @@
 import type { ServerWebSocket } from "bun";
 import { LIMITS } from "./config";
 import { onChange, replaySince, dbReady, type ChangeEvent } from "./db";
+import { asWorldsError } from "./errors";
 import type { Identity } from "./identity";
+import { b64, fromB64, getRoom, type DocClient } from "./docs";
 
 // One multiplexed socket per page. Frame protocol is part of the frozen v1
 // contract (docs/PLAN.md B.2): sub/unsub/pub → event/msg/presence/ack/error.
 
+type DocRoomRef = Awaited<ReturnType<typeof getRoom>>;
+
 export interface SocketData {
   who: Identity;
   site: string;
-  subs: Map<string, { kind: "db" | "channel" | "actors"; key: string; cid?: string }>;
+  subs: Map<string, { kind: "db" | "channel" | "actors" | "doc"; key: string; cid?: string; room?: DocRoomRef; client?: DocClient }>;
   fanout?: { tokens: number; at: number }; // broadcast budget, created on first pub/aevent
 }
 
@@ -288,7 +292,66 @@ async function handleSub(ws: WS, id: string, frame: Record<string, unknown>): Pr
     sendActorSnapshot(ws, key, id, zone, cid); // instant last-value snapshot of the zone
     return;
   }
-  sendErr(ws, id, "invalid_request", "kind must be db, channel or actors");
+  if (frame.kind === "doc") {
+    if (!dbReady()) {
+      sendErr(ws, id, "maintenance", "database unavailable");
+      return;
+    }
+    const name = String(frame.doc ?? "");
+    // A reconnecting client names where it left off; only that epoch's tail is missing.
+    const epoch = Number(frame.epoch);
+    const since = typeof frame.since === "string" && frame.since ? Number(frame.since) : NaN;
+    let room: DocRoomRef;
+    try {
+      room = await getRoom(ws.data.site, name);
+    } catch (e) {
+      const err = asWorldsError(e);
+      sendErr(ws, id, err.code, err.message);
+      return;
+    }
+    const client: DocClient = { send: (f) => ws.send(JSON.stringify(f)) };
+    ws.data.subs.set(id, { kind: "doc", key: `${ws.data.site}/${name}`, room, client });
+    room.subscribe(client, id);
+    const tail = Number.isFinite(epoch) && Number.isFinite(since) ? await room.updatesSince(epoch, since) : null;
+    if (tail) {
+      ws.send(JSON.stringify({ op: "doc_ack", id, seq: room.seq, epoch: room.epoch, resumed: true }));
+      for (const u of tail) ws.send(JSON.stringify({ op: "doc_update", id, seq: room.seq, update: b64(u) }));
+    } else {
+      ws.send(JSON.stringify(room.stateFrame("doc_state", id)));
+    }
+    return;
+  }
+  sendErr(ws, id, "invalid_request", "kind must be db, channel, actors or doc");
+}
+
+// `doc_update` carries one Yjs update against the epoch the client holds. The room
+// answers with `doc_ack` (committed), `doc_rejected` (failed validation; carries the
+// current state), or `doc_reset` (stale epoch; carries the current state).
+async function handleDocUpdate(ws: WS, id: string, frame: Record<string, unknown>): Promise<void> {
+  const sub = ws.data.subs.get(id);
+  if (!sub || sub.kind !== "doc" || !sub.room || !sub.client) {
+    sendErr(ws, id, "invalid_request", "doc_update needs an open doc subscription id");
+    return;
+  }
+  let update: Uint8Array;
+  try {
+    update = fromB64(frame.update);
+  } catch (e) {
+    const err = asWorldsError(e);
+    sendErr(ws, id, err.code, err.message);
+    return;
+  }
+  try {
+    await sub.room.submit(ws.data.who, Number(frame.epoch), update, sub.client, id);
+  } catch (e) {
+    const err = asWorldsError(e);
+    if (err.code === "conflict") {
+      ws.send(JSON.stringify(sub.room.stateFrame("doc_reset", id, { reason: "stale epoch" })));
+      return;
+    }
+    // Validation failures were already answered with doc_rejected by the room.
+    if (err.code !== "invalid_request") sendErr(ws, id, err.code, err.message);
+  }
 }
 
 // `set` updates the caller's own last-value state (and zone). No ack — it runs at
@@ -374,6 +437,7 @@ function handleUnsub(ws: WS, id: string): void {
     }
   }
   if (sub?.kind === "actors" && sub.cid) dropActor(ws, sub.key, sub.cid);
+  if (sub?.kind === "doc" && sub.room && sub.client) sub.room.unsubscribe(sub.client);
 }
 
 function handlePub(ws: WS, id: string, frame: Record<string, unknown>): void {
@@ -430,6 +494,7 @@ export const websocket = {
     if (frame.op === "set") return handleSet(ws, frame);
     if (frame.op === "ameta") return handleSetMeta(ws, frame);
     if (frame.op === "aevent") return handleActorEvent(ws, frame);
+    if (frame.op === "doc_update") return handleDocUpdate(ws, id, frame);
     // Unknown ops are ignored (forward-compat rule).
   },
 
@@ -442,6 +507,7 @@ export const websocket = {
         touched.add(sub.key);
       }
       if (sub.kind === "actors" && sub.cid) dropActor(ws, sub.key, sub.cid);
+      if (sub.kind === "doc" && sub.room && sub.client) sub.room.unsubscribe(sub.client);
     }
     for (const key of touched) broadcastPresence(key);
   },

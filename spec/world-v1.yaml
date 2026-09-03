@@ -21,7 +21,13 @@ paths:
     put: { summary: replace }
     delete: { summary: delete (idempotent) }
   /api/v1/db/{collection}/{id}/increment: { post: { summary: atomic counter } }
-  /api/v1/socket: { get: { summary: multiplexed WebSocket (db subs + channels), subprotocol worlds.v1 } }
+  /api/v1/socket: { get: { summary: "multiplexed WebSocket (db subs + channels + actors + docs), subprotocol worlds.v1" } }
+  /api/v1/docs: { get: { summary: list this site's collaborative documents } }
+  /api/v1/docs/{name}: { get: { summary: "document state: {epoch, seq, state (base64 Yjs update), bytes}" } }
+  /api/v1/docs/{name}/updates:
+    get: { summary: "committed updates after ?since= within ?epoch= (replay_expired when past the snapshot)" }
+    post: { summary: "append one update {epoch, update} -> {seq}; conflict on stale epoch, invalid_request on schema violation" }
+  /api/v1/docs/{name}/rotate: { post: { summary: "install a compact state {epoch, state} as the next epoch; every subscriber is reset" } }
   /api/v1/ai/complete: { post: { summary: Gemini completion (model aliases only) } }
   /api/v1/ai/embed: { post: { summary: embedding } }
   /api/v1/ai/image: { post: { summary: image -> stored upload } }

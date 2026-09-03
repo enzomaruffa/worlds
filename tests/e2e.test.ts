@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtemp, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import * as Y from "yjs";
 
 // Spins the real server (random port, temp data dir) against the compose
 // Postgres. These double as the seed of the golden contract corpus (Draft B):
@@ -56,6 +57,7 @@ beforeAll(async () => {
     env: {
       ...process.env, WORLDS_PORT: String(PORT), WORLDS_DATA_DIR: dataDir, WORLDS_DEV: "1", WORLDS_DISABLE_WORKERS: "1", WORLDS_SEED: "0",
       WORLDS_SERVICE_TOKENS: JSON.stringify({ [SVC_TOKEN]: { email: "app@localhost", handle: "app", name: "App" } }),
+      WORLDS_DOC_IDLE_MS: "300",
     },
     stdout: "pipe",
     stderr: "pipe",
@@ -1018,5 +1020,182 @@ describe("collection policies", () => {
     await deploy(P, { "index.html": "<h1>open</h1>" });
     const res = await req("POST", "/api/v1/db/decisions", { body: { text: "anyone" }, site: P });
     expect(res.status).toBe(200);
+  });
+});
+
+describe("worlds.doc", () => {
+  const b64 = (u: Uint8Array) => Buffer.from(u).toString("base64");
+  const unb64 = (s: string) => new Uint8Array(Buffer.from(s, "base64"));
+
+  // A socket client holding a Y.Doc wired the way sdk/src/doc.ts wires it.
+  async function client(docName: string, headers: Record<string, string> = {}) {
+    const ws = new WebSocket(`ws://localhost:${PORT}/api/v1/socket`, {
+      protocols: ["worlds.v1"],
+      headers: { host: `${S1}.worlds.localhost`, ...headers },
+    } as never);
+    let ydoc = new Y.Doc();
+    let epoch = 0;
+    const frames: any[] = [];
+    const waiters: ((f: any) => void)[] = [];
+    // Local edits go straight to the server, like `ydoc.on("update") → doc.send`.
+    const relay = (u: Uint8Array, origin: unknown) => {
+      if (origin === "server") return;
+      ws.send(JSON.stringify({ op: "doc_update", id: "d1", epoch, update: b64(u) }));
+    };
+    // A state frame replaces the local document — the server's copy is the document.
+    const install = (state: string) => {
+      ydoc.destroy();
+      ydoc = new Y.Doc();
+      Y.applyUpdate(ydoc, unb64(state), "server");
+      ydoc.on("update", relay);
+    };
+    ws.onmessage = (m) => {
+      const f = JSON.parse(String(m.data));
+      frames.push(f);
+      if (f.op === "doc_state" || f.op === "doc_reset" || f.op === "doc_rejected") {
+        epoch = f.epoch;
+        install(f.state);
+      } else if (f.op === "doc_update") {
+        Y.applyUpdate(ydoc, unb64(f.update), "server");
+      }
+      for (const w of waiters.splice(0)) w(f);
+    };
+    await new Promise((r) => (ws.onopen = r));
+    ws.send(JSON.stringify({ op: "sub", id: "d1", kind: "doc", doc: docName }));
+    await next((f) => f.op === "doc_state");
+    function next(pred: (f: any) => boolean, ms = 3000): Promise<any> {
+      const hit = frames.find(pred);
+      if (hit) return Promise.resolve(hit);
+      return new Promise((resolve, reject) => {
+        const t = setTimeout(() => reject(new Error("no frame matched in time")), ms);
+        const w = (f: any) => {
+          if (pred(f)) {
+            clearTimeout(t);
+            resolve(f);
+          } else waiters.push(w);
+        };
+        waiters.push(w);
+      });
+    }
+    return {
+      ws, frames, next,
+      text: () => ydoc.get("root", Y.XmlText).toString(),
+      type: (s: string) => ydoc.get("root", Y.XmlText).insert(ydoc.get("root", Y.XmlText).length, s),
+      set epoch(e: number) { epoch = e; },
+      get epoch() { return epoch; },
+      close: () => ws.close(),
+    };
+  }
+
+  test("two clients converge, the sender is acked, both see the committed update", async () => {
+    const a = await client("plan-a");
+    const b = await client("plan-a");
+    expect(a.frames[0].op).toBe("doc_state");
+    a.type("hello");
+    const ack = await a.next((f) => f.op === "doc_ack");
+    expect(ack.seq).toBe(1);
+    await b.next((f) => f.op === "doc_update" && f.seq === 1);
+    expect(b.text()).toBe("hello");
+    b.type(" world");
+    await a.next((f) => f.op === "doc_update" && f.seq === 2);
+    expect(a.text()).toBe("hello world");
+    expect(b.text()).toBe("hello world");
+    a.close();
+    b.close();
+  });
+
+  test("the HTTP surface reads the same state and a service can append", async () => {
+    const a = await client("plan-http");
+    a.type("via socket");
+    await a.next((f) => f.op === "doc_ack");
+    const got = await (await req("GET", "/api/v1/docs/plan-http")).json();
+    expect(got.epoch).toBe(1);
+    expect(got.seq).toBe(1);
+    const d = new Y.Doc();
+    Y.applyUpdate(d, unb64(got.state));
+    expect(d.get("root", Y.XmlText).toString()).toBe("via socket");
+
+    // a service (no browser) appends through HTTP; the socket client sees it
+    d.get("root", Y.XmlText).insert(d.get("root", Y.XmlText).length, " + service");
+    const update = Y.encodeStateAsUpdate(d, Y.encodeStateVectorFromUpdate(unb64(got.state)));
+    const posted = await req("POST", "/api/v1/docs/plan-http/updates", { body: { epoch: 1, update: b64(update) }, headers: asService });
+    expect(posted.status).toBe(200);
+    expect((await posted.json()).seq).toBe(2);
+    await a.next((f) => f.op === "doc_update" && f.seq === 2);
+    expect(a.text()).toBe("via socket + service");
+
+    const tail = await (await req("GET", "/api/v1/docs/plan-http/updates?epoch=1&since=1")).json();
+    expect(tail.updates.length).toBe(1);
+    const listed = await (await req("GET", "/api/v1/docs")).json();
+    expect(listed.items.map((d: any) => d.name)).toContain("plan-http");
+    a.close();
+  });
+
+  test("an oversized update is refused with the frozen error shape", async () => {
+    const a = await client("plan-big");
+    const d = new Y.Doc();
+    d.get("root", Y.XmlText).insert(0, "x".repeat(600 * 1024));
+    a.ws.send(JSON.stringify({ op: "doc_update", id: "d1", epoch: 1, update: b64(Y.encodeStateAsUpdate(d)) }));
+    const err = await a.next((f) => f.op === "error");
+    expect(err.error.code).toBe("payload_too_large");
+    a.close();
+  });
+
+  test("a stale epoch gets a reset with the current state; garbage gets rejected", async () => {
+    const a = await client("plan-stale");
+    a.type("real");
+    await a.next((f) => f.op === "doc_ack");
+    a.ws.send(JSON.stringify({ op: "doc_update", id: "d1", epoch: 41, update: b64(new Uint8Array([0, 0])) }));
+    const reset = await a.next((f) => f.op === "doc_reset");
+    expect(reset.epoch).toBe(1);
+    expect(a.text()).toBe("real");
+    a.ws.send(JSON.stringify({ op: "doc_update", id: "d1", epoch: 1, update: b64(new Uint8Array([7, 7, 7])) }));
+    const rejected = await a.next((f) => f.op === "doc_rejected");
+    expect(rejected.reason).toContain("not a valid Yjs update");
+    expect(a.text()).toBe("real");
+    a.close();
+  });
+
+  test("a reconnecting client resumes from its seq and only gets the tail", async () => {
+    const a = await client("plan-resume");
+    a.type("one");
+    await a.next((f) => f.op === "doc_ack" && f.seq === 1);
+    const b = await client("plan-resume");
+    b.type("two");
+    await a.next((f) => f.op === "doc_update" && f.seq === 2);
+    a.ws.send(JSON.stringify({ op: "sub", id: "d2", kind: "doc", doc: "plan-resume", epoch: 1, since: "1" }));
+    const resumed = await a.next((f) => f.id === "d2" && f.op === "doc_ack" && f.resumed);
+    expect(resumed.seq).toBe(2);
+    const tail = await a.next((f) => f.id === "d2" && f.op === "doc_update");
+    expect(typeof tail.update).toBe("string");
+    a.close();
+    b.close();
+  });
+
+  test("rotation installs a compact state as a new epoch and resets every subscriber", async () => {
+    const a = await client("plan-rotate");
+    a.type("old history");
+    await a.next((f) => f.op === "doc_ack");
+    const fresh = new Y.Doc();
+    fresh.get("root", Y.XmlText).insert(0, "compact");
+    const res = await req("POST", "/api/v1/docs/plan-rotate/rotate", { body: { epoch: 1, state: b64(Y.encodeStateAsUpdate(fresh)) }, headers: asService });
+    expect(res.status).toBe(200);
+    expect((await res.json()).epoch).toBe(2);
+    const reset = await a.next((f) => f.op === "doc_reset");
+    expect(reset.epoch).toBe(2);
+    expect(a.text()).toBe("compact");
+    a.close();
+  });
+
+  test("an idle document is snapshotted and served identically afterwards", async () => {
+    const a = await client("plan-idle");
+    a.type("durable");
+    await a.next((f) => f.op === "doc_ack");
+    a.close();
+    await Bun.sleep(700);
+    const got = await (await req("GET", "/api/v1/docs/plan-idle")).json();
+    const d = new Y.Doc();
+    Y.applyUpdate(d, unb64(got.state));
+    expect(d.get("root", Y.XmlText).toString()).toBe("durable");
   });
 });
