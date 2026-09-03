@@ -225,6 +225,41 @@ multi-table with codes), **red-light / paint-arena / racing** (single `worlds.ro
 
 ---
 
+### 10c. Collaborative document (`worlds.doc` + Yjs) — a shared editor, whiteboard or any CRDT
+
+The server keeps the authoritative copy and persists every accepted update before relaying
+it. `worlds.doc` only moves bytes; bring Yjs from a CDN and wire it in.
+
+```html
+<script type="module">
+import * as Y from "https://cdn.jsdelivr.net/npm/yjs@13/+esm";
+let ydoc, transport;
+function open() {
+  ydoc = new Y.Doc();                                   // ALWAYS empty at bind time
+  transport = worlds.doc("notes-main", {
+    onState:  (state)  => Y.applyUpdate(ydoc, state, "server"),
+    onUpdate: (update) => Y.applyUpdate(ydoc, update, "server"),
+    // The epoch moved (rotation) or our update was refused: rebuild from the server's state.
+    onReset:    ()     => { transport.close(); open(); },
+    onRejected: ()     => { transport.close(); open(); },
+  });
+  ydoc.on("update", (u, origin) => { if (origin !== "server") transport.send(u); });
+  ydoc.get("text", Y.Text).observe(render);
+}
+open();
+</script>
+```
+
+- Reset means *replace*, not merge: applying the server state onto a doc that already has
+  content unions the two histories. Rebuild the doc, then attach observers, then let the
+  state arrive.
+- Cursors and "who is here" ride a plain channel: `worlds.ws.channel("doc:notes-main")` with
+  `y-protocols/awareness` encoded as base64 in the payload.
+- Declare what the tree may contain in `.world.json` → `docs` (see quickstart "Document
+  schemas"); the server rejects anything else, so a broken client can't corrupt the doc.
+- Documents over 4MB ask for a rotation (`onStatus({rotateWanted})`): a client that knows the
+  content model builds a fresh compact doc and `POST /api/v1/docs/<name>/rotate`s it.
+
 ## Resources (all CDN / CC0 — sites are static behind the gate, so any CDN works)
 
 You have no build step. Pull libraries straight from a CDN with a `<script>` tag or an ES
