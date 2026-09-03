@@ -8,12 +8,15 @@ import { sql, dbReady } from "./db";
 import { upsertSite, siteUrl, publishSiteDoc, getSite } from "./sites";
 import { allowDeploy } from "./ratelimit";
 import { postDeploy } from "./postdeploy";
+import { parseManifestPolicies } from "./policies";
 
 const SITE_NAME = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
 
 // Ownership: the first uploader owns a site; only the owner can overwrite it
-// (basic maintainer model). New sites are open to anyone.
+// (basic maintainer model). New sites are open to anyone — any person, that is: a
+// service token can write data but never publish code that every viewer then runs.
 async function requireOwner(site: string, who: Identity): Promise<void> {
+  if (who.kind === "service") throw new WorldsError("forbidden", "service identities cannot deploy sites");
   // Ownership lives in postgres, so without it there is no way to tell the owner from
   // anyone else — refuse rather than let a db blip open every site up to overwrite.
   if (!dbReady()) throw new WorldsError("maintenance", "database unavailable — deploys are paused");
@@ -66,6 +69,8 @@ async function finalizeDeploy(site: string, root: string, who: Identity): Promis
   if (await manifestFile.exists()) {
     manifest = await manifestFile.json().catch(() => ({}));
   }
+  // Validated before the swap so a bad manifest leaves the previous deploy serving.
+  const policies = parseManifestPolicies(manifest);
 
   const files = await walk(root);
   const bytes = files.reduce((n, f) => n + f.size, 0);
@@ -75,7 +80,7 @@ async function finalizeDeploy(site: string, root: string, who: Identity): Promis
   const deployId = `dp_${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`;
   let created = false;
   if (dbReady()) {
-    created = (await upsertSite(site, who, manifest)).created;
+    created = (await upsertSite(site, who, { ...manifest, policies })).created;
     await sql`
       INSERT INTO deploys (deploy_id, site, by_handle, by_name, files, bytes)
       VALUES (${deployId}, ${site}, ${who.handle}, ${who.name}, ${files.length}, ${bytes})`;

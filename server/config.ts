@@ -1,5 +1,37 @@
 const DEV_SESSION_SECRET = "insecure-dev-secret-change-me";
 
+export interface ServiceAccount {
+  email: string;
+  handle: string;
+  name?: string;
+}
+
+// WORLDS_SERVICE_TOKENS is JSON: {"<token>": {"email": "app@example.com", "handle": "app", "name": "App"}}.
+// A malformed value refuses to boot — a half-parsed table would silently lock services out.
+function parseServiceTokens(raw: string | undefined): Record<string, ServiceAccount> {
+  if (!raw) return {};
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error("WORLDS_SERVICE_TOKENS is not valid JSON");
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error("WORLDS_SERVICE_TOKENS must be an object keyed by token");
+  }
+  const out: Record<string, ServiceAccount> = {};
+  for (const [token, v] of Object.entries(parsed as Record<string, unknown>)) {
+    const acct = v as Partial<ServiceAccount> | null;
+    if (token.length < 16) throw new Error("WORLDS_SERVICE_TOKENS: tokens must be at least 16 characters");
+    if (!acct || typeof acct.email !== "string" || !acct.email.includes("@")) throw new Error(`WORLDS_SERVICE_TOKENS: entry needs an email`);
+    if (typeof acct.handle !== "string" || !/^[a-z0-9][a-z0-9._-]{0,63}$/.test(acct.handle)) {
+      throw new Error(`WORLDS_SERVICE_TOKENS: "${acct.email}" needs a handle matching ^[a-z0-9][a-z0-9._-]*$`);
+    }
+    out[token] = { email: acct.email, handle: acct.handle, ...(typeof acct.name === "string" ? { name: acct.name } : {}) };
+  }
+  return out;
+}
+
 export const config = {
   port: Number(process.env.WORLDS_PORT ?? 8420),
   dataDir: process.env.WORLDS_DATA_DIR ?? "./data",
@@ -44,6 +76,9 @@ export const config = {
   sessionSecret: process.env.WORLDS_SESSION_SECRET || DEV_SESSION_SECRET,
   // External origin for OAuth redirect_uri, e.g. https://world.example.com. Derived from the request if unset.
   publicOrigin: process.env.WORLDS_PUBLIC_ORIGIN || null,
+  serviceTokens: parseServiceTokens(process.env.WORLDS_SERVICE_TOKENS),
+  // Ceiling for a site's `.world.json` uploads.maxTotalBytes; unset = the platform default is the ceiling.
+  uploadQuotaMax: process.env.WORLDS_UPLOAD_QUOTA_MAX ? Number(process.env.WORLDS_UPLOAD_QUOTA_MAX) : null,
 };
 
 // Google mode HMACs the session cookie and the screenshot render token with this key,

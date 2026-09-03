@@ -13,6 +13,7 @@ const SYSTEM: Identity = {
   handle: "world",
   name: "Worlds",
   avatar: avatarFor("system@localhost"),
+  kind: "user",
 };
 
 // Runs at boot and again on every db reconnect, so two calls can overlap — and both

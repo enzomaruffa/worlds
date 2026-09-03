@@ -80,6 +80,8 @@ async function migratePostgres(): Promise<void> {
   // Universe layout: embedding-derived [x,y,z] (similar sites cluster), set async post-deploy.
   await sql`ALTER TABLE sites ADD COLUMN IF NOT EXISTS embed_pos jsonb`;
   await sql`ALTER TABLE sites ADD COLUMN IF NOT EXISTS screenshot text`;
+  // Per-site write rules from `.world.json` (see policies.ts).
+  await sql`ALTER TABLE sites ADD COLUMN IF NOT EXISTS policies jsonb NOT NULL DEFAULT '{}'`;
   await sql`
     CREATE TABLE IF NOT EXISTS deploys (
       deploy_id  text PRIMARY KEY,
@@ -145,9 +147,11 @@ async function migrateSqlite(): Promise<void> {
       category     TEXT NOT NULL DEFAULT 'misc',
       embed_pos    TEXT,
       screenshot   TEXT,
+      policies     TEXT NOT NULL DEFAULT '{}',
       created_at   TEXT NOT NULL DEFAULT (${NOW}),
       updated_at   TEXT NOT NULL DEFAULT (${NOW})
     )`);
+  await addSqliteColumn("sites", "policies", "TEXT NOT NULL DEFAULT '{}'");
   await sql.unsafe(`
     CREATE TABLE IF NOT EXISTS deploys (
       deploy_id TEXT PRIMARY KEY,
@@ -190,6 +194,14 @@ async function migrateSqlite(): Promise<void> {
       at         TEXT NOT NULL DEFAULT (${NOW})
     )`);
   await sql.unsafe(`CREATE INDEX IF NOT EXISTS events_scope ON events (site, collection, seq)`);
+}
+
+// SQLite has no ADD COLUMN IF NOT EXISTS; a database created before the column existed
+// needs the explicit check.
+async function addSqliteColumn(table: string, column: string, ddl: string): Promise<void> {
+  const cols = (await sql.unsafe(`PRAGMA table_info(${table})`)) as { name: string }[];
+  if (cols.some((c) => c.name === column)) return;
+  await sql.unsafe(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`);
 }
 
 // Run the hourly events prune exactly once (events are only needed for the replay

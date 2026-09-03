@@ -3,6 +3,9 @@ import { LIMITS } from "./config";
 import { WorldsError, json } from "./errors";
 import type { Identity } from "./identity";
 import {
+  collectionPolicy, maxDocBytes, requireAppendable, requireDocBytes, requireUrlFields, requireWriter,
+} from "./policies";
+import {
   asText, eqParam, jsonArg, jsonEq, jsonIncrement, jsonMerge, jsonNumber, jsonParam, jsonPath, jsonSize, jsonText,
   jsonValue, monotonicNow, NOW, timestampEq,
 } from "./dialect";
@@ -57,6 +60,10 @@ export async function createDoc(site: string, collection: string, body: unknown,
   requireDb();
   checkCollection(collection);
   checkDoc(body);
+  const policy = await collectionPolicy(site, collection);
+  requireWriter(policy, who);
+  requireDocBytes(policy, body);
+  requireUrlFields(policy, body);
   await checkQuotas(site, collection);
   const id = `doc_${crypto.randomUUID().replaceAll("-", "").slice(0, 16)}`;
   const [row] = await sql.unsafe(
@@ -87,10 +94,17 @@ export async function patchDoc(
   body: unknown,
   mode: "merge" | "replace",
   precondition: string | null,
+  who: Identity,
 ) {
   requireDb();
   checkCollection(collection);
   checkDoc(body);
+  const policy = await collectionPolicy(site, collection);
+  requireAppendable(policy, "updated");
+  requireWriter(policy, who);
+  requireUrlFields(policy, body);
+  if (mode === "replace") requireDocBytes(policy, body);
+  const maxBytes = maxDocBytes(policy);
   if (precondition && Number.isNaN(Date.parse(precondition))) {
     throw new WorldsError("invalid_request", "if-unmodified-since-version must be an ISO timestamp");
   }
@@ -108,7 +122,7 @@ export async function patchDoc(
          WHERE site = $1 AND collection = $2 AND id = $3 ${guard}
            AND ${jsonSize(merged)} <= $6
          RETURNING id, data, created_by, created_at, updated_at`,
-        [site, collection, id, precondition, jsonParam(body), LIMITS.docBytes],
+        [site, collection, id, precondition, jsonParam(body), maxBytes],
       )
     : await sql.unsafe(
         `UPDATE documents SET data = ${jsonArg("$5")}, updated_at = ${monotonicNow("updated_at")}
@@ -116,14 +130,14 @@ export async function patchDoc(
          RETURNING id, data, created_by, created_at, updated_at`,
         [site, collection, id, precondition, jsonParam(body)],
       );
-  if (!row) await explainFailedPatch(site, collection, id, precondition);
+  if (!row) await explainFailedPatch(site, collection, id, precondition, maxBytes);
   const doc = envelope(row as DocRow);
   await emitChange(site, collection, "update", doc);
   return json(doc);
 }
 
 // A patch matched no row for one of three reasons; re-read to say which. Always throws.
-async function explainFailedPatch(site: string, collection: string, id: string, precondition: string | null): Promise<never> {
+async function explainFailedPatch(site: string, collection: string, id: string, precondition: string | null, maxBytes: number): Promise<never> {
   const [cur] = await sql`
     SELECT id, data, created_by, created_at, updated_at FROM documents
     WHERE site = ${site} AND collection = ${collection} AND id = ${id}`;
@@ -131,12 +145,15 @@ async function explainFailedPatch(site: string, collection: string, id: string, 
   if (precondition && new Date(cur.updated_at).toISOString() !== precondition) {
     throw new WorldsError("conflict", "document changed since read", undefined, { doc: envelope(cur as DocRow) });
   }
-  throw new WorldsError("payload_too_large", `merged document would exceed ${LIMITS.docBytes / 1024}KB`);
+  throw new WorldsError("payload_too_large", `merged document would exceed ${maxBytes} bytes`);
 }
 
-export async function incrementDoc(site: string, collection: string, id: string, body: unknown) {
+export async function incrementDoc(site: string, collection: string, id: string, body: unknown, who: Identity) {
   requireDb();
   checkCollection(collection);
+  const policy = await collectionPolicy(site, collection);
+  requireAppendable(policy, "incremented");
+  requireWriter(policy, who);
   const { field, by = 1 } = (body ?? {}) as { field?: string; by?: number };
   // Number.isFinite, not typeof: NaN and Infinity are numbers that postgres rejects
   // mid-statement, which would surface as a 500 rather than a bad request.
@@ -157,9 +174,12 @@ export async function incrementDoc(site: string, collection: string, id: string,
   return json(doc);
 }
 
-export async function deleteDoc(site: string, collection: string, id: string) {
+export async function deleteDoc(site: string, collection: string, id: string, who: Identity) {
   requireDb();
   checkCollection(collection);
+  const policy = await collectionPolicy(site, collection);
+  requireAppendable(policy, "deleted");
+  requireWriter(policy, who);
   const rows = await sql`
     DELETE FROM documents
     WHERE site = ${site} AND collection = ${collection} AND id = ${id}

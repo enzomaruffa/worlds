@@ -5,7 +5,7 @@ info:
   title: Worlds API
   version: "1"
 paths:
-  /api/v1/me: { get: { summary: caller identity } }
+  /api/v1/me: { get: { summary: "caller identity: email, handle, name, avatar_url, kind (user|service; bearer tokens are services)" } }
   /api/v1/site: { get: { summary: calling site context (Host-derived) } }
   /api/v1/deploy: { post: { summary: multipart tarball -> live site } }
   /api/v1/sites: { get: { summary: site directory } }

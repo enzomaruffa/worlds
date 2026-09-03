@@ -2,6 +2,7 @@ import { LIMITS } from "./config";
 import { WorldsError, json } from "./errors";
 import { store } from "./blobstore";
 import { identityFrom, requireCsrf } from "./identity";
+import { uploadQuotaBytes } from "./policies";
 
 const UPLOAD_NAME = /^[\w][\w. -]{0,127}$/;
 
@@ -21,8 +22,9 @@ export async function putUpload(req: Request, site: string): Promise<Response> {
     throw new WorldsError("invalid_request", "bad upload name");
   }
   const used = await store.uploadsBytes(site);
-  if (used + file.size > LIMITS.uploadsPerSiteBytes) {
-    throw new WorldsError("quota_exceeded", "site upload quota (1GB) reached");
+  const quota = await uploadQuotaBytes(site);
+  if (used + file.size > quota) {
+    throw new WorldsError("quota_exceeded", `site upload quota (${Math.round(quota / 1024 / 1024)}MB) reached`);
   }
   const { size } = await store.putUpload(site, name, file);
   return json({

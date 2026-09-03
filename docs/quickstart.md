@@ -27,5 +27,30 @@ Optional `.world.json` at the folder root:
 Categories: `games`, `work`, `tools`, `experiments`, `misc` (default) — they decide which
 star system your world orbits on the universe map.
 
+### Write rules (`.world.json` → `collections`, `uploads`)
+
+By default every signed-in caller can write anything. A site can declare rules the server
+enforces on every write; a rule the manifest gets wrong fails the deploy instead of being dropped.
+
+```json
+{
+  "collections": {
+    "decisions": {"appendOnly": true, "writers": ["service:app"]},
+    "chat":      {"maxBytes": 16384, "urlFields": {"attachments[].url": ["/u/my-site/"]}}
+  },
+  "uploads": {"maxTotalBytes": 5368709120}
+}
+```
+
+- `appendOnly` — documents can be created, never updated, incremented or deleted (`forbidden`).
+- `writers` — `"user:<handle>"`, `"service:<handle>"` or `"*"`; anyone else gets `forbidden`.
+- `maxBytes` — a tighter per-document cap than the platform's 256KB (`payload_too_large`).
+- `urlFields` — dotted paths (`"a.b"`, `"items[].url"`) whose string values must start with one
+  of the prefixes (`invalid_request`). Keeps media references inside the sign-in boundary.
+- `uploads.maxTotalBytes` — the site's upload quota; can go below the default, and above it only
+  up to the operator's ceiling.
+
+Rules are read from the manifest of the current deploy: a bundle without them has none.
+
 What Worlds is not for: anything external-facing, secrets (there are no permissions),
 heavy compute, cron jobs. Scheduled reports become "refresh when opened, ping Slack when off".

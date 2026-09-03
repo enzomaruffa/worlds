@@ -8,7 +8,7 @@ Quotas are floors — they can go up, never down for existing behavior.
 | Collections per site | 50 |
 | Documents per collection | 50,000 |
 | Upload size | 25MB |
-| Uploads per site | 1GB |
+| Uploads per site | 1GB (a site's `.world.json` can lower it, or raise it up to the operator's `WORLDS_UPLOAD_QUOTA_MAX`) |
 | AI completions | 200 / user / day |
 | AI images | 50 / user / day |
 | Slack notifies | 50 / user / day |

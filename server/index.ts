@@ -106,12 +106,12 @@ async function api(req: Request, url: URL, site: string): Promise<Response> {
     const who = identityFrom(req);
     if (method === "GET") {
       const prof = await resolveProfile(who.handle, who.email);
-      return json({ email: who.email, handle: prof.handle, name: prof.name, avatar_url: prof.avatar_url });
+      return json({ email: who.email, handle: prof.handle, name: prof.name, avatar_url: prof.avatar_url, kind: who.kind });
     }
     if (method === "PUT") {
       requireCsrf(req);
       const prof = await updateProfile(who.handle, who.email, await req.json().catch(() => ({})));
-      return json({ email: who.email, handle: prof.handle, name: prof.name, avatar_url: prof.avatar_url });
+      return json({ email: who.email, handle: prof.handle, name: prof.name, avatar_url: prof.avatar_url, kind: who.kind });
     }
   }
   if (p[0] === "site" && method === "GET") {
@@ -171,12 +171,12 @@ async function api(req: Request, url: URL, site: string): Promise<Response> {
       const id = p[2]!;
       const pre = req.headers.get("if-unmodified-since-version");
       if (method === "GET") return dbapi.getDoc(readSite, collection, id);
-      if (method === "PATCH") return dbapi.patchDoc(site, collection, id, await req.json().catch(() => null), "merge", pre);
-      if (method === "PUT") return dbapi.patchDoc(site, collection, id, await req.json().catch(() => null), "replace", pre);
-      if (method === "DELETE") return dbapi.deleteDoc(site, collection, id);
+      if (method === "PATCH") return dbapi.patchDoc(site, collection, id, await req.json().catch(() => null), "merge", pre, who);
+      if (method === "PUT") return dbapi.patchDoc(site, collection, id, await req.json().catch(() => null), "replace", pre, who);
+      if (method === "DELETE") return dbapi.deleteDoc(site, collection, id, who);
     }
     if (p.length === 4 && p[3] === "increment" && method === "POST") {
-      return dbapi.incrementDoc(site, collection, p[2]!, await req.json().catch(() => null));
+      return dbapi.incrementDoc(site, collection, p[2]!, await req.json().catch(() => null), who);
     }
   }
 
@@ -255,7 +255,7 @@ const server = Bun.serve<SocketData, never>({
       if (url.pathname === "/api/v1/socket") {
         const raw = identityFrom(req);
         const prof = await resolveProfile(raw.handle, raw.email);
-        const who = { email: raw.email, handle: prof.handle, name: prof.name, avatar: prof.avatar_url };
+        const who = { email: raw.email, handle: prof.handle, name: prof.name, avatar: prof.avatar_url, kind: raw.kind };
         if (srv.upgrade(req, { data: { who, site, subs: new Map() } })) return undefined as never;
         throw new WorldsError("invalid_request", "expected websocket upgrade");
       }

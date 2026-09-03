@@ -7,6 +7,7 @@ export interface Identity {
   handle: string; // email local-part, lowercased — frozen rule (creator URLs)
   name: string;
   avatar: string;
+  kind: "user" | "service"; // service = a bearer-token caller (an app or agent), never a person
 }
 
 // Deterministic avatar from the email (Gravatar if they have one, identicon
@@ -30,10 +31,26 @@ const EMAIL_HEADERS = ["x-auth-request-email", "cf-access-authenticated-user-ema
 
 function mk(email: string, name?: string, picture?: string): Identity {
   const handle = email.split("@")[0]!.toLowerCase();
-  return { email, handle, name: name || deriveName(handle), avatar: picture || avatarFor(email) };
+  return { email, handle, name: name || deriveName(handle), avatar: picture || avatarFor(email), kind: "user" };
+}
+
+// Services and agents can't hold a browser session. They present a bearer token that the
+// operator mapped to a fixed identity (WORLDS_SERVICE_TOKENS). A token that is present but
+// unknown is refused outright rather than falling through to another scheme.
+function serviceFrom(req: Request): Identity | null {
+  const header = req.headers.get("authorization");
+  if (!header) return null;
+  const m = /^Bearer\s+(\S+)$/i.exec(header);
+  if (!m) throw new WorldsError("unauthorized", "malformed authorization header");
+  const svc = config.serviceTokens[m[1]!];
+  if (!svc) throw new WorldsError("unauthorized", "unknown service token");
+  return { email: svc.email, handle: svc.handle, name: svc.name ?? deriveName(svc.handle), avatar: avatarFor(svc.email), kind: "service" };
 }
 
 export function identityFrom(req: Request): Identity {
+  const svc = serviceFrom(req);
+  if (svc) return svc;
+
   // Dev: stub identity (a header may still override, for impersonation in tests).
   if (config.dev) return mk(req.headers.get("x-auth-request-email") || "dev@localhost");
 

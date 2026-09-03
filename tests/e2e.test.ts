@@ -15,6 +15,8 @@ const S1 = `t1-${RUN}`;
 const S2 = `t2-${RUN}`;
 let proc: ReturnType<typeof Bun.spawn>;
 let dataDir: string;
+const SVC_TOKEN = "test-service-token-0123456789";
+const asService = { authorization: `Bearer ${SVC_TOKEN}` };
 
 function req(method: string, path: string, opts: { body?: unknown; form?: FormData; site?: string; headers?: Record<string, string> } = {}) {
   const headers: Record<string, string> = {
@@ -51,7 +53,10 @@ beforeAll(async () => {
   dataDir = await mkdtemp(join(tmpdir(), "world-data-"));
   proc = Bun.spawn(["bun", "server/index.ts"], {
     cwd: new URL("..", import.meta.url).pathname,
-    env: { ...process.env, WORLDS_PORT: String(PORT), WORLDS_DATA_DIR: dataDir, WORLDS_DEV: "1", WORLDS_DISABLE_WORKERS: "1", WORLDS_SEED: "0" },
+    env: {
+      ...process.env, WORLDS_PORT: String(PORT), WORLDS_DATA_DIR: dataDir, WORLDS_DEV: "1", WORLDS_DISABLE_WORKERS: "1", WORLDS_SEED: "0",
+      WORLDS_SERVICE_TOKENS: JSON.stringify({ [SVC_TOKEN]: { email: "app@localhost", handle: "app", name: "App" } }),
+    },
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -880,5 +885,138 @@ describe("path routing (WORLDS_ROUTING=path)", () => {
     })).json();
     expect(put.url).toBe(`/u/${SITE}/p.txt`);
     expect(await (await fetch(`${PB}${put.url}`)).text()).toBe("path bytes");
+  });
+});
+
+describe("service identities", () => {
+  test("a known bearer token is a service identity", async () => {
+    const me = await (await req("GET", "/api/v1/me", { headers: asService })).json();
+    expect(me).toMatchObject({ email: "app@localhost", handle: "app", name: "App", kind: "service" });
+  });
+
+  test("people are kind: user", async () => {
+    const me = await (await req("GET", "/api/v1/me")).json();
+    expect(me.kind).toBe("user");
+  });
+
+  test("an unknown bearer token is refused, not downgraded", async () => {
+    const res = await req("GET", "/api/v1/me", { headers: { authorization: "Bearer nope-nope-nope-nope-nope" } });
+    expect(res.status).toBe(401);
+    expect((await res.json()).error.code).toBe("unauthorized");
+  });
+
+  test("a service can write documents but never deploy a site", async () => {
+    const doc = await req("POST", "/api/v1/db/svc_notes", { body: { text: "hi" }, headers: asService });
+    expect(doc.status).toBe(200);
+    expect((await doc.json()).created_by).toBe("app");
+
+    const form = new FormData();
+    form.set("site", `${S1}-svc`);
+    form.set("bundle", await bundle({ "index.html": "<h1>svc</h1>" }), "bundle.tgz");
+    const res = await req("POST", "/api/v1/deploy", { form, site: "home", headers: asService });
+    expect(res.status).toBe(403);
+  });
+
+  test("the socket accepts a bearer token", async () => {
+    const ws = new WebSocket(`ws://localhost:${PORT}/api/v1/socket`, {
+      protocols: ["worlds.v1"],
+      headers: { host: `${S1}.worlds.localhost`, ...asService },
+    } as never);
+    const ack = new Promise<string>((resolve) => {
+      ws.onmessage = (m) => resolve(String(m.data));
+    });
+    await new Promise((r) => (ws.onopen = r));
+    ws.send(JSON.stringify({ op: "sub", id: "s1", kind: "channel", channel: "svc-room", presence: true }));
+    const first = JSON.parse(await ack);
+    expect(["ack", "presence"]).toContain(first.op);
+    ws.close();
+  });
+});
+
+describe("collection policies", () => {
+  const P = `t-pol-${RUN}`;
+  const manifest = {
+    collections: {
+      decisions: { appendOnly: true, writers: ["service:app"] },
+      chat: { maxBytes: 128, urlFields: { "attachments[].url": [`/u/${P}/`] } },
+    },
+    uploads: { maxTotalBytes: 2048 },
+  };
+
+  beforeAll(async () => {
+    const res = await deploy(P, { "index.html": "<h1>pol</h1>", ".world.json": JSON.stringify(manifest) });
+    expect(res.status).toBe(200);
+  });
+
+  test("writers: a person is refused, the listed service writes", async () => {
+    const denied = await req("POST", "/api/v1/db/decisions", { body: { text: "x" }, site: P });
+    expect(denied.status).toBe(403);
+    expect((await denied.json()).error.code).toBe("forbidden");
+    const ok = await req("POST", "/api/v1/db/decisions", { body: { text: "x" }, site: P, headers: asService });
+    expect(ok.status).toBe(200);
+  });
+
+  test("appendOnly: no update, replace, increment or delete — even for the writer", async () => {
+    const doc = await (await req("POST", "/api/v1/db/decisions", { body: { text: "y", n: 1 }, site: P, headers: asService })).json();
+    const base = `/api/v1/db/decisions/${doc.id}`;
+    for (const [method, path, body] of [
+      ["PATCH", base, { text: "z" }],
+      ["PUT", base, { text: "z" }],
+      ["POST", `${base}/increment`, { field: "n" }],
+      ["DELETE", base, undefined],
+    ] as const) {
+      const res = await req(method, path, { body, site: P, headers: asService });
+      expect(res.status).toBe(403);
+      expect((await res.json()).error.message).toContain("append-only");
+    }
+    expect((await (await req("GET", base, { site: P })).json()).data.text).toBe("y");
+  });
+
+  test("maxBytes tightens the document limit for one collection", async () => {
+    const res = await req("POST", "/api/v1/db/chat", { body: { text: "x".repeat(200) }, site: P });
+    expect(res.status).toBe(413);
+    expect((await req("POST", "/api/v1/db/chat", { body: { text: "short" }, site: P })).status).toBe(200);
+  });
+
+  test("urlFields: attachments must point at this site's uploads", async () => {
+    const bad = await req("POST", "/api/v1/db/chat", { body: { text: "a", attachments: [{ url: "https://evil.example/x.png" }] }, site: P });
+    expect(bad.status).toBe(400);
+    expect((await bad.json()).error.message).toContain("attachments[].url");
+    const ok = await req("POST", "/api/v1/db/chat", { body: { text: "a", attachments: [{ url: `/u/${P}/x.png` }] }, site: P });
+    expect(ok.status).toBe(200);
+    // a merge patch is checked too
+    const doc = await ok.json();
+    const patched = await req("PATCH", `/api/v1/db/chat/${doc.id}`, { body: { attachments: [{ url: "http://x/" }] }, site: P });
+    expect(patched.status).toBe(400);
+  });
+
+  test("unpoliced collections on the same site stay open", async () => {
+    const doc = await (await req("POST", "/api/v1/db/free", { body: { n: 1 }, site: P })).json();
+    expect((await req("PATCH", `/api/v1/db/free/${doc.id}`, { body: { n: 2 }, site: P })).status).toBe(200);
+    expect((await req("DELETE", `/api/v1/db/free/${doc.id}`, { site: P })).status).toBe(200);
+  });
+
+  test("uploads.maxTotalBytes lowers the site's upload quota", async () => {
+    const form = new FormData();
+    form.set("file", new Blob(["x".repeat(4096)]), "big.txt");
+    const res = await req("POST", "/api/v1/uploads", { form, site: P });
+    expect(res.status).toBe(429);
+    expect((await res.json()).error.code).toBe("quota_exceeded");
+  });
+
+  test("a malformed policy fails the deploy and keeps the old site serving", async () => {
+    const res = await deploy(P, {
+      "index.html": "<h1>broken</h1>",
+      ".world.json": JSON.stringify({ collections: { decisions: { writers: "app" } } }),
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.message).toContain("writers");
+    expect(await (await req("GET", "/", { site: P })).text()).toContain("pol");
+  });
+
+  test("redeploying without policies removes them", async () => {
+    await deploy(P, { "index.html": "<h1>open</h1>" });
+    const res = await req("POST", "/api/v1/db/decisions", { body: { text: "anyone" }, site: P });
+    expect(res.status).toBe(200);
   });
 });

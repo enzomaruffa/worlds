@@ -13,10 +13,16 @@ Every `on*`/`subscribe` returns an unsubscribe function.
 ## Identity
 
 ```js
-const me = await worlds.me();   // {email, name, handle, avatar_url}
+const me = await worlds.me();   // {email, name, handle, avatar_url, kind}
 await worlds.ready;             // resolves once the site context is loaded
 worlds.site;                    // {name, url} — populated after `await worlds.ready`
 ```
+
+`kind` is `"user"` for a person and `"service"` for a non-browser caller. Services (an app
+backend, an agent) authenticate with `Authorization: Bearer <token>`, where the operator maps
+each token to a fixed identity (`WORLDS_SERVICE_TOKENS`). A service can read and write data
+and documents under the same rules as anyone else, but can never deploy a site. Every
+document's `created_by` is that caller's handle, stamped by the server.
 
 ## Errors
 
