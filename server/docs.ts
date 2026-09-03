@@ -2,7 +2,7 @@ import * as Y from "yjs";
 import { sql, dbReady, requireDb } from "./db";
 import { WorldsError } from "./errors";
 import type { Identity } from "./identity";
-import { docSchemaFor, validateTree, type Violation } from "./docschema";
+import { checkRefs, docSchemaFor, validateTree, type DocSchema, type Violation } from "./docschema";
 
 // Server-held collaborative documents. A doc is one Yjs document per (site, name); the
 // server holds the authoritative Y.Doc while anyone is connected, and Postgres/SQLite holds a
@@ -196,19 +196,19 @@ class DocRoom {
     const schema = await docSchemaFor(this.site, this.name);
     let accepted = batch;
     let merged = mergeSafe(batch.map((p) => p.update));
-    let violation = merged ? this.tryApply(merged, schema) : BAD_ENCODING;
+    let violation = merged ? await this.tryApply(merged, schema) : BAD_ENCODING;
     if (violation && batch.length > 1) {
       // One bad update shouldn't take the rest of the batch with it: keep the ones that
       // pass on their own.
       accepted = [];
       for (const p of batch) {
-        const v = this.tryApply(p.update, schema);
+        const v = await this.tryApply(p.update, schema);
         if (v) this.reject(p, v);
         else accepted.push(p);
       }
       if (!accepted.length) return;
       merged = mergeSafe(accepted.map((p) => p.update));
-      violation = merged ? this.tryApply(merged, schema) : BAD_ENCODING;
+      violation = merged ? await this.tryApply(merged, schema) : BAD_ENCODING;
     }
     if (violation || !merged) {
       for (const p of accepted) this.reject(p, violation ?? BAD_ENCODING);
@@ -251,7 +251,7 @@ class DocRoom {
     }
   }
 
-  private tryApply(update: Uint8Array, schema: Awaited<ReturnType<typeof docSchemaFor>>): Violation | null {
+  private async tryApply(update: Uint8Array, schema: DocSchema | null): Promise<Violation | null> {
     const scratch = new Y.Doc({ gc: true });
     try {
       Y.applyUpdate(scratch, Y.encodeStateAsUpdate(this.ydoc));
@@ -260,9 +260,18 @@ class DocRoom {
       scratch.destroy();
       return { rule: "encoding", message: `update is not a valid Yjs update: ${(e as Error).message}` };
     }
-    const v = schema ? validateTree(scratch, schema) : null;
-    scratch.destroy();
-    return v;
+    try {
+      return await this.validate(scratch, schema);
+    } finally {
+      scratch.destroy();
+    }
+  }
+
+  private async validate(doc: Y.Doc, schema: DocSchema | null): Promise<Violation | null> {
+    if (!schema) return null;
+    const check = validateTree(doc, schema, Y.encodeStateAsUpdate(doc).byteLength);
+    if (check.violation) return check.violation;
+    return check.refs.length ? checkRefs(this.site, check.refs) : null;
   }
 
   private reject(p: Pending, v: Violation): void {
@@ -300,8 +309,7 @@ class DocRoom {
       fresh.destroy();
       throw new WorldsError("invalid_request", `state is not a valid Yjs update: ${(e as Error).message}`);
     }
-    const schema = await docSchemaFor(this.site, this.name);
-    const v = schema ? validateTree(fresh, schema) : null;
+    const v = await this.validate(fresh, await docSchemaFor(this.site, this.name));
     if (v) {
       fresh.destroy();
       throw new WorldsError("invalid_request", v.message, undefined, { rule: v.rule });

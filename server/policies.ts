@@ -2,6 +2,7 @@ import { LIMITS, config } from "./config";
 import { sql, dbReady } from "./db";
 import { WorldsError } from "./errors";
 import type { Identity } from "./identity";
+import { LEXICAL_COMMON_ATTRS, SCHEMA_DEFAULTS, type AttrRule, type DocSchema, type NodeRule } from "./docschema";
 
 // Per-site rules declared in `.world.json` and applied by the server on every write.
 // Without them every collection is open to every signed-in caller, which is right for
@@ -24,9 +25,10 @@ export interface CollectionPolicy {
 export interface SitePolicies {
   collections: Record<string, CollectionPolicy>;
   uploads: { maxTotalBytes?: number };
+  docs: Record<string, DocSchema>; // glob on the document name → its tree schema
 }
 
-export const NO_POLICIES: SitePolicies = { collections: {}, uploads: {} };
+export const NO_POLICIES: SitePolicies = { collections: {}, uploads: {}, docs: {} };
 
 const COLLECTION = /^[a-z0-9_-]{1,64}$/;
 const WRITER = /^(\*|(user|service):[a-z0-9][a-z0-9._-]{0,63})$/;
@@ -38,10 +40,122 @@ function bad(msg: string): never {
 
 // A broken policy fails the deploy. Dropping it silently would leave a collection the
 // owner believes is protected wide open.
+const ATTR_RULE_KEYS = new Set(["type", "enum", "maxLen", "min", "max", "urlPrefix", "ref", "nullable"]);
+const ATTR_TYPES = new Set(["string", "int", "number", "bool", "json", "any"]);
+
+function parseAttrRule(where: string, raw: unknown): AttrRule {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) bad(`${where} must be an object`);
+  const r = raw as Record<string, unknown>;
+  for (const k of Object.keys(r)) if (!ATTR_RULE_KEYS.has(k)) bad(`${where}.${k} is not a known attribute rule`);
+  const rule: AttrRule = {};
+  if (r.type !== undefined) {
+    if (typeof r.type !== "string" || !ATTR_TYPES.has(r.type)) bad(`${where}.type must be one of ${[...ATTR_TYPES].join(", ")}`);
+    rule.type = r.type as AttrRule["type"];
+  }
+  if (r.enum !== undefined) {
+    if (!Array.isArray(r.enum) || !r.enum.length || !r.enum.every((v) => v === null || ["string", "number", "boolean"].includes(typeof v))) {
+      bad(`${where}.enum must be a non-empty array of scalars`);
+    }
+    rule.enum = r.enum as AttrRule["enum"];
+  }
+  for (const k of ["maxLen", "min", "max"] as const) {
+    if (r[k] !== undefined) {
+      if (typeof r[k] !== "number" || !Number.isFinite(r[k])) bad(`${where}.${k} must be a number`);
+      rule[k] = r[k] as number;
+    }
+  }
+  if (r.urlPrefix !== undefined) {
+    if (!Array.isArray(r.urlPrefix) || !r.urlPrefix.length || !r.urlPrefix.every((p) => typeof p === "string" && p)) bad(`${where}.urlPrefix must be a non-empty array of prefixes`);
+    rule.urlPrefix = r.urlPrefix as string[];
+  }
+  if (r.ref !== undefined) {
+    if (typeof r.ref !== "string" || !COLLECTION.test(r.ref)) bad(`${where}.ref must be a collection name`);
+    rule.ref = r.ref;
+  }
+  if (r.nullable !== undefined) {
+    if (typeof r.nullable !== "boolean") bad(`${where}.nullable must be a boolean`);
+    rule.nullable = r.nullable;
+  }
+  return rule;
+}
+
+const NODE_TYPE = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
+
+function parseDocSchema(where: string, raw: unknown): DocSchema {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) bad(`${where} must be an object`);
+  const r = raw as Record<string, unknown>;
+  for (const k of Object.keys(r)) if (!["root", "typeAttr", "nodes", "commonAttrs", "limits"].includes(k)) bad(`${where}.${k} is not a known schema key`);
+  const root = r.root === undefined ? SCHEMA_DEFAULTS.root : r.root;
+  const typeAttr = r.typeAttr === undefined ? SCHEMA_DEFAULTS.typeAttr : r.typeAttr;
+  if (typeof root !== "string" || !NODE_TYPE.test(root)) bad(`${where}.root must be a name`);
+  if (typeof typeAttr !== "string" || !typeAttr) bad(`${where}.typeAttr must be a name`);
+  if (typeof r.nodes !== "object" || r.nodes === null || Array.isArray(r.nodes)) bad(`${where}.nodes must be an object keyed by node type`);
+  const nodes: Record<string, NodeRule> = {};
+  for (const [type, spec] of Object.entries(r.nodes as Record<string, unknown>)) {
+    if (!NODE_TYPE.test(type)) bad(`${where}.nodes."${type}" is not a valid node type`);
+    if (typeof spec !== "object" || spec === null || Array.isArray(spec)) bad(`${where}.nodes.${type} must be an object`);
+    const s = spec as Record<string, unknown>;
+    for (const k of Object.keys(s)) if (!["attrs", "children", "maxText"].includes(k)) bad(`${where}.nodes.${type}.${k} is not a known node rule`);
+    const rule: NodeRule = {};
+    if (s.attrs !== undefined) {
+      if (typeof s.attrs !== "object" || s.attrs === null || Array.isArray(s.attrs)) bad(`${where}.nodes.${type}.attrs must be an object`);
+      rule.attrs = {};
+      for (const [name, ar] of Object.entries(s.attrs as Record<string, unknown>)) rule.attrs[name] = parseAttrRule(`${where}.nodes.${type}.attrs.${name}`, ar);
+    }
+    if (s.children !== undefined) {
+      if (!Array.isArray(s.children) || !s.children.every((c) => typeof c === "string" && NODE_TYPE.test(c))) bad(`${where}.nodes.${type}.children must be an array of node types`);
+      rule.children = s.children as string[];
+    }
+    if (s.maxText !== undefined) {
+      if (!Number.isInteger(s.maxText) || (s.maxText as number) < 0) bad(`${where}.nodes.${type}.maxText must be a non-negative integer`);
+      rule.maxText = s.maxText as number;
+    }
+    nodes[type] = rule;
+  }
+  if (!nodes[root]) bad(`${where}.nodes must declare the root node "${root}"`);
+  for (const [type, rule] of Object.entries(nodes)) {
+    for (const c of rule.children ?? []) if (!nodes[c]) bad(`${where}.nodes.${type}.children names undeclared type "${c}"`);
+  }
+  const commonAttrs: Record<string, AttrRule> = { ...LEXICAL_COMMON_ATTRS };
+  if (r.commonAttrs !== undefined) {
+    if (typeof r.commonAttrs !== "object" || r.commonAttrs === null || Array.isArray(r.commonAttrs)) bad(`${where}.commonAttrs must be an object`);
+    for (const [name, ar] of Object.entries(r.commonAttrs as Record<string, unknown>)) commonAttrs[name] = parseAttrRule(`${where}.commonAttrs.${name}`, ar);
+  }
+  const limits: DocSchema["limits"] = { depth: SCHEMA_DEFAULTS.depth, bytes: SCHEMA_DEFAULTS.bytes, nodes: SCHEMA_DEFAULTS.nodes, textChars: SCHEMA_DEFAULTS.textChars, perType: {} };
+  if (r.limits !== undefined) {
+    if (typeof r.limits !== "object" || r.limits === null || Array.isArray(r.limits)) bad(`${where}.limits must be an object`);
+    const l = r.limits as Record<string, unknown>;
+    for (const k of Object.keys(l)) if (!["depth", "bytes", "nodes", "textChars", "perType"].includes(k)) bad(`${where}.limits.${k} is not a known limit`);
+    for (const k of ["depth", "bytes", "nodes", "textChars"] as const) {
+      if (l[k] !== undefined) {
+        if (!Number.isInteger(l[k]) || (l[k] as number) < 1) bad(`${where}.limits.${k} must be a positive integer`);
+        limits[k] = l[k] as number;
+      }
+    }
+    if (l.perType !== undefined) {
+      if (typeof l.perType !== "object" || l.perType === null || Array.isArray(l.perType)) bad(`${where}.limits.perType must be an object`);
+      for (const [type, n] of Object.entries(l.perType as Record<string, unknown>)) {
+        if (!nodes[type]) bad(`${where}.limits.perType names undeclared type "${type}"`);
+        if (!Number.isInteger(n) || (n as number) < 0) bad(`${where}.limits.perType.${type} must be a non-negative integer`);
+        limits.perType[type] = n as number;
+      }
+    }
+  }
+  return { root, typeAttr, nodes, commonAttrs, limits };
+}
+
 export function parseManifestPolicies(manifest: unknown): SitePolicies {
-  const out: SitePolicies = { collections: {}, uploads: {} };
+  const out: SitePolicies = { collections: {}, uploads: {}, docs: {} };
   if (typeof manifest !== "object" || manifest === null) return out;
   const m = manifest as Record<string, unknown>;
+
+  if (m.docs !== undefined) {
+    if (typeof m.docs !== "object" || m.docs === null || Array.isArray(m.docs)) bad("docs must be an object keyed by document name pattern");
+    for (const [pattern, schema] of Object.entries(m.docs as Record<string, unknown>)) {
+      if (!/^[a-z0-9*][a-z0-9._*-]{0,63}$/.test(pattern)) bad(`docs."${pattern}" is not a valid document name pattern`);
+      out.docs[pattern] = parseDocSchema(`docs.${pattern}`, schema);
+    }
+  }
 
   if (m.collections !== undefined) {
     if (typeof m.collections !== "object" || m.collections === null || Array.isArray(m.collections)) {
@@ -118,7 +232,7 @@ export async function sitePolicies(site: string): Promise<SitePolicies> {
   const raw = row?.policies;
   const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
   const policies: SitePolicies = parsed && typeof parsed === "object"
-    ? { collections: parsed.collections ?? {}, uploads: parsed.uploads ?? {} }
+    ? { collections: parsed.collections ?? {}, uploads: parsed.uploads ?? {}, docs: parsed.docs ?? {} }
     : NO_POLICIES;
   cache.set(site, { at: Date.now(), policies });
   return policies;

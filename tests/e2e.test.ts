@@ -1028,10 +1028,10 @@ describe("worlds.doc", () => {
   const unb64 = (s: string) => new Uint8Array(Buffer.from(s, "base64"));
 
   // A socket client holding a Y.Doc wired the way sdk/src/doc.ts wires it.
-  async function client(docName: string, headers: Record<string, string> = {}) {
+  async function client(docName: string, headers: Record<string, string> = {}, site = S1) {
     const ws = new WebSocket(`ws://localhost:${PORT}/api/v1/socket`, {
       protocols: ["worlds.v1"],
-      headers: { host: `${S1}.worlds.localhost`, ...headers },
+      headers: { host: `${site}.worlds.localhost`, ...headers },
     } as never);
     let ydoc = new Y.Doc();
     let epoch = 0;
@@ -1079,6 +1079,7 @@ describe("worlds.doc", () => {
     }
     return {
       ws, frames, next,
+      get ydoc() { return ydoc; },
       text: () => ydoc.get("root", Y.XmlText).toString(),
       type: (s: string) => ydoc.get("root", Y.XmlText).insert(ydoc.get("root", Y.XmlText).length, s),
       set epoch(e: number) { epoch = e; },
@@ -1185,6 +1186,88 @@ describe("worlds.doc", () => {
     expect(reset.epoch).toBe(2);
     expect(a.text()).toBe("compact");
     a.close();
+  });
+
+  describe("with a declared schema", () => {
+    const SD = `t-schema-${RUN}`;
+    const manifest = {
+      collections: { decisions: { appendOnly: true } },
+      docs: {
+        "plan-*": {
+          nodes: {
+            root: { children: ["paragraph", "decision"] },
+            paragraph: { children: ["text"] },
+            text: {},
+            decision: { attrs: { __id: { ref: "decisions" } } },
+          },
+        },
+      },
+    };
+    const base = { __format: 0, __style: "", __indent: 0, __dir: null, __textFormat: 0, __textStyle: "" };
+
+    beforeAll(async () => {
+      expect((await deploy(SD, { "index.html": "<h1>schema</h1>", ".world.json": JSON.stringify(manifest) })).status).toBe(200);
+    });
+
+    function paragraph(root: Y.XmlText, text: string): void {
+      const p = new Y.XmlText();
+      root.insertEmbed(root.length, p);
+      for (const [k, v] of Object.entries({ __type: "paragraph", ...base })) p.setAttribute(k, v as string);
+      const run = new Y.Map();
+      p.insertEmbed(0, run);
+      for (const [k, v] of Object.entries({ __type: "text", __format: 0, __style: "", __mode: 0, __detail: 0 })) run.set(k, v);
+      p.insert(1, text);
+    }
+
+    test("a well-formed update commits; an undeclared node is rejected and the doc is untouched", async () => {
+      const a = await client("plan-schema", {}, SD);
+      a.ydoc.transact(() => paragraph(a.ydoc.get("root", Y.XmlText), "fine"));
+      await a.next((f) => f.op === "doc_ack" && f.seq === 1);
+
+      a.ydoc.transact(() => {
+        const bad = new Y.XmlElement();
+        a.ydoc.get("root", Y.XmlText).insertEmbed(a.ydoc.get("root", Y.XmlText).length, bad);
+        bad.setAttribute("__type", "script");
+      });
+      const rejected = await a.next((f) => f.op === "doc_rejected");
+      expect(rejected.rule).toBe("type");
+      expect(rejected.reason).toContain('"script"');
+      // the client resynced from the state in the frame: the script node is gone
+      const got = await (await req("GET", "/api/v1/docs/plan-schema", { site: SD })).json();
+      expect(got.seq).toBe(1);
+      a.close();
+    });
+
+    test("a projection must reference an existing record", async () => {
+      const a = await client("plan-refs", {}, SD);
+      const decision = (id: string) =>
+        a.ydoc.transact(() => {
+          const el = new Y.XmlElement();
+          a.ydoc.get("root", Y.XmlText).insertEmbed(a.ydoc.get("root", Y.XmlText).length, el);
+          el.setAttribute("__type", "decision");
+          el.setAttribute("__id", id);
+        });
+      decision("doc_missing");
+      const rejected = await a.next((f) => f.op === "doc_rejected");
+      expect(rejected.rule).toBe("ref");
+
+      const rec = await (await req("POST", "/api/v1/db/decisions", { body: { text: "we decided" }, site: SD })).json();
+      decision(rec.id);
+      await a.next((f) => f.op === "doc_ack" && f.seq === 1);
+      a.close();
+    });
+
+    test("the HTTP path reports the violation as invalid_request with its rule", async () => {
+      const d = new Y.Doc();
+      const el = new Y.XmlElement();
+      d.get("root", Y.XmlText).insertEmbed(0, el);
+      el.setAttribute("__type", "iframe");
+      const res = await req("POST", "/api/v1/docs/plan-http-bad/updates", { body: { epoch: 1, update: b64(Y.encodeStateAsUpdate(d)) }, site: SD, headers: asService });
+      expect(res.status).toBe(400);
+      const err = (await res.json()).error;
+      expect(err.code).toBe("invalid_request");
+      expect(err.rule).toBe("type");
+    });
   });
 
   test("an idle document is snapshotted and served identically afterwards", async () => {
