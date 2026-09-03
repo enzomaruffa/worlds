@@ -8,6 +8,8 @@ import { WorldsError } from "./errors";
 // upstream proxy injects the verified email instead and these routes are unused.
 
 const COOKIE = "world_session";
+// Dev-only identity switch (see /auth/dev below and identityFrom in identity.ts).
+export const DEV_USER_COOKIE = "worlds_dev_user";
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const GOOGLE_AUTH = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN = "https://oauth2.googleapis.com/token";
@@ -61,7 +63,7 @@ function unseal<T>(token: string | undefined | null): T | null {
   }
 }
 
-function readCookie(req: Request, name: string): string | null {
+export function readCookie(req: Request, name: string): string | null {
   const m = (req.headers.get("cookie") ?? "").match(new RegExp(`(?:^|;\\s*)${name}=([^;]+)`));
   if (!m) return null;
   try {
@@ -244,7 +246,46 @@ function signinPage(rd: string): Response {
   return new Response(html, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
 }
 
+// Dev-only identity switch: no Google round-trip, just pick who you are. `?as=` sets
+// the cookie identityFrom reads (see identity.ts); omitting it clears it, or — for a
+// browser navigation — shows a form so a person can switch without crafting the URL.
+function devLoginPage(rd: string): Response {
+  const target = rd.replace(/"/g, "&quot;");
+  const html = `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Dev sign-in · Worlds</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  body { font: 15px/1.5 ui-sans-serif,system-ui,-apple-system,sans-serif; max-width: 360px; margin: 96px auto; color: #e4e4e7; background: #09090b }
+  input { width: 100%; box-sizing: border-box; padding: 8px 10px; font-size: 14px; margin-top: 12px; border-radius: 6px; border: 1px solid #3f3f46; background: #18181b; color: inherit }
+  button { margin-top: 12px; padding: 8px 16px; border-radius: 6px; border: 0; background: #f59e0b; color: #09090b; font-weight: 600; cursor: pointer }
+</style></head><body>
+<h1>Dev sign-in</h1>
+<p>Worlds is running with <code>WORLDS_DEV=1</code> — pick an identity to test as.</p>
+<form method="get" action="/auth/dev">
+  <input name="as" type="email" placeholder="you@localhost" required autofocus>
+  <input type="hidden" name="rd" value="${target}">
+  <button type="submit">Sign in</button>
+</form>
+</body></html>`;
+  return new Response(html, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
+}
+
 export async function handleAuth(req: Request, path: string): Promise<Response> {
+  if (path === "/auth/dev") {
+    if (!config.dev) throw new WorldsError("not_found", "not found");
+    const u = new URL(req.url);
+    const rd = safeReturn(u.searchParams.get("rd") ?? undefined);
+    const as = u.searchParams.get("as");
+    if (as === null) {
+      if ((req.headers.get("accept") ?? "").includes("text/html")) return devLoginPage(rd);
+      return redirect(rd, `${DEV_USER_COOKIE}=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax`);
+    }
+    const email = as.trim().toLowerCase();
+    if (!email) throw new WorldsError("invalid_request", "as must not be empty");
+    const cookie = `${DEV_USER_COOKIE}=${encodeURIComponent(email)}; Max-Age=${SESSION_TTL_MS / 1000}; Path=/; HttpOnly; SameSite=Lax`;
+    return redirect(rd, cookie);
+  }
+
   if (path === "/auth/login") {
     const rd = new URL(req.url).searchParams.get("rd") ?? "/";
     if (gisMode()) return signinPage(rd);

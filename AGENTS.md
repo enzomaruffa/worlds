@@ -96,6 +96,17 @@ WORLDS_DEV=1 WORLDS_SEED=0 bun server/index.ts   # :8420; identity stubbed as de
 # impersonate by passing the x-auth-request-email header; sites at <site>.worlds.localhost:8420
 ```
 
+### Local dev
+
+- `WORLDS_DEV_SITES="prelude=/abs/path/to/dist,other=/abs/path"` (dev mode only) serves a
+  folder straight off disk at that site name — no deploy step, edits are live, and the
+  folder's own `.world.json` supplies its policies (collections/docs/uploads/backend) fresh
+  each request.
+- `GET /auth/dev?as=alice@localhost&rd=/app/prelude/` switches the dev-stub identity (cookie
+  `worlds_dev_user`, 7 days, header still wins for impersonation in tests); `GET /auth/dev`
+  with no `as` clears it, or shows a tiny switch-user form when the request is a browser
+  navigation. 404 outside dev mode.
+
 - **Syntax-check a site's inline script** (catches parse errors fast):
   `bun -e 'const h=require("fs").readFileSync(F,"utf8");for(const m of h.matchAll(/<script(?![^>]*src=)[^>]*>([\s\S]*?)<\/script>/g))new Function(m[1]);console.log("ok")'`
 - **Browser-smoke** a multiplayer/3D site: deploy it to a dev server, load with Playwright,

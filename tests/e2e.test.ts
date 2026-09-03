@@ -3,6 +3,7 @@ import { mkdtemp, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as Y from "yjs";
+import { signProxy } from "../server/proxy";
 
 // Spins the real server (random port, temp data dir) against the compose
 // Postgres. These double as the seed of the golden contract corpus (Draft B):
@@ -1280,5 +1281,239 @@ describe("worlds.doc", () => {
     const d = new Y.Doc();
     Y.applyUpdate(d, unb64(got.state));
     expect(d.get("root", Y.XmlText).toString()).toBe("durable");
+  });
+});
+
+describe("backend proxy + dev mode", () => {
+  const BPORT = 9900 + Math.floor(Math.random() * 300);
+  const BB = `http://localhost:${BPORT}`;
+  const SECRET = "test-proxy-secret";
+  const DEVSITE = "devsite";
+  let bproc: ReturnType<typeof Bun.spawn>;
+  let bdir: string;
+  let devDir: string;
+  let echo: ReturnType<typeof Bun.serve>;
+  let echoSockets = 0;
+  let aliceCookie = "";
+
+  async function deployTo(site: string, files: Record<string, string>) {
+    const form = new FormData();
+    form.set("site", site);
+    form.set("bundle", await bundle(files), "bundle.tgz");
+    return fetch(`${BB}/api/v1/deploy`, { method: "POST", headers: { "x-worlds-csrf": "1" }, body: form });
+  }
+
+  beforeAll(async () => {
+    // Echoes HTTP as JSON ({method, path, query, headers, body}, 201 for POST) and
+    // WebSocket messages prefixed "echo:" — a stand-in backend the proxy forwards to.
+    echo = Bun.serve({
+      port: 0,
+      async fetch(request, srv) {
+        if ((request.headers.get("upgrade") ?? "").toLowerCase() === "websocket") {
+          if (srv.upgrade(request, { data: undefined })) return undefined as never;
+          return new Response("expected websocket", { status: 400 });
+        }
+        const url = new URL(request.url);
+        const headers: Record<string, string> = {};
+        for (const [k, v] of request.headers) headers[k] = v;
+        const body = request.method === "GET" || request.method === "HEAD" ? null : await request.text();
+        return new Response(
+          JSON.stringify({ method: request.method, path: url.pathname, query: Object.fromEntries(url.searchParams), headers, body }),
+          { status: request.method === "POST" ? 201 : 200, headers: { "content-type": "application/json", "x-echo-custom": "yes" } },
+        );
+      },
+      websocket: {
+        open() { echoSockets++; },
+        message(ws, msg) { ws.send(`echo:${msg}`); },
+        close() { echoSockets--; },
+      },
+    });
+
+    devDir = await mkdtemp(join(tmpdir(), "worlds-devsite-"));
+    await Bun.write(join(devDir, "index.html"), "<h1>dev-v1</h1>");
+    await Bun.write(
+      join(devDir, ".world.json"),
+      JSON.stringify({
+        collections: { notes: { appendOnly: true } },
+        backend: { url: `http://localhost:${echo.port}`, prefix: "/_api/" },
+      }),
+    );
+
+    bdir = await mkdtemp(join(tmpdir(), "worlds-backend-"));
+    bproc = Bun.spawn(["bun", "server/index.ts"], {
+      cwd: new URL("..", import.meta.url).pathname,
+      env: {
+        ...process.env,
+        WORLDS_PORT: String(BPORT),
+        WORLDS_DATA_DIR: bdir,
+        WORLDS_DEV: "1",
+        WORLDS_ROUTING: "path",
+        WORLDS_DISABLE_WORKERS: "1",
+        WORLDS_SEED: "0",
+        WORLDS_PROXY_SECRET: SECRET,
+        WORLDS_DEV_SITES: `${DEVSITE}=${devDir}`,
+      },
+      stdout: "ignore",
+      stderr: "ignore",
+    });
+    for (let i = 0; i < 60; i++) {
+      try { if ((await fetch(`${BB}/healthz`)).ok) break; } catch { /* booting */ }
+      await Bun.sleep(100);
+    }
+  });
+
+  afterAll(async () => {
+    bproc?.kill();
+    echo.stop(true);
+    await rm(bdir, { recursive: true, force: true });
+    await rm(devDir, { recursive: true, force: true });
+  });
+
+  test("a dev mount serves the folder live, no deploy — edits show up, .. is refused", async () => {
+    const first = await fetch(`${BB}/app/${DEVSITE}/`);
+    expect(first.status).toBe(200);
+    expect(await first.text()).toContain("dev-v1");
+
+    await Bun.write(join(devDir, "index.html"), "<h1>dev-v2</h1>");
+    const second = await fetch(`${BB}/app/${DEVSITE}/`);
+    expect(await second.text()).toContain("dev-v2");
+
+    const traversal = await fetch(`${BB}/app/${DEVSITE}/%2e%2e/%2e%2e/etc/passwd`);
+    expect(traversal.status).toBe(404);
+  });
+
+  test("/auth/dev switches identity via cookie; the header still wins; clearing works", async () => {
+    const login = await fetch(`${BB}/auth/dev?as=alice@localhost`, { redirect: "manual" });
+    expect(login.status).toBe(302);
+    aliceCookie = login.headers.get("set-cookie")!.split(";")[0]!;
+
+    const asAlice = await (await fetch(`${BB}/api/v1/me`, { headers: { cookie: aliceCookie } })).json();
+    expect(asAlice.handle).toBe("alice");
+
+    const noCookie = await (await fetch(`${BB}/api/v1/me`)).json();
+    expect(noCookie.handle).toBe("dev");
+
+    const headerWins = await (
+      await fetch(`${BB}/api/v1/me`, { headers: { cookie: aliceCookie, "x-auth-request-email": "bob@localhost" } })
+    ).json();
+    expect(headerWins.handle).toBe("bob");
+
+    const cleared = await fetch(`${BB}/auth/dev`, { redirect: "manual", headers: { cookie: aliceCookie } });
+    expect(cleared.status).toBe(302);
+    expect(cleared.headers.get("set-cookie")).toContain("Max-Age=0");
+  });
+
+  test("the dev mount's own .world.json policy applies with no deploy", async () => {
+    const create = await fetch(`${BB}/api/v1/db/notes`, {
+      method: "POST",
+      headers: { "x-worlds-csrf": "1", "x-worlds-site": DEVSITE, "content-type": "application/json" },
+      body: JSON.stringify({ text: "hi" }),
+    });
+    expect(create.status).toBe(200);
+    const doc = await create.json();
+    const patch = await fetch(`${BB}/api/v1/db/notes/${doc.id}`, {
+      method: "PATCH",
+      headers: { "x-worlds-csrf": "1", "x-worlds-site": DEVSITE, "content-type": "application/json" },
+      body: JSON.stringify({ text: "bye" }),
+    });
+    expect(patch.status).toBe(403);
+    expect((await patch.json()).error.code).toBe("forbidden");
+  });
+
+  test("a proxied GET reaches the backend, signed, with cookies stripped", async () => {
+    const res = await fetch(`${BB}/app/${DEVSITE}/_api/hello?x=1`, { headers: { cookie: aliceCookie } });
+    expect(res.status).toBe(200);
+    const echoed = await res.json();
+    expect(echoed.method).toBe("GET");
+    expect(echoed.path).toBe("/hello");
+    expect(echoed.query).toEqual({ x: "1" });
+    expect(echoed.headers["x-worlds-site"]).toBe(DEVSITE);
+    expect(echoed.headers.cookie).toBeUndefined();
+
+    const user = JSON.parse(echoed.headers["x-worlds-user"]);
+    expect(user).toMatchObject({ email: "alice@localhost", handle: "alice", kind: "user" });
+
+    const ts = Number(echoed.headers["x-worlds-ts"]);
+    const expected = signProxy("GET", "/hello", echoed.headers["x-worlds-user"], ts, SECRET);
+    expect(echoed.headers["x-worlds-signature"]).toBe(expected);
+  });
+
+  test("a POST body round-trips; the backend's status and headers come through", async () => {
+    const res = await fetch(`${BB}/app/${DEVSITE}/_api/echo`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ a: 1 }),
+    });
+    expect(res.status).toBe(201);
+    expect(res.headers.get("x-echo-custom")).toBe("yes");
+    const echoed = await res.json();
+    expect(JSON.parse(echoed.body)).toEqual({ a: 1 });
+  });
+
+  test("a path under the site but outside the prefix is still static", async () => {
+    const res = await fetch(`${BB}/app/${DEVSITE}/index.html`);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain("dev-v2");
+  });
+
+  test("websocket passthrough: connect, echo, and closing the client closes the upstream", async () => {
+    const before = echoSockets;
+    const ws = new WebSocket(`ws://localhost:${BPORT}/app/${DEVSITE}/_api/ws`);
+    const reply = new Promise<string>((resolve) => { ws.onmessage = (m) => resolve(String(m.data)); });
+    await new Promise<void>((resolve, reject) => {
+      ws.onopen = () => resolve();
+      ws.onerror = () => reject(new Error("ws failed to open"));
+    });
+    // The client's own open() fires as soon as the browser<->platform leg upgrades — it
+    // doesn't wait on the platform<->backend dial, so only a successful echo proves the
+    // backend side is actually up (frames sent before then are queued, not dropped).
+    ws.send("hi");
+    expect(await reply).toBe("echo:hi");
+    expect(echoSockets).toBe(before + 1);
+
+    ws.close();
+    await Bun.sleep(300);
+    expect(echoSockets).toBe(before);
+  });
+
+  test("a deployed (non-mounted) site's backend also proxies", async () => {
+    const site = `${S1}-backend`;
+    const deployed = await deployTo(site, {
+      "index.html": "<h1>deployed</h1>",
+      ".world.json": JSON.stringify({ backend: { url: `http://localhost:${echo.port}`, prefix: "/_api/" } }),
+    });
+    expect(deployed.status).toBe(200);
+
+    const res = await fetch(`${BB}/app/${site}/_api/ping`);
+    expect(res.status).toBe(200);
+    const echoed = await res.json();
+    expect(echoed.path).toBe("/ping");
+    expect(echoed.headers["x-worlds-site"]).toBe(site);
+  });
+
+  test("an unreachable backend answers 502 upstream_error", async () => {
+    const dead = Bun.serve({ port: 0, fetch: () => new Response("unused") });
+    const deadPort = dead.port;
+    dead.stop(true);
+
+    const site = `${S1}-dead-backend`;
+    const deployed = await deployTo(site, {
+      "index.html": "<h1>dead</h1>",
+      ".world.json": JSON.stringify({ backend: { url: `http://localhost:${deadPort}`, prefix: "/_api/" } }),
+    });
+    expect(deployed.status).toBe(200);
+
+    const res = await fetch(`${BB}/app/${site}/_api/hello`);
+    expect(res.status).toBe(502);
+    expect((await res.json()).error.code).toBe("upstream_error");
+  });
+
+  test("a bad backend.url fails the deploy with invalid_request", async () => {
+    const res = await deployTo(`${S1}-bad-backend`, {
+      "index.html": "<h1>bad</h1>",
+      ".world.json": JSON.stringify({ backend: { url: "not-a-url", prefix: "/_api/" } }),
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.code).toBe("invalid_request");
   });
 });

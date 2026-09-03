@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { LIMITS, config } from "./config";
 import { sql, dbReady } from "./db";
 import { WorldsError } from "./errors";
@@ -22,17 +23,24 @@ export interface CollectionPolicy {
   urlFields?: Record<string, string[]>; // dotted path ("a.b", "items[].url") → allowed prefixes
 }
 
+export interface BackendPolicy {
+  url: string;
+  prefix: string;
+}
+
 export interface SitePolicies {
   collections: Record<string, CollectionPolicy>;
   uploads: { maxTotalBytes?: number };
   docs: Record<string, DocSchema>; // glob on the document name → its tree schema
+  backend: BackendPolicy | null;
 }
 
-export const NO_POLICIES: SitePolicies = { collections: {}, uploads: {}, docs: {} };
+export const NO_POLICIES: SitePolicies = { collections: {}, uploads: {}, docs: {}, backend: null };
 
 const COLLECTION = /^[a-z0-9_-]{1,64}$/;
 const WRITER = /^(\*|(user|service):[a-z0-9][a-z0-9._-]{0,63})$/;
 const FIELD_PATH = /^[\w-]+(\[\])?(\.[\w-]+(\[\])?)*$/;
+const DEFAULT_BACKEND_PREFIX = "/_api/";
 
 function bad(msg: string): never {
   throw new WorldsError("invalid_request", `.world.json: ${msg}`);
@@ -145,7 +153,7 @@ function parseDocSchema(where: string, raw: unknown): DocSchema {
 }
 
 export function parseManifestPolicies(manifest: unknown): SitePolicies {
-  const out: SitePolicies = { collections: {}, uploads: {}, docs: {} };
+  const out: SitePolicies = { collections: {}, uploads: {}, docs: {}, backend: null };
   if (typeof manifest !== "object" || manifest === null) return out;
   const m = manifest as Record<string, unknown>;
 
@@ -212,6 +220,25 @@ export function parseManifestPolicies(manifest: unknown): SitePolicies {
       out.uploads.maxTotalBytes = u.maxTotalBytes as number;
     }
   }
+
+  if (m.backend !== undefined && m.backend !== null) {
+    if (typeof m.backend !== "object" || Array.isArray(m.backend)) bad("backend must be an object");
+    const b = m.backend as Record<string, unknown>;
+    for (const key of Object.keys(b)) if (!["url", "prefix"].includes(key)) bad(`backend.${key} is not a known setting`);
+    if (typeof b.url !== "string") bad("backend.url must be a string");
+    let parsed: URL;
+    try {
+      parsed = new URL(b.url);
+    } catch {
+      bad("backend.url must be an absolute URL");
+    }
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") bad("backend.url must be http or https");
+    if (parsed.search || parsed.hash) bad("backend.url must not include a query or hash");
+    const prefix = b.prefix === undefined ? DEFAULT_BACKEND_PREFIX : b.prefix;
+    if (typeof prefix !== "string" || !prefix.startsWith("/") || !prefix.endsWith("/")) bad(`backend.prefix must start and end with "/"`);
+    if (prefix.length > 64) bad("backend.prefix must be at most 64 characters");
+    out.backend = { url: b.url, prefix };
+  }
   return out;
 }
 
@@ -224,7 +251,43 @@ export function invalidatePolicies(site: string): void {
   cache.delete(site);
 }
 
+// Dev mounts (WORLDS_DEV_SITES) have no deploy step, so their manifest can change on disk
+// between requests — cache briefly (not 5s like a real deploy) so an edit shows up fast.
+const DEV_MANIFEST_CACHE_MS = 1_000;
+const devManifestCache = new Map<string, { at: number; raw: Record<string, unknown> | null; policies: SitePolicies }>();
+
+async function loadDevManifest(site: string, dir: string): Promise<{ raw: Record<string, unknown> | null; policies: SitePolicies }> {
+  const hit = devManifestCache.get(site);
+  if (hit && Date.now() - hit.at < DEV_MANIFEST_CACHE_MS) return hit;
+  let raw: Record<string, unknown> | null = null;
+  let policies: SitePolicies = NO_POLICIES;
+  const f = Bun.file(join(dir, ".world.json"));
+  if (await f.exists()) {
+    try {
+      raw = (await f.json()) as Record<string, unknown>;
+      policies = parseManifestPolicies(raw);
+    } catch (e) {
+      console.warn(`worlds: dev site "${site}" has a malformed .world.json — treating as no policies (${(e as Error).message})`);
+      raw = null;
+      policies = NO_POLICIES;
+    }
+  }
+  const entry = { at: Date.now(), raw, policies };
+  devManifestCache.set(site, entry);
+  return entry;
+}
+
+// null means "not a dev mount" — the caller falls back to the deployed site's spa_fallback.
+export async function devSpaFallback(site: string): Promise<boolean | null> {
+  const dir = config.devSites[site];
+  if (!dir) return null;
+  const { raw } = await loadDevManifest(site, dir);
+  return typeof raw?.spa_fallback === "boolean" ? raw.spa_fallback : false;
+}
+
 export async function sitePolicies(site: string): Promise<SitePolicies> {
+  const dir = config.devSites[site];
+  if (dir) return (await loadDevManifest(site, dir)).policies;
   if (!dbReady()) return NO_POLICIES;
   const hit = cache.get(site);
   if (hit && Date.now() - hit.at < CACHE_MS) return hit.policies;
@@ -232,7 +295,7 @@ export async function sitePolicies(site: string): Promise<SitePolicies> {
   const raw = row?.policies;
   const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
   const policies: SitePolicies = parsed && typeof parsed === "object"
-    ? { collections: parsed.collections ?? {}, uploads: parsed.uploads ?? {}, docs: parsed.docs ?? {} }
+    ? { collections: parsed.collections ?? {}, uploads: parsed.uploads ?? {}, docs: parsed.docs ?? {}, backend: parsed.backend ?? null }
     : NO_POLICIES;
   cache.set(site, { at: Date.now(), policies });
   return policies;

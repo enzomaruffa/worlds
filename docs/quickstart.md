@@ -52,6 +52,37 @@ enforces on every write; a rule the manifest gets wrong fails the deploy instead
 
 Rules are read from the manifest of the current deploy: a bundle without them has none.
 
+### Backend (`.world.json` → `backend`)
+
+A site can put a real backend behind the same sign-in wall:
+
+```json
+{"backend": {"url": "http://app.internal:8080", "prefix": "/_api/"}}
+```
+
+- `url` — an absolute `http:`/`https:` origin (no query or hash).
+- `prefix` — the site-relative path that gets forwarded; must start and end with `/`
+  (default `/_api/`, max 64 chars). `GET /_api/channels/x` forwards to `<url>/channels/x`
+  with the query string kept.
+
+Every proxied request carries:
+
+- `x-worlds-site` — the site name.
+- `x-worlds-user` — `{"email","handle","name","kind"}` for the signed-in caller.
+- `x-worlds-ts` — unix seconds.
+- `x-worlds-signature` — hex HMAC-SHA256, keyed with `WORLDS_PROXY_SECRET`, over:
+  ```
+  ${method}\n${pathAfterPrefix}\n${userJson}\n${ts}
+  ```
+  Recompute it (or import `signProxy` from a TypeScript backend) and compare — a mismatch
+  means the request didn't come through the platform.
+
+The platform session cookie is stripped before forwarding; `authorization` passes through
+unchanged so a bearer caller still reaches the backend as itself. WebSocket upgrades under
+`prefix` are piped straight through for the life of the connection (same subprotocols, same
+signed headers). Without `WORLDS_PROXY_SECRET` configured the proxy answers `503 maintenance`;
+an unreachable backend answers `502 upstream_error`.
+
 ### Document schemas (`.world.json` → `docs`)
 
 A `worlds.doc` document is a Yjs tree the server never interprets, so by default any

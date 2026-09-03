@@ -1,3 +1,4 @@
+import type { Server } from "bun";
 import { join } from "node:path";
 import { config } from "./config";
 import { WorldsError, asWorldsError, json, jsonError } from "./errors";
@@ -7,6 +8,8 @@ import { initDb, sql, requireDb, onDbReady } from "./db";
 import { handleDeploy, handleDeployFolder } from "./deploy";
 import { serveSite, siteNotFound } from "./staticsite";
 import { getSiteOr404, listSites, publicSite, siteUrl, bumpVisit, getSite } from "./sites";
+import { sitePolicies } from "./policies";
+import { dialBackend, prepareProxyUpgrade, proxyAfterPrefix, proxyHttp } from "./proxy";
 import * as dbapi from "./dbapi";
 import * as docs from "./docs";
 import * as uploads from "./uploads";
@@ -63,6 +66,37 @@ function siteFromRequest(req: Request, url: URL): string {
     return req.headers.get("x-worlds-site") || url.searchParams.get("site") || "home";
   }
   return siteFromHost(req.headers.get("host") ?? "");
+}
+
+function isUpgradeRequest(req: Request): boolean {
+  return (req.headers.get("upgrade") ?? "").toLowerCase() === "websocket";
+}
+
+// A site's declared backend (.world.json → backend) intercepts everything under its
+// prefix, ahead of static serving. Checked at both static-serving call sites (path-mode
+// /app/<site>/ and the plain branch) so neither routing mode can bypass it.
+// Returns `null` for "not a backend request — keep serving the site". A successful
+// websocket upgrade returns `undefined`, which the caller must propagate as-is: Bun
+// requires the fetch handler return nothing (not a Response) once upgrade() succeeds.
+async function tryBackendProxy(
+  req: Request,
+  srv: Server<SocketData>,
+  site: string,
+  sitePath: string,
+): Promise<Response | undefined | null> {
+  const { backend } = await sitePolicies(site);
+  if (!backend) return null;
+  const after = proxyAfterPrefix(backend, sitePath);
+  if (after === null) return null;
+
+  if (isUpgradeRequest(req)) {
+    const { wsUrl, protocols, headers, who } = await prepareProxyUpgrade(req, site, backend, config.proxySecret, after);
+    const upstream = dialBackend(wsUrl, protocols, headers);
+    if (srv.upgrade(req, { data: { who, site, subs: new Map(), proxy: upstream } })) return undefined;
+    upstream.close();
+    throw new WorldsError("invalid_request", "expected websocket upgrade");
+  }
+  return proxyHttp(req, site, backend, config.proxySecret, after);
 }
 
 function loader(file: string, immutable: boolean): Promise<Response | null> {
@@ -332,6 +366,10 @@ const server = Bun.serve<SocketData, never>({
           if (rest.length === 0) return new Response(null, { status: 308, headers: { location: `/app/${appSite}/` } });
           const path = `/${rest.join("/")}`;
           if (appSite === "hello") return (await serveBundled(TUTORIAL_DIR, path)) ?? siteNotFound("hello");
+          // Path mode has no Host to resolve the site from, so the proxy must use the
+          // site named in the URL here — not the header/query fallback siteFromRequest uses.
+          const proxied = await tryBackendProxy(req, srv, appSite, path);
+          if (proxied !== null) return proxied;
           return (await serveSite(req, appSite, path)) ?? siteNotFound(appSite);
         }
       }
@@ -358,6 +396,8 @@ const server = Bun.serve<SocketData, never>({
         return siteNotFound("home");
       }
 
+      const proxied = await tryBackendProxy(req, srv, site, url.pathname);
+      if (proxied !== null) return proxied;
       const res = await serveSite(req, site, url.pathname);
       return res ?? siteNotFound(site);
     } catch (e) {

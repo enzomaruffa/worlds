@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { store, type Stored } from "./blobstore";
+import { config } from "./config";
 import { spaFallback } from "./sites";
 
 // Caching: code/text (html/js/css/…) gets `no-cache` (revalidate every load) so
@@ -41,10 +42,25 @@ async function etagFor(key: string, st: Stored): Promise<string> {
   return etag;
 }
 
-async function respond(req: Request, site: string, path: string, st: Stored): Promise<Response> {
+async function respond(req: Request, site: string, path: string, st: Stored, forceNoStore = false): Promise<Response> {
   const etag = await etagFor(`${site}:${path}`, st);
-  const res = new Response(st.body, { headers: { etag, "cache-control": cacheControl(path) } });
+  const res = new Response(st.body, { headers: { etag, "cache-control": forceNoStore ? "no-store" : cacheControl(path) } });
   return checkEtag(req, res);
+}
+
+// A dev mount (WORLDS_DEV_SITES) serves straight off disk — same ".." guard as
+// blobstore's safeRel (checked on the raw parts; a resolved path can look clean after
+// collapsing "..", so the check has to happen before that).
+async function readDevFile(dir: string, path: string): Promise<Stored | null> {
+  if (path.split("/").includes("..")) return null;
+  try {
+    const f = Bun.file(join(dir, path));
+    const s = await f.stat();
+    if (s.isDirectory()) return null;
+    return { body: f, size: s.size, mtime: s.mtime.getTime() };
+  } catch {
+    return null;
+  }
 }
 
 function checkEtag(req: Request, res: Response): Response {
@@ -59,10 +75,11 @@ function checkEtag(req: Request, res: Response): Response {
 export async function serveSite(req: Request, site: string, pathname: string): Promise<Response | null> {
   let path = decodeURIComponent(pathname);
   if (path.endsWith("/")) path += "index.html";
+  const mount = config.devSites[site];
 
   const tryServe = async (p: string): Promise<Response | null> => {
-    const st = await store.readSite(site, p);
-    return st ? await respond(req, site, p, st) : null;
+    const st = mount ? await readDevFile(mount, p) : await store.readSite(site, p);
+    return st ? await respond(req, site, p, st, !!mount) : null;
   };
 
   let res = await tryServe(path);

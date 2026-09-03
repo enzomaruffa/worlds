@@ -4,6 +4,7 @@ import { onChange, replaySince, dbReady, type ChangeEvent } from "./db";
 import { asWorldsError } from "./errors";
 import type { Identity } from "./identity";
 import { b64, fromB64, getRoom, type DocClient } from "./docs";
+import { closeUpstream, pipeUpstream, sendUpstream } from "./proxy";
 
 // One multiplexed socket per page. Frame protocol is part of the frozen v1
 // contract (docs/PLAN.md B.2): sub/unsub/pub → event/msg/presence/ack/error.
@@ -15,6 +16,7 @@ export interface SocketData {
   site: string;
   subs: Map<string, { kind: "db" | "channel" | "actors" | "doc"; key: string; cid?: string; room?: DocRoomRef; client?: DocClient }>;
   fanout?: { tokens: number; at: number }; // broadcast budget, created on first pub/aevent
+  proxy?: WebSocket; // set for a site backend passthrough — the upstream client socket
 }
 
 type WS = ServerWebSocket<SocketData>;
@@ -471,11 +473,19 @@ function handlePub(ws: WS, id: string, frame: Record<string, unknown>): void {
 }
 
 export const websocket = {
-  open(_ws: WS): void {
+  open(ws: WS): void {
+    if (ws.data.proxy) {
+      pipeUpstream(ws.data.proxy, ws);
+      return;
+    }
     ensureChangeFeed();
   },
 
   async message(ws: WS, raw: string | Buffer): Promise<void> {
+    if (ws.data.proxy) {
+      sendUpstream(ws.data.proxy, raw);
+      return;
+    }
     let frame: Record<string, unknown>;
     try {
       frame = JSON.parse(String(raw));
@@ -498,7 +508,11 @@ export const websocket = {
     // Unknown ops are ignored (forward-compat rule).
   },
 
-  close(ws: WS): void {
+  close(ws: WS, code: number, reason: string): void {
+    if (ws.data.proxy) {
+      closeUpstream(ws.data.proxy, code, reason);
+      return;
+    }
     const touched = new Set<string>();
     for (const sub of ws.data.subs.values()) {
       if (sub.kind === "db") dropFromScope(dbSubs, sub.key, ws);

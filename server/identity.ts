@@ -1,6 +1,6 @@
 import { config } from "./config";
 import { WorldsError } from "./errors";
-import { sessionFrom } from "./auth";
+import { DEV_USER_COOKIE, readCookie, sessionFrom } from "./auth";
 
 export interface Identity {
   email: string;
@@ -51,8 +51,11 @@ export function identityFrom(req: Request): Identity {
   const svc = serviceFrom(req);
   if (svc) return svc;
 
-  // Dev: stub identity (a header may still override, for impersonation in tests).
-  if (config.dev) return mk(req.headers.get("x-auth-request-email") || "dev@localhost");
+  // Dev: stub identity. Header wins (impersonation in tests), then the /auth/dev cookie
+  // (switching identity in a browser tab), then the fixed default.
+  if (config.dev) {
+    return mk(req.headers.get("x-auth-request-email") || readCookie(req, DEV_USER_COOKIE) || "dev@localhost");
+  }
 
   if (config.authMode === "gateway") {
     for (const h of EMAIL_HEADERS) {

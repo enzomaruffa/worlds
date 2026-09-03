@@ -3,7 +3,7 @@ import type { Identity } from "./identity";
 import { config } from "./config";
 import { WorldsError } from "./errors";
 import { asText, ILIKE, jsonArg, jsonArrayAppend, jsonArrayHas, jsonParam, NOW } from "./dialect";
-import { invalidatePolicies, NO_POLICIES, type SitePolicies } from "./policies";
+import { devSpaFallback, invalidatePolicies, NO_POLICIES, type SitePolicies } from "./policies";
 
 export interface SiteRow {
   name: string;
@@ -141,6 +141,8 @@ export async function listSites(q: {
 }
 
 export async function spaFallback(name: string): Promise<boolean> {
+  const dev = await devSpaFallback(name);
+  if (dev !== null) return dev;
   const s = await getSite(name);
   return s?.spa_fallback ?? false;
 }

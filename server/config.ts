@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+
 const DEV_SESSION_SECRET = "insecure-dev-secret-change-me";
 
 export interface ServiceAccount {
@@ -32,6 +34,24 @@ function parseServiceTokens(raw: string | undefined): Record<string, ServiceAcco
   return out;
 }
 
+// WORLDS_DEV_SITES="name=/abs/path,other=/abs/path2" — dev-only folder mounts (see AGENTS.md).
+// A bad entry (or a dir that doesn't exist) refuses to boot rather than silently 404ing later.
+function parseDevSites(raw: string | undefined, dev: boolean): Record<string, string> {
+  if (!dev || !raw) return {};
+  const out: Record<string, string> = {};
+  for (const entry of raw.split(",").map((s) => s.trim()).filter(Boolean)) {
+    const eq = entry.indexOf("=");
+    if (eq < 1) throw new Error(`WORLDS_DEV_SITES: bad entry "${entry}" (expected name=/abs/path)`);
+    const name = entry.slice(0, eq).trim();
+    const dir = entry.slice(eq + 1).trim();
+    if (!dir || !existsSync(dir)) throw new Error(`WORLDS_DEV_SITES: "${name}" points at "${dir}", which does not exist`);
+    out[name] = dir;
+  }
+  return out;
+}
+
+const DEV = process.env.WORLDS_DEV === "1";
+
 export const config = {
   port: Number(process.env.WORLDS_PORT ?? 8420),
   dataDir: process.env.WORLDS_DATA_DIR ?? "./data",
@@ -43,7 +63,9 @@ export const config = {
   // In dev any "<site>.<baseDomain>" Host works, e.g. mysite.worlds.localhost:8420.
   baseDomain: process.env.WORLDS_BASE_DOMAIN ?? "worlds.localhost",
   // dev stubs identity (no real auth) — explicit opt-in.
-  dev: process.env.WORLDS_DEV === "1",
+  dev: DEV,
+  // Dev-only: mount local folders straight onto site names, no deploy needed (see AGENTS.md).
+  devSites: parseDevSites(process.env.WORLDS_DEV_SITES, DEV),
   // Postgres by default. `sqlite` runs the whole platform off one file under
   // WORLDS_DATA_DIR — no database server to operate, which is the point for a small
   // self-host or a single-pod deploy. Inferred from DATABASE_URL when it names a file.
@@ -77,6 +99,9 @@ export const config = {
   // External origin for OAuth redirect_uri, e.g. https://world.example.com. Derived from the request if unset.
   publicOrigin: process.env.WORLDS_PUBLIC_ORIGIN || null,
   serviceTokens: parseServiceTokens(process.env.WORLDS_SERVICE_TOKENS),
+  // HMAC key for signing requests forwarded to a site's declared backend (see policies.ts).
+  // Unset = the proxy refuses every request with 503 rather than forwarding unsigned ones.
+  proxySecret: process.env.WORLDS_PROXY_SECRET || null,
   // Ceiling for a site's `.world.json` uploads.maxTotalBytes; unset = the platform default is the ceiling.
   uploadQuotaMax: process.env.WORLDS_UPLOAD_QUOTA_MAX ? Number(process.env.WORLDS_UPLOAD_QUOTA_MAX) : null,
 };
