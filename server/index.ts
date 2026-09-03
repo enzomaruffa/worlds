@@ -12,6 +12,7 @@ import { sitePolicies } from "./policies";
 import { dialBackend, prepareProxyUpgrade, proxyAfterPrefix, proxyHttp } from "./proxy";
 import * as dbapi from "./dbapi";
 import * as docs from "./docs";
+import * as cluster from "./cluster";
 import * as uploads from "./uploads";
 import * as ai from "./ai";
 import { notifySlack } from "./notify";
@@ -26,8 +27,10 @@ await store.init();
 // Registered before initDb so an install that boots ahead of postgres still gets its
 // universe once the connection lands, instead of staying empty until a manual restart.
 onDbReady(seedWorlds);
+onDbReady(() => cluster.start());
 await initDb();
 await seedWorlds(); // joins the hook's run when the db was up at boot
+await cluster.start();
 
 const HOMEPAGE_DIR = new URL("../homepage", import.meta.url).pathname;
 const SDK_DIR = new URL("../sdk", import.meta.url).pathname;
@@ -229,7 +232,7 @@ async function api(req: Request, url: URL, site: string): Promise<Response> {
     const name = p[1]!;
     if (p.length === 2 && method === "GET") {
       const room = await docs.getRoom(site, name);
-      const s = room.state();
+      const s = await room.state();
       return json({ name, epoch: s.epoch, seq: s.seq, state: docs.b64(s.state), bytes: room.stateBytes });
     }
     if (p.length === 3 && p[2] === "updates") {
@@ -328,6 +331,17 @@ const server = Bun.serve<SocketData, never>({
         if (srv.upgrade(req, { data: { who, site, subs: new Map() } })) return undefined as never;
         throw new WorldsError("invalid_request", "expected websocket upgrade");
       }
+      // Pod-to-pod link (cluster.ts), shared-secret authenticated. Peers dial each other's
+      // internal addresses, so this never sits behind the sign-in wall.
+      if (url.pathname === "/internal/peer") {
+        const pod = req.headers.get("x-worlds-pod") ?? "";
+        if (!cluster.enabled || !pod || req.headers.get("x-worlds-cluster-secret") !== config.clusterSecret) {
+          throw new WorldsError("unauthorized", "not a cluster peer");
+        }
+        const who = { email: `${pod}@cluster`, handle: pod, name: pod, avatar: "", kind: "service" as const };
+        if (srv.upgrade(req, { data: { who, site: "home", subs: new Map(), peer: pod } })) return undefined as never;
+        throw new WorldsError("invalid_request", "expected websocket upgrade");
+      }
       if (url.pathname === "/mcp") return await handleMcp(req);
       if (url.pathname.startsWith("/api/")) return await api(req, url, site);
 
@@ -407,10 +421,11 @@ const server = Bun.serve<SocketData, never>({
   websocket,
 });
 
-// Open documents snapshot on the way out so a restart replays nothing.
+// Open documents snapshot on the way out so a restart replays nothing, and the pod's leases
+// and registry row go with it so peers re-home rooms at once instead of after the TTL.
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
   process.on(signal, () => {
-    docs.closeAllRooms().finally(() => process.exit(0));
+    docs.closeAllRooms().then(() => cluster.stop()).finally(() => process.exit(0));
   });
 }
 

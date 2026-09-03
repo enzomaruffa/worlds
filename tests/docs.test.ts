@@ -18,6 +18,8 @@ const SITE = "unit";
 // Names are unique per run: the database behind these tests may outlive the process.
 const RUN = Date.now().toString(36);
 const N = (s: string) => `${s}-${RUN}`;
+// These tests drive the room class directly; in a cluster getRoom could hand back a remote one.
+const local = async (name: string) => (await docs.getRoom(SITE, N(name))) as InstanceType<typeof docs.DocRoom>;
 
 function textUpdate(base: Uint8Array | null, text: string): { update: Uint8Array; doc: Y.Doc } {
   const doc = new Y.Doc();
@@ -52,92 +54,92 @@ afterAll(async () => {
 
 describe("doc room", () => {
   test("a new document starts at epoch 1, seq 0, empty", async () => {
-    const room = await docs.getRoom(SITE, N("fresh"));
-    const s = room.state();
+    const room = await local("fresh");
+    const s = room.snapshotState();
     expect(s.epoch).toBe(1);
     expect(s.seq).toBe(0);
     expect(textOf(s.state)).toBe("");
   });
 
   test("updates commit in order and subscribers hear ack then update", async () => {
-    const room = await docs.getRoom(SITE, N("order"));
+    const room = await local("order");
     const frames: Record<string, unknown>[] = [];
     const client = { send: (f: Record<string, unknown>) => frames.push(f) };
     room.subscribe(client, "s1");
     const a = textUpdate(null, "hello");
     const seq1 = await room.submit(who, 1, a.update, client, "s1");
     expect(seq1).toBe(1);
-    const b = textUpdate(room.state().state, " world");
+    const b = textUpdate(room.snapshotState().state, " world");
     const seq2 = await room.submit(who, 1, b.update, client, "s1");
     expect(seq2).toBe(2);
-    expect(textOf(room.state().state)).toBe(" worldhello");
+    expect(textOf(room.snapshotState().state)).toBe(" worldhello");
     expect(frames.map((f) => f.op)).toEqual(["doc_ack", "doc_update", "doc_ack", "doc_update"]);
     expect(frames[0]!.seq).toBe(1);
     room.unsubscribe(client);
   });
 
   test("a stale epoch is a conflict carrying the current epoch", async () => {
-    const room = await docs.getRoom(SITE, N("epoch"));
+    const room = await local("epoch");
     expect(() => room.submit(who, 7, textUpdate(null, "x").update, null, null)).toThrow(/stale epoch/);
   });
 
   test("an oversized update is refused before anything is queued", async () => {
-    const room = await docs.getRoom(SITE, N("big"));
+    const room = await local("big");
     const huge = textUpdate(null, "x".repeat(600 * 1024)).update;
     expect(() => room.submit(who, 1, huge, null, null)).toThrow(/exceeds/);
     expect(room.seq).toBe(0);
   });
 
   test("garbage bytes are rejected and never touch the live document", async () => {
-    const room = await docs.getRoom(SITE, N("garbage"));
+    const room = await local("garbage");
     await room.submit(who, 1, textUpdate(null, "keep").update, null, null);
     const frames: Record<string, unknown>[] = [];
     const client = { send: (f: Record<string, unknown>) => frames.push(f) };
     room.subscribe(client, "s1");
     await expect(room.submit(who, 1, new Uint8Array([1, 2, 3, 4, 5]), client, "s1")).rejects.toThrow(/not a valid Yjs update/);
     expect(frames[0]!.op).toBe("doc_rejected");
-    expect(textOf(room.state().state)).toBe("keep");
+    expect(textOf(room.snapshotState().state)).toBe("keep");
     expect(room.seq).toBe(1);
     room.unsubscribe(client);
   });
 
   test("one bad update in a batch does not sink the good ones", async () => {
-    const room = await docs.getRoom(SITE, N("batch"));
+    const room = await local("batch");
     const good = room.submit(who, 1, textUpdate(null, "ok").update, null, null);
     // Both settle in the same flush; attach the handler now so the rejection is never unhandled.
     const bad = room.submit(who, 1, new Uint8Array([9, 9, 9]), null, null).then(() => null, (e: Error) => e);
     expect(await good).toBe(1);
     expect(await bad).toBeInstanceOf(Error);
-    expect(textOf(room.state().state)).toBe("ok");
+    expect(textOf(room.snapshotState().state)).toBe("ok");
   });
 
   test("a crash before any snapshot replays the committed log", async () => {
-    const room = await docs.getRoom(SITE, N("crash"));
+    const room = await local("crash");
     await room.submit(who, 1, textUpdate(null, "one").update, null, null);
-    await room.submit(who, 1, textUpdate(room.state().state, " two").update, null, null);
+    await room.submit(who, 1, textUpdate(room.snapshotState().state, " two").update, null, null);
     await docs.forgetRoom(SITE, N("crash"));
-    const again = await docs.getRoom(SITE, N("crash"));
+    const again = await local("crash");
     expect(again.seq).toBe(2);
-    expect(textOf(again.state().state)).toBe(" twoone");
+    expect(textOf(again.snapshotState().state)).toBe(" twoone");
   });
 
   test("a snapshot truncates the log and reloads identically", async () => {
-    const room = await docs.getRoom(SITE, N("snap"));
-    for (let i = 0; i < 3; i++) await room.submit(who, 1, textUpdate(room.state().state, String(i)).update, null, null);
+    const room = await local("snap");
+    for (let i = 0; i < 3; i++) await room.submit(who, 1, textUpdate(room.snapshotState().state, String(i)).update, null, null);
     await room.snapshot();
     const [rows] = await db.sql`SELECT count(*) AS n FROM doc_updates WHERE site = ${SITE} AND name = ${N("snap")}`;
     expect(Number(rows.n)).toBe(0);
-    const before = textOf(room.state().state);
+    const before = textOf(room.snapshotState().state);
     await docs.forgetRoom(SITE, N("snap"));
-    const again = await docs.getRoom(SITE, N("snap"));
+    const again = await local("snap");
     expect(again.seq).toBe(3);
-    expect(textOf(again.state().state)).toBe(before);
+    expect(textOf(again.snapshotState().state)).toBe(before);
   });
 
   test("updatesSince hands back the tail, or null past the snapshot", async () => {
-    const room = await docs.getRoom(SITE, N("tail"));
+    const room = await local("tail");
     await room.submit(who, 1, textUpdate(null, "a").update, null, null);
-    await room.submit(who, 1, textUpdate(room.state().state, "b").update, null, null);
+    await room.submit(who, 1, textUpdate(room.snapshotState().state, "b").update, null, null);
     expect((await room.updatesSince(1, 1))!.length).toBe(1);
     expect(await room.updatesSince(1, 2)).toEqual([]);
     expect(await room.updatesSince(2, 0)).toBeNull();
@@ -146,7 +148,7 @@ describe("doc room", () => {
   });
 
   test("rotation installs a compact state as a new epoch and resets subscribers", async () => {
-    const room = await docs.getRoom(SITE, N("rotate"));
+    const room = await local("rotate");
     await room.submit(who, 1, textUpdate(null, "old").update, null, null);
     const frames: Record<string, unknown>[] = [];
     const client = { send: (f: Record<string, unknown>) => frames.push(f) };
@@ -160,22 +162,22 @@ describe("doc room", () => {
     expect(frames.at(-1)!.op).toBe("doc_reset");
     expect(() => room.submit(who, 1, textUpdate(null, "x").update, null, null)).toThrow(/stale epoch/);
     await docs.forgetRoom(SITE, N("rotate"));
-    const again = await docs.getRoom(SITE, N("rotate"));
+    const again = await local("rotate");
     expect(again.epoch).toBe(2);
-    expect(textOf(again.state().state)).toBe("compact");
+    expect(textOf(again.snapshotState().state)).toBe("compact");
     room.unsubscribe(client);
   });
 
   test("an idle room closes with a snapshot and a late subscriber gets a fresh, equal room", async () => {
-    const room = await docs.getRoom(SITE, N("idle"));
+    const room = await local("idle");
     const client = { send: () => {} };
     room.subscribe(client, "s1");
     await room.submit(who, 1, textUpdate(null, "bye").update, client, "s1");
     room.unsubscribe(client);
     await Bun.sleep(400);
-    const again = await docs.getRoom(SITE, N("idle"));
+    const again = await local("idle");
     expect(again).not.toBe(room);
-    expect(textOf(again.state().state)).toBe("bye");
+    expect(textOf(again.snapshotState().state)).toBe("bye");
   });
 
   test("document names are validated and per-site quota is enforced", async () => {

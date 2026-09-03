@@ -3,6 +3,11 @@ import { sql, dbReady, requireDb } from "./db";
 import { WorldsError } from "./errors";
 import type { Identity } from "./identity";
 import { checkRefs, docSchemaFor, validateTree, type DocSchema, type Violation } from "./docschema";
+import * as cluster from "./cluster";
+import { RemoteRoom, onRehome, onRemoteDetach } from "./docremote";
+import { b64, fromB64, type DocClient, type DocRoomLike, type DocState } from "./doctypes";
+
+export { b64, fromB64, type DocClient, type DocRoomLike, type DocState } from "./doctypes";
 
 // Server-held collaborative documents. A doc is one Yjs document per (site, name); the
 // server holds the authoritative Y.Doc while anyone is connected, and Postgres/SQLite holds a
@@ -36,18 +41,6 @@ export function checkDocName(name: string): void {
   if (!DOC_NAME.test(name)) throw new WorldsError("invalid_request", "bad document name");
 }
 
-// A connected subscriber. The socket layer hands in a closure so this module never
-// depends on Bun's WebSocket type.
-export interface DocClient {
-  send(frame: Record<string, unknown>): void;
-}
-
-export interface DocState {
-  epoch: number;
-  seq: number;
-  state: Uint8Array;
-}
-
 type Pending = {
   client: DocClient | null;
   subId: string | null;
@@ -56,17 +49,6 @@ type Pending = {
   resolve(seq: number): void;
   reject(err: WorldsError): void;
 };
-
-export function b64(bytes: Uint8Array): string {
-  return Buffer.from(bytes).toString("base64");
-}
-
-export function fromB64(s: unknown): Uint8Array {
-  if (typeof s !== "string" || !s) throw new WorldsError("invalid_request", "update must be a base64 string");
-  const buf = Buffer.from(s, "base64");
-  if (!buf.length) throw new WorldsError("invalid_request", "update must be a base64 string");
-  return new Uint8Array(buf);
-}
 
 const BAD_ENCODING: Violation = { rule: "encoding", message: "update is not a valid Yjs update" };
 
@@ -85,7 +67,7 @@ function toBytes(v: unknown): Uint8Array {
   return new Uint8Array(v as ArrayBuffer);
 }
 
-class DocRoom {
+export class DocRoom implements DocRoomLike {
   ydoc = new Y.Doc({ gc: true });
   epoch = 1;
   seq = 0;
@@ -122,16 +104,25 @@ class DocRoom {
     this.stateBytes = Y.encodeStateAsUpdate(this.ydoc).byteLength;
   }
 
-  state(): DocState {
+  // Async only to share the DocRoomLike surface with the remote room; nothing here waits.
+  async state(): Promise<DocState> {
+    return this.snapshotState();
+  }
+
+  snapshotState(): DocState {
     return { epoch: this.epoch, seq: this.seq, state: Y.encodeStateAsUpdate(this.ydoc) };
   }
 
-  stateFrame(op: "doc_state" | "doc_reset" | "doc_rejected", subId: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
-    const s = this.state();
+  async stateFrame(op: "doc_state" | "doc_reset" | "doc_rejected", subId: string, extra: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
+    return this.frame(op, subId, extra);
+  }
+
+  private frame(op: string, subId: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
+    const s = this.snapshotState();
     return { op, id: subId, epoch: s.epoch, seq: s.seq, state: b64(s.state), bytes: this.stateBytes, ...extra };
   }
 
-  subscribe(client: DocClient, subId: string): void {
+  async subscribe(client: DocClient, subId: string): Promise<void> {
     this.subs.set(client, subId);
     if (this.idleTimer) {
       clearTimeout(this.idleTimer);
@@ -277,7 +268,7 @@ class DocRoom {
   private reject(p: Pending, v: Violation): void {
     p.reject(new WorldsError("invalid_request", v.message, undefined, { rule: v.rule }));
     if (p.client && p.subId) {
-      p.client.send(this.stateFrame("doc_rejected", p.subId, { reason: v.message, rule: v.rule }));
+      p.client.send(this.frame("doc_rejected", p.subId, { reason: v.message, rule: v.rule }));
     }
   }
 
@@ -329,9 +320,9 @@ class DocRoom {
     this.rotateWanted = false;
     this.sinceSnapshot = { batches: 0, bytes: 0 };
     for (const [client, subId] of this.subs) {
-      client.send(this.stateFrame("doc_reset", subId, { reason: `rotated by ${who.handle}` }));
+      client.send(this.frame("doc_reset", subId, { reason: `rotated by ${who.handle}` }));
     }
-    return this.state();
+    return this.snapshotState();
   }
 
   private scheduleClose(): void {
@@ -356,10 +347,12 @@ class DocRoom {
   }
 }
 
-// One registry entry per open document. A closing room stays registered until its final
-// snapshot is written, so a subscriber arriving mid-close waits for it and then loads a
-// fresh room that sees that snapshot — two rooms for one document never overlap.
-const rooms = new Map<string, Promise<DocRoom>>();
+// One registry entry per open document, local or remote. A closing local room stays
+// registered until its final snapshot is written, so a subscriber arriving mid-close waits
+// for it and then loads a fresh room that sees that snapshot — two rooms for one document
+// never overlap. With several pods the lease decides which pod loads the real room; the
+// others get a RemoteRoom that forwards to it.
+const rooms = new Map<string, Promise<DocRoomLike>>();
 
 function key(site: string, name: string): string {
   return `${site}/${name}`;
@@ -370,6 +363,7 @@ async function closeRoom(room: DocRoom): Promise<void> {
     await room.finish();
   } finally {
     rooms.delete(key(room.site, room.name));
+    await cluster.release(key(room.site, room.name));
   }
 }
 
@@ -378,7 +372,7 @@ async function countDocs(site: string): Promise<number> {
   return Number(row?.n ?? 0);
 }
 
-export async function getRoom(site: string, name: string): Promise<DocRoom> {
+export async function getRoom(site: string, name: string): Promise<DocRoomLike> {
   requireDb();
   checkDocName(name);
   const k = key(site, name);
@@ -386,10 +380,12 @@ export async function getRoom(site: string, name: string): Promise<DocRoom> {
     const existing = rooms.get(k);
     if (!existing) break;
     const room = await existing;
-    if (!room.closing) return room;
+    if (!(room instanceof DocRoom) || !room.closing) return room;
     await room.closing.catch(() => {});
   }
-  const loading = (async () => {
+  const loading = (async (): Promise<DocRoomLike> => {
+    const owner = await cluster.acquire(k);
+    if (owner !== cluster.podId) return new RemoteRoom(owner, site, name);
     const room = new DocRoom(site, name);
     const [exists] = await sql`SELECT 1 AS present FROM docs WHERE site = ${site} AND name = ${name}`;
     if (!exists && (await countDocs(site)) >= DOC_LIMITS.docsPerSite) {
@@ -403,8 +399,15 @@ export async function getRoom(site: string, name: string): Promise<DocRoom> {
     return await loading;
   } catch (e) {
     rooms.delete(k);
+    await cluster.release(k);
     throw e;
   }
+}
+
+// The registry entry, if the document is open here — for callers that must not open it
+// (a socket closing, say) but need to leave a room they joined.
+export function peekRoom(site: string, name: string): Promise<DocRoomLike> | undefined {
+  return rooms.get(key(site, name));
 }
 
 // Drop the in-memory room WITHOUT snapshotting — what a crash does. The next getRoom
@@ -413,14 +416,139 @@ export async function forgetRoom(site: string, name: string): Promise<void> {
   const k = key(site, name);
   const p = rooms.get(k);
   rooms.delete(k);
-  if (p) (await p).ydoc.destroy();
+  if (!p) return;
+  const room = await p;
+  if (room instanceof DocRoom) room.ydoc.destroy();
 }
 
 // Graceful stop: snapshot every open room so a restart replays nothing.
 export async function closeAllRooms(): Promise<void> {
-  await Promise.all([...rooms.values()].map((p) => p.then((r) => r.finish()).catch(() => {})));
+  await Promise.all([...rooms.values()].map((p) => p.then((r) => (r instanceof DocRoom ? r.finish() : undefined)).catch(() => {})));
   rooms.clear();
 }
+
+// ---- the owner's side of a remote room ----
+
+// Peer pods subscribe once per document; the owner fans committed frames to that pod as
+// pushes and the pod re-addresses them to its own sockets.
+const peerClients = new Map<string, Map<string, DocClient>>();
+
+async function ownedRoom(site: string, name: string): Promise<DocRoom> {
+  const room = await getRoom(site, name);
+  if (!(room instanceof DocRoom)) {
+    throw new WorldsError("conflict", "this pod does not hold the document", undefined, { owner: (room as RemoteRoom).owner });
+  }
+  return room;
+}
+
+cluster.onRequest("doc.subscribe", async ({ site, name }: { site: string; name: string }, from) => {
+  const room = await ownedRoom(site, name);
+  const k = key(site, name);
+  let byPod = peerClients.get(k);
+  if (!byPod) peerClients.set(k, (byPod = new Map()));
+  let client = byPod.get(from);
+  if (!client) {
+    client = { send: (frame) => cluster.push(from, "doc", { site, name, frame }) };
+    byPod.set(from, client);
+  }
+  await room.subscribe(client, "peer");
+  return { epoch: room.epoch, seq: room.seq };
+});
+
+cluster.onPush("doc.unsubscribe", ({ site, name }: { site: string; name: string }, from) => {
+  const k = key(site, name);
+  const client = peerClients.get(k)?.get(from);
+  if (!client) return;
+  peerClients.get(k)!.delete(from);
+  rooms.get(k)?.then((room) => {
+    if (room instanceof DocRoom) room.unsubscribe(client);
+  });
+});
+
+cluster.onRequest("doc.state", async ({ site, name }: { site: string; name: string }) => {
+  const room = await ownedRoom(site, name);
+  const s = room.snapshotState();
+  return { epoch: s.epoch, seq: s.seq, state: b64(s.state), bytes: room.stateBytes };
+});
+
+cluster.onRequest("doc.updates", async ({ site, name, epoch, since }: { site: string; name: string; epoch: number; since: number }) => {
+  const room = await ownedRoom(site, name);
+  const tail = await room.updatesSince(Number(epoch), Number(since));
+  return tail ? { updates: tail.map(b64) } : null;
+});
+
+cluster.onRequest("doc.submit", async ({ site, name, epoch, update, who }: { site: string; name: string; epoch: number; update: string; who: Identity }) => {
+  const room = await ownedRoom(site, name);
+  const seq = await room.submit(who, Number(epoch), fromB64(update), null, null);
+  return { seq, epoch: room.epoch };
+});
+
+cluster.onRequest("doc.rotate", async ({ site, name, epoch, state, who }: { site: string; name: string; epoch: number; state: string; who: Identity }) => {
+  const room = await ownedRoom(site, name);
+  const s = await room.rotate(who, Number(epoch), fromB64(state));
+  return { epoch: s.epoch, seq: s.seq, state: b64(s.state), bytes: room.stateBytes };
+});
+
+cluster.onPeerLost((pod) => {
+  for (const [k, byPod] of peerClients) {
+    const client = byPod.get(pod);
+    if (!client) continue;
+    byPod.delete(pod);
+    rooms.get(k)?.then((room) => {
+      if (room instanceof DocRoom) room.unsubscribe(client);
+    });
+  }
+});
+
+onRemoteDetach((remote) => {
+  const k = key(remote.site, remote.name);
+  rooms.get(k)?.then((room) => {
+    if (room === remote) rooms.delete(k);
+  });
+});
+
+// The owner is gone (its link dropped) or we lost our own lease: run ownership again
+// once the lease is free and hand the subscribers a fresh state from wherever the room
+// lands. Until the old lease expires every attempt points at the dead pod and fails,
+// so this retries on a short timer.
+async function rehomeSubs(site: string, name: string, subs: Map<DocClient, string>, attempt = 0): Promise<void> {
+  const k = key(site, name);
+  try {
+    const room = await getRoom(site, name);
+    for (const [client, subId] of subs) {
+      await room.subscribe(client, subId);
+      client.send(await room.stateFrame("doc_state", subId));
+    }
+  } catch {
+    rooms.delete(k);
+    if (attempt < 60) {
+      setTimeout(() => void rehomeSubs(site, name, subs, attempt + 1), 500);
+      return;
+    }
+    for (const [client, subId] of subs) {
+      client.send({ op: "error", id: subId, error: { code: "maintenance", message: "document has no home; resubscribe" } });
+    }
+  }
+}
+
+onRehome((site, name, subs) => void rehomeSubs(site, name, subs));
+
+// Our lease was taken over while we were still running (a long stall). Another pod may
+// already be writing, so the in-memory room is dropped without a snapshot — the log is
+// what's authoritative — and its subscribers follow the document to its new owner.
+cluster.onLeaseLost((k) => {
+  const p = rooms.get(k);
+  if (!p) return;
+  rooms.delete(k);
+  peerClients.delete(k);
+  void p.then((room) => {
+    if (!(room instanceof DocRoom)) return;
+    const subs = new Map([...room.subs].filter(([, id]) => id !== "peer"));
+    room.subs.clear();
+    room.ydoc.destroy();
+    if (subs.size) void rehomeSubs(room.site, room.name, subs);
+  });
+});
 
 export async function listDocs(site: string): Promise<{ name: string; epoch: number; bytes: number; updated_at: string }[]> {
   requireDb();

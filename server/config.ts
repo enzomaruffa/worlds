@@ -104,6 +104,10 @@ export const config = {
   proxySecret: process.env.WORLDS_PROXY_SECRET || null,
   // Ceiling for a site's `.world.json` uploads.maxTotalBytes; unset = the platform default is the ceiling.
   uploadQuotaMax: process.env.WORLDS_UPLOAD_QUOTA_MAX ? Number(process.env.WORLDS_UPLOAD_QUOTA_MAX) : null,
+  // Multi-pod (cluster.ts): this pod's URL as other pods reach it (e.g. http://10.0.1.7:8420).
+  // Unset = single pod. WORLDS_CLUSTER_SECRET authenticates the pod-to-pod links.
+  peerUrl: process.env.WORLDS_PEER_URL || null,
+  clusterSecret: process.env.WORLDS_CLUSTER_SECRET || null,
 };
 
 // Google mode HMACs the session cookie and the screenshot render token with this key,

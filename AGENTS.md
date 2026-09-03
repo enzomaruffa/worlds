@@ -122,6 +122,19 @@ WORLDS_DEV=1 WORLDS_SEED=0 bun server/index.ts   # :8420; identity stubbed as de
 4. If it's reusable, demonstrate it in an `examples/games/` app.
 5. Additive-only: never remove/rename/retype existing `worlds.js` surface or `/api/v1` shapes.
 
+### Multi-pod
+
+One pod is the default and needs nothing. To run several (Postgres only), give each pod
+`WORLDS_PEER_URL` (its own address as other pods reach it, e.g. `http://$(POD_IP):8420`) and a
+shared `WORLDS_CLUSTER_SECRET`; `WORLDS_POD_ID` defaults to the hostname. Pods register in the
+`pods` table and keep one authenticated WebSocket link per pair (`server/cluster.ts`); db change
+events, channel messages and presence are relayed over the links, and each `worlds.doc` document
+is hosted by exactly one pod through a lease in `room_leases` (other pods forward to it; when the
+owner dies the document is re-homed once the lease expires, `WORLDS_LEASE_TTL_MS`, default 15 s).
+`worlds.actors` rooms are still per pod — a game with players on two pods does not work yet, so
+keep actors-heavy deployments at one replica. `tests/cluster.test.ts` runs two pods against the
+dev Postgres.
+
 ### Two-repo + deploy model
 
 - **Canonical OSS:** `enzomaruffa/worlds` (this repo's `origin`). Build features HERE.

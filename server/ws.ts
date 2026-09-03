@@ -3,20 +3,23 @@ import { LIMITS } from "./config";
 import { onChange, replaySince, dbReady, type ChangeEvent } from "./db";
 import { asWorldsError } from "./errors";
 import type { Identity } from "./identity";
-import { b64, fromB64, getRoom, type DocClient } from "./docs";
+import { b64, fromB64, getRoom, peekRoom, type DocClient, type DocRoomLike } from "./docs";
 import { closeUpstream, pipeUpstream, sendUpstream } from "./proxy";
+import * as cluster from "./cluster";
 
 // One multiplexed socket per page. Frame protocol is part of the frozen v1
 // contract (docs/PLAN.md B.2): sub/unsub/pub → event/msg/presence/ack/error.
 
-type DocRoomRef = Awaited<ReturnType<typeof getRoom>>;
-
 export interface SocketData {
   who: Identity;
   site: string;
-  subs: Map<string, { kind: "db" | "channel" | "actors" | "doc"; key: string; cid?: string; room?: DocRoomRef; client?: DocClient }>;
+  // Doc subscriptions keep the document name, not the room: the room a document lives in
+  // can change under a socket (an owner pod dies and it is re-homed), so it is looked up
+  // in the registry on every use.
+  subs: Map<string, { kind: "db" | "channel" | "actors" | "doc"; key: string; cid?: string; doc?: string; client?: DocClient }>;
   fanout?: { tokens: number; at: number }; // broadcast budget, created on first pub/aevent
   proxy?: WebSocket; // set for a site backend passthrough — the upstream client socket
+  peer?: string; // set for a pod-to-pod link (cluster.ts) — the dialing pod's id
 }
 
 type WS = ServerWebSocket<SocketData>;
@@ -95,20 +98,73 @@ function presenceKey(site: string, channel: string): string {
   return `${site}/${channel}`;
 }
 
-function broadcastPresence(key: string): void {
-  const members = channelMembers.get(key);
-  if (!members) return;
+type Person = { handle: string; name: string };
+
+// Presence a peer pod reported for a channel: key → pod → members. Merged into what this
+// pod sees locally so a room spread over two pods shows one roster.
+const remotePresence = new Map<string, Map<string, Person[]>>();
+
+function localPresence(key: string): Person[] {
   const seen = new Set<string>();
-  const list = [];
-  for (const who of members.values()) {
+  const list: Person[] = [];
+  for (const who of channelMembers.get(key)?.values() ?? []) {
     if (seen.has(who.handle)) continue;
     seen.add(who.handle);
     list.push({ handle: who.handle, name: who.name });
+  }
+  return list;
+}
+
+function sendPresence(key: string): void {
+  const members = channelMembers.get(key);
+  if (!members) return;
+  const seen = new Set<string>();
+  const list: Person[] = [];
+  for (const p of [...localPresence(key), ...[...(remotePresence.get(key)?.values() ?? [])].flat()]) {
+    if (seen.has(p.handle)) continue;
+    seen.add(p.handle);
+    list.push(p);
   }
   for (const [ws] of members) {
     for (const [id, sub] of ws.data.subs) {
       if (sub.kind === "channel" && sub.key === key) {
         ws.send(JSON.stringify({ op: "presence", id, members: list }));
+      }
+    }
+  }
+}
+
+// Local membership changed: tell local subscribers and every peer pod.
+function broadcastPresence(key: string): void {
+  sendPresence(key);
+  cluster.broadcast("presence", { key, members: localPresence(key) });
+}
+
+cluster.onBroadcast("presence", ({ key, members }: { key: string; members: Person[] }, from) => {
+  if (!remotePresence.has(key)) remotePresence.set(key, new Map());
+  if (members.length) remotePresence.get(key)!.set(from, members);
+  else remotePresence.get(key)!.delete(from);
+  sendPresence(key);
+});
+
+cluster.onPeerLost((pod) => {
+  for (const [key, byPod] of remotePresence) {
+    if (byPod.delete(pod)) sendPresence(key);
+  }
+});
+
+// A channel message from a peer pod: fan out to this pod's members of that channel.
+cluster.onBroadcast("pub", ({ key, msg }: { key: string; msg: Record<string, unknown> }) => {
+  deliverPub(key, msg);
+});
+
+function deliverPub(key: string, base: Record<string, unknown>): void {
+  const members = channelMembers.get(key);
+  if (!members) return;
+  for (const [peer] of members) {
+    for (const [subId, sub] of peer.data.subs) {
+      if (sub.kind === "channel" && sub.key === key) {
+        peer.send(JSON.stringify({ ...base, id: subId }));
       }
     }
   }
@@ -303,7 +359,7 @@ async function handleSub(ws: WS, id: string, frame: Record<string, unknown>): Pr
     // A reconnecting client names where it left off; only that epoch's tail is missing.
     const epoch = Number(frame.epoch);
     const since = typeof frame.since === "string" && frame.since ? Number(frame.since) : NaN;
-    let room: DocRoomRef;
+    let room: DocRoomLike;
     try {
       room = await getRoom(ws.data.site, name);
     } catch (e) {
@@ -312,14 +368,21 @@ async function handleSub(ws: WS, id: string, frame: Record<string, unknown>): Pr
       return;
     }
     const client: DocClient = { send: (f) => ws.send(JSON.stringify(f)) };
-    ws.data.subs.set(id, { kind: "doc", key: `${ws.data.site}/${name}`, room, client });
-    room.subscribe(client, id);
-    const tail = Number.isFinite(epoch) && Number.isFinite(since) ? await room.updatesSince(epoch, since) : null;
-    if (tail) {
-      ws.send(JSON.stringify({ op: "doc_ack", id, seq: room.seq, epoch: room.epoch, resumed: true }));
-      for (const u of tail) ws.send(JSON.stringify({ op: "doc_update", id, seq: room.seq, update: b64(u) }));
-    } else {
-      ws.send(JSON.stringify(room.stateFrame("doc_state", id)));
+    ws.data.subs.set(id, { kind: "doc", key: `${ws.data.site}/${name}`, doc: name, client });
+    try {
+      await room.subscribe(client, id);
+      const tail = Number.isFinite(epoch) && Number.isFinite(since) ? await room.updatesSince(epoch, since) : null;
+      if (tail) {
+        ws.send(JSON.stringify({ op: "doc_ack", id, seq: room.seq, epoch: room.epoch, resumed: true }));
+        for (const u of tail) ws.send(JSON.stringify({ op: "doc_update", id, seq: room.seq, update: b64(u) }));
+      } else {
+        ws.send(JSON.stringify(await room.stateFrame("doc_state", id)));
+      }
+    } catch (e) {
+      ws.data.subs.delete(id);
+      room.unsubscribe(client);
+      const err = asWorldsError(e);
+      sendErr(ws, id, err.code, err.message);
     }
     return;
   }
@@ -331,7 +394,7 @@ async function handleSub(ws: WS, id: string, frame: Record<string, unknown>): Pr
 // current state), or `doc_reset` (stale epoch; carries the current state).
 async function handleDocUpdate(ws: WS, id: string, frame: Record<string, unknown>): Promise<void> {
   const sub = ws.data.subs.get(id);
-  if (!sub || sub.kind !== "doc" || !sub.room || !sub.client) {
+  if (!sub || sub.kind !== "doc" || !sub.doc || !sub.client) {
     sendErr(ws, id, "invalid_request", "doc_update needs an open doc subscription id");
     return;
   }
@@ -343,12 +406,14 @@ async function handleDocUpdate(ws: WS, id: string, frame: Record<string, unknown
     sendErr(ws, id, err.code, err.message);
     return;
   }
+  let room: DocRoomLike;
   try {
-    await sub.room.submit(ws.data.who, Number(frame.epoch), update, sub.client, id);
+    room = await getRoom(ws.data.site, sub.doc);
+    await room.submit(ws.data.who, Number(frame.epoch), update, sub.client, id);
   } catch (e) {
     const err = asWorldsError(e);
-    if (err.code === "conflict") {
-      ws.send(JSON.stringify(sub.room.stateFrame("doc_reset", id, { reason: "stale epoch" })));
+    if (err.code === "conflict" && room!) {
+      ws.send(JSON.stringify(await room.stateFrame("doc_reset", id, { reason: "stale epoch" })));
       return;
     }
     // Validation failures were already answered with doc_rejected by the room.
@@ -427,6 +492,11 @@ function handleActorEvent(ws: WS, frame: Record<string, unknown>): void {
   }
 }
 
+// Leave a document without opening it: only a room already in the registry needs to hear it.
+function leaveDoc(site: string, name: string, client: DocClient): void {
+  void peekRoom(site, name)?.then((room) => room.unsubscribe(client)).catch(() => {});
+}
+
 function handleUnsub(ws: WS, id: string): void {
   const sub = ws.data.subs.get(id);
   ws.data.subs.delete(id);
@@ -439,7 +509,7 @@ function handleUnsub(ws: WS, id: string): void {
     }
   }
   if (sub?.kind === "actors" && sub.cid) dropActor(ws, sub.key, sub.cid);
-  if (sub?.kind === "doc" && sub.room && sub.client) sub.room.unsubscribe(sub.client);
+  if (sub?.kind === "doc" && sub.doc && sub.client) leaveDoc(ws.data.site, sub.doc, sub.client);
 }
 
 function handlePub(ws: WS, id: string, frame: Record<string, unknown>): void {
@@ -453,22 +523,14 @@ function handlePub(ws: WS, id: string, frame: Record<string, unknown>): void {
     return;
   }
   const key = presenceKey(ws.data.site, String(frame.channel ?? ""));
-  const members = channelMembers.get(key);
   const base = {
     op: "msg",
     payload,
     from: { handle: ws.data.who.handle, name: ws.data.who.name },
     at: new Date().toISOString(),
   };
-  if (members) {
-    for (const [peer] of members) {
-      for (const [subId, sub] of peer.data.subs) {
-        if (sub.kind === "channel" && sub.key === key) {
-          peer.send(JSON.stringify({ ...base, id: subId }));
-        }
-      }
-    }
-  }
+  deliverPub(key, base);
+  cluster.broadcast("pub", { key, msg: base });
   ws.send(JSON.stringify({ op: "ack", id }));
 }
 
@@ -478,12 +540,20 @@ export const websocket = {
       pipeUpstream(ws.data.proxy, ws);
       return;
     }
+    if (ws.data.peer) {
+      cluster.attachInbound(ws.data.peer, { send: (d) => ws.send(d), close: () => ws.close() });
+      return;
+    }
     ensureChangeFeed();
   },
 
   async message(ws: WS, raw: string | Buffer): Promise<void> {
     if (ws.data.proxy) {
       sendUpstream(ws.data.proxy, raw);
+      return;
+    }
+    if (ws.data.peer) {
+      cluster.inboundMessage(ws.data.peer, raw);
       return;
     }
     let frame: Record<string, unknown>;
@@ -513,6 +583,10 @@ export const websocket = {
       closeUpstream(ws.data.proxy, code, reason);
       return;
     }
+    if (ws.data.peer) {
+      cluster.inboundClosed(ws.data.peer);
+      return;
+    }
     const touched = new Set<string>();
     for (const sub of ws.data.subs.values()) {
       if (sub.kind === "db") dropFromScope(dbSubs, sub.key, ws);
@@ -521,7 +595,7 @@ export const websocket = {
         touched.add(sub.key);
       }
       if (sub.kind === "actors" && sub.cid) dropActor(ws, sub.key, sub.cid);
-      if (sub.kind === "doc" && sub.room && sub.client) sub.room.unsubscribe(sub.client);
+      if (sub.kind === "doc" && sub.doc && sub.client) leaveDoc(ws.data.site, sub.doc, sub.client);
     }
     for (const key of touched) broadcastPresence(key);
   },

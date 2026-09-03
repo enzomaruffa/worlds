@@ -154,6 +154,19 @@ async function migratePostgres(): Promise<void> {
       at     timestamptz NOT NULL DEFAULT now(),
       PRIMARY KEY (site, name, epoch, seq)
     )`;
+  // Multi-pod bookkeeping (cluster.ts): who is alive, and who hosts which room.
+  await sql`
+    CREATE TABLE IF NOT EXISTS pods (
+      id        text PRIMARY KEY,
+      url       text NOT NULL,
+      last_seen timestamptz NOT NULL DEFAULT now()
+    )`;
+  await sql`
+    CREATE TABLE IF NOT EXISTS room_leases (
+      key        text PRIMARY KEY,
+      owner      text NOT NULL,
+      expires_at timestamptz NOT NULL
+    )`;
 }
 
 // Same shape, SQLite spelling: JSON lives in TEXT, timestamps are ISO-8601 strings
@@ -305,10 +318,22 @@ export interface ChangeEvent {
 
 type Listener = (ev: ChangeEvent) => void;
 const listeners = new Set<Listener>();
+const localListeners = new Set<Listener>();
 
+// Every committed change, whether this pod wrote it or a peer relayed it.
 export function onChange(fn: Listener): () => void {
   listeners.add(fn);
   return () => listeners.delete(fn);
+}
+
+// Only changes this pod wrote — what the cluster relays to the other pods.
+export function onLocalChange(fn: Listener): () => void {
+  localListeners.add(fn);
+  return () => localListeners.delete(fn);
+}
+
+export function dispatchRemoteChange(ev: ChangeEvent): void {
+  for (const fn of listeners) fn(ev);
 }
 
 export async function emitChange(
@@ -325,6 +350,7 @@ export async function emitChange(
   );
   const ev: ChangeEvent = { seq: Number(row.seq), site, collection, type, doc, cursor: String(row.seq) };
   for (const fn of listeners) fn(ev);
+  for (const fn of localListeners) fn(ev);
 }
 
 export const EVENT_RETENTION_HOURS = 24;
