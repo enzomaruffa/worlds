@@ -180,6 +180,23 @@ describe("doc room", () => {
     expect(textOf(again.snapshotState().state)).toBe("bye");
   });
 
+  test("deleting a document fails pending writes, tells subscribers, drops rows and frees the slot", async () => {
+    const room = await local("gone");
+    await room.submit(who, 1, textUpdate(null, "bye").update, null, null);
+    const frames: Record<string, unknown>[] = [];
+    room.subscribe({ send: (f: Record<string, unknown>) => frames.push(f) }, "s1");
+    const before = (await docs.listDocs(SITE)).length;
+    expect(await docs.deleteDoc(SITE, N("gone"))).toEqual({ deleted: true });
+    expect(frames.at(-1)).toMatchObject({ op: "error", id: "s1", error: { code: "not_found" } });
+    const [rows] = await db.sql`SELECT count(*) AS n FROM docs WHERE site = ${SITE} AND name = ${N("gone")}`;
+    expect(Number(rows.n)).toBe(0);
+    expect((await docs.listDocs(SITE)).length).toBe(before - 1);
+    expect(await docs.deleteDoc(SITE, N("gone"))).toEqual({ deleted: false });
+    const again = await local("gone");
+    expect(again.seq).toBe(0);
+    expect(textOf(again.snapshotState().state)).toBe("");
+  });
+
   test("document names are validated and per-site quota is enforced", async () => {
     await expect(docs.getRoom(SITE, "Bad Name")).rejects.toThrow(/bad document name/);
     const list = await docs.listDocs(SITE);

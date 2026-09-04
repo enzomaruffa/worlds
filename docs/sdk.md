@@ -138,7 +138,7 @@ Services and agents use the same document over HTTP with a bearer identity:
 `GET /api/v1/docs` · `GET /api/v1/docs/<name>` → `{epoch, seq, state}` ·
 `GET /api/v1/docs/<name>/updates?epoch=&since=` · `POST /api/v1/docs/<name>/updates {epoch, update}`
 → `{seq}` (409 `conflict` on a stale epoch, 400 `invalid_request` with `rule` on a schema
-violation) · `POST /api/v1/docs/<name>/rotate`. States and updates are base64.
+violation) · `POST /api/v1/docs/<name>/rotate` · `DELETE /api/v1/docs/<name>` (site contributors and services; subscribers get an `error` frame and the name is free again — `worlds.docs.remove(name)` from a page). States and updates are base64.
 
 ## Realtime channels — `worlds.ws`
 

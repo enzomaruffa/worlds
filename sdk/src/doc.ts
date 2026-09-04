@@ -1,4 +1,5 @@
 import { sock } from "./socket";
+import { call } from "./http";
 
 // worlds.doc(name) — the transport for ONE server-held collaborative document. The
 // server keeps the authoritative copy and persists every accepted update before anyone
@@ -43,6 +44,13 @@ export function fromBase64(s: string): Uint8Array {
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
   return out;
 }
+
+// Whole-document operations that need no live transport.
+export const docs = {
+  list: () => call("GET", "/api/v1/docs"),
+  // Site contributors and services only; subscribers get an error frame and the name is free again.
+  remove: (name: string) => call("DELETE", `/api/v1/docs/${encodeURIComponent(name)}`),
+};
 
 export function doc(name: string, handlers: DocHandlers): DocTransport {
   let epoch = 0;

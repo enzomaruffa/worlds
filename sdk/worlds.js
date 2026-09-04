@@ -1139,6 +1139,10 @@
       out[i] = bin.charCodeAt(i);
     return out;
   }
+  var docs = {
+    list: () => call("GET", "/api/v1/docs"),
+    remove: (name) => call("DELETE", `/api/v1/docs/${encodeURIComponent(name)}`)
+  };
   function doc(name, handlers) {
     let epoch = 0;
     let seq = 0;
@@ -1436,6 +1440,7 @@
     rooms,
     actors,
     doc,
+    docs,
     idle,
     id,
     colorFor,

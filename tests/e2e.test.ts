@@ -1130,6 +1130,15 @@ describe("worlds.doc", () => {
     expect(tail.updates.length).toBe(1);
     const listed = await (await req("GET", "/api/v1/docs")).json();
     expect(listed.items.map((d: any) => d.name)).toContain("plan-http");
+
+    // deleting frees the name: the socket subscriber is told, a fresh read starts over
+    const del = await req("DELETE", "/api/v1/docs/plan-http", { headers: asService });
+    expect(del.status).toBe(200);
+    expect(await del.json()).toEqual({ deleted: true });
+    await a.next((f) => f.op === "error" && f.error?.code === "not_found");
+    const fresh = await (await req("GET", "/api/v1/docs/plan-http")).json();
+    expect(fresh.seq).toBe(0);
+    expect((await (await req("GET", "/api/v1/docs")).json()).items.map((d: any) => d.name)).toContain("plan-http");
     a.close();
   });
 

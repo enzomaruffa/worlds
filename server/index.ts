@@ -230,6 +230,16 @@ async function api(req: Request, url: URL, site: string): Promise<Response> {
     const who = identityFrom(req);
     if (p.length === 1 && method === "GET") return json({ items: await docs.listDocs(site), next_cursor: null });
     const name = p[1]!;
+    if (p.length === 2 && method === "DELETE") {
+      // Writes are open to anyone signed in (the schema is the guard); deleting is not. A site
+      // without a row (folder-mounted in dev) has no contributors, so only a service may.
+      const s = await getSite(site);
+      const contributor = !!s && (s.creator === who.handle || s.contributors.includes(who.handle));
+      if (who.kind !== "service" && !contributor) {
+        throw new WorldsError("forbidden", "only a site contributor or a service may delete documents");
+      }
+      return json(await docs.deleteDoc(site, name));
+    }
     if (p.length === 2 && method === "GET") {
       const room = await docs.getRoom(site, name);
       const s = await room.state();

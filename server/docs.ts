@@ -27,7 +27,7 @@ export const DOC_LIMITS = {
   updateBytes: 512 * 1024,
   stateBytes: 4 * 1024 * 1024, // past this, subscribers are told a rotation is wanted
   hardStateBytes: 8 * 1024 * 1024, // past this, updates are refused
-  docsPerSite: 200,
+  docsPerSite: Math.max(1, Number(process.env.WORLDS_DOCS_PER_SITE ?? 200)),
   nameLength: 64,
   snapshotEvery: 200, // committed batches between snapshots
   snapshotLogBytes: 1024 * 1024,
@@ -345,6 +345,22 @@ export class DocRoom implements DocRoomLike {
     await this.snapshot();
     this.ydoc.destroy();
   }
+
+  // The document is being deleted: nothing queued commits, a flush already in flight is
+  // allowed to land first so no row is written after the delete, subscribers are told, and
+  // the Y.Doc goes away without a snapshot.
+  async evict(): Promise<void> {
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer);
+      this.flushTimer = null;
+    }
+    const gone = new WorldsError("not_found", "document deleted");
+    for (const p of this.pending.splice(0)) this.fail(p, gone);
+    if (this.flushing) await this.flushing.catch(() => {});
+    for (const [client, subId] of this.subs) client.send({ op: "error", id: subId, error: { code: gone.code, message: gone.message } });
+    this.subs.clear();
+    this.ydoc.destroy();
+  }
 }
 
 // One registry entry per open document, local or remote. A closing local room stays
@@ -421,6 +437,31 @@ export async function forgetRoom(site: string, name: string): Promise<void> {
   if (room instanceof DocRoom) room.ydoc.destroy();
 }
 
+// Remove a document for good: pending writes fail, subscribers hear the room is gone, the
+// rows go and the site's quota slot frees. Whether the caller may do this is the route's
+// decision; the owning pod does the work so no other pod is mid-write on the same rows.
+export async function deleteDoc(site: string, name: string): Promise<{ deleted: boolean }> {
+  requireDb();
+  checkDocName(name);
+  const k = key(site, name);
+  const owner = await cluster.acquire(k);
+  if (owner !== cluster.podId) {
+    const res = await cluster.request<{ deleted: boolean }>(owner, "doc.delete", { site, name });
+    rooms.delete(k);
+    return res;
+  }
+  const p = rooms.get(k);
+  rooms.delete(k);
+  if (p) {
+    const room = await p.catch(() => null);
+    if (room instanceof DocRoom) await room.evict();
+  }
+  const [row] = await sql`DELETE FROM docs WHERE site = ${site} AND name = ${name} RETURNING name`;
+  await sql`DELETE FROM doc_updates WHERE site = ${site} AND name = ${name}`;
+  await cluster.release(k);
+  return { deleted: !!row };
+}
+
 // Graceful stop: snapshot every open room so a restart replays nothing.
 export async function closeAllRooms(): Promise<void> {
   await Promise.all([...rooms.values()].map((p) => p.then((r) => (r instanceof DocRoom ? r.finish() : undefined)).catch(() => {})));
@@ -482,6 +523,8 @@ cluster.onRequest("doc.submit", async ({ site, name, epoch, update, who }: { sit
   const seq = await room.submit(who, Number(epoch), fromB64(update), null, null);
   return { seq, epoch: room.epoch };
 });
+
+cluster.onRequest("doc.delete", async ({ site, name }: { site: string; name: string }) => deleteDoc(site, name));
 
 cluster.onRequest("doc.rotate", async ({ site, name, epoch, state, who }: { site: string; name: string; epoch: number; state: string; who: Identity }) => {
   const room = await ownedRoom(site, name);

@@ -10,7 +10,7 @@ import { notify } from "./notify";
 import { room } from "./room";
 import { rooms } from "./rooms";
 import { actors } from "./actors";
-import { doc } from "./doc";
+import { doc, docs } from "./doc";
 import { idle } from "./idle";
 import { id, colorFor, uniqByHandle, esc, countdown } from "./util";
 import { toast } from "./toast";
@@ -38,6 +38,7 @@ const worlds: any = {
   rooms,
   actors,
   doc,
+  docs,
   idle,
   // batteries: small building blocks every multiplayer/collab site needs
   id,

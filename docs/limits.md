@@ -15,7 +15,7 @@ Quotas are floors — they can go up, never down for existing behavior.
 | WS payload | 16KB |
 | Document update (`worlds.doc`) | 512KB |
 | Document state | 4MB before a rotation is asked for; 8MB hard ceiling |
-| Documents per site | 200 |
+| Documents per site | 200 (operator override: `WORLDS_DOCS_PER_SITE`) |
 | Deploy bundle | 100MB, 2000 files |
 | Deploys per site | 60 / hour |
 
