@@ -7,19 +7,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends tar \
 
 WORKDIR /app
 
-# install (dev-only deps: bun-types) + build the SDK artifact from sdk/src
+# install (dev-only deps: bun-types, typescript) + build the SDK artifact from sdk/src
+# and the generated reference from the same source, so /worlds.js and
+# /docs/reference.md can never disagree with the code in this image.
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile
 COPY sdk ./sdk
-RUN bun run build:sdk
-
-# server + served assets. The universe ships so first boot can seed it as the
-# initial world (server/seed.ts).
 COPY server ./server
-COPY homepage ./homepage
 COPY docs ./docs
 COPY spec ./spec
+COPY scripts ./scripts
+RUN bun run build:sdk && bun run build:docs
+
+# served assets. The universe ships so first boot can seed it as the
+# initial world (server/seed.ts).
+COPY homepage ./homepage
 COPY tutorial ./tutorial
+COPY docsite ./docsite
 COPY universe ./universe
 
 ENV WORLDS_PORT=8420 \

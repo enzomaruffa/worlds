@@ -17,7 +17,8 @@ import { mountLeave } from "./leave";
 
 const worlds: any = {
   WorldsError,
-  site: { name: null, url: null },
+  // {name, url} of the site this page is — populated once `worlds.ready` resolves.
+  site: { name: null as string | null, url: null as string | null },
   me: () => call("GET", "/api/v1/me"),
   db: {
     collection,
