@@ -64,7 +64,12 @@ export function doc(name: string, handlers: DocHandlers): DocTransport {
   let resubAttempts = 0;
   // A dropped socket is reported as reconnecting until the next doc_state lands.
   const offConnection = sock.onConnection((state) => {
-    if (state === "closed") handlers.onStatus?.({ bytes: 0, rotateWanted: false, reconnecting: true });
+    if (state !== "closed") return;
+    // Ask for the whole state on the way back, not the tail: only a doc_state lets the client
+    // diff its own unsent edits against what the server has (frames queued during the outage
+    // may have died with the connection).
+    entry.cursor = null;
+    handlers.onStatus?.({ bytes: 0, rotateWanted: false, reconnecting: true });
   });
   const { id, entry, off } = sock.sub(frame, () => {}, {
     onDoc: (f: any) => {

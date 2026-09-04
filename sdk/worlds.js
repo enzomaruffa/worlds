@@ -1160,8 +1160,10 @@
     const frame = { op: "sub", kind: "doc", doc: name };
     let resubAttempts = 0;
     const offConnection = sock.onConnection((state) => {
-      if (state === "closed")
-        handlers.onStatus?.({ bytes: 0, rotateWanted: false, reconnecting: true });
+      if (state !== "closed")
+        return;
+      entry.cursor = null;
+      handlers.onStatus?.({ bytes: 0, rotateWanted: false, reconnecting: true });
     });
     const { id: id2, entry, off } = sock.sub(frame, () => {}, {
       onDoc: (f) => {
