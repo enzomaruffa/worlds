@@ -1,0 +1,609 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>worlds · docs</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+<div class="shell">
+<aside class="side" id="side">
+  <a class="brand" href="#top"><b>worlds</b> <span>docs</span></a>
+  <nav id="nav">
+    <div class="grp">start</div>
+    <a href="#start">What Worlds is</a>
+    <a href="#deploy">Deploy a site</a>
+    <div class="grp">the sdk, live</div>
+    <a href="#identity">Identity</a>
+    <a href="#db">Database</a>
+    <a href="#cross">Cross-world reads</a>
+    <a href="#ai">AI</a>
+    <a href="#uploads">Uploads</a>
+    <a href="#ws">Channels</a>
+    <a href="#room">Room</a>
+    <a href="#rooms">Rooms</a>
+    <a href="#actors">Actors</a>
+    <a href="#idle">Idle progress</a>
+    <a href="#utils">Utilities</a>
+    <a href="#notify">Notify</a>
+    <a href="#errors">Errors</a>
+    <div class="grp">platform</div>
+    <a href="#limits">Limits &amp; contract</a>
+    <a href="#how">How it works</a>
+    <a href="#agents">Agents &amp; MCP</a>
+    <a href="#examples">Example worlds</a>
+  </nav>
+  <div class="me" id="sideMe"><img alt="" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E" /><div><b>…</b><small>signing in</small></div></div>
+  <button class="btn sm ghost menu" id="menuBtn" aria-label="menu">☰</button>
+</aside>
+
+<main>
+<header class="hero" id="top">
+  <h1>Everything Worlds can do,<br /><em>running live.</em></h1>
+  <p>Worlds turns a folder of static files into <code>&lt;name&gt;.<span data-base-host>your-worlds-host</span></code> — signed-in only, with a database, AI, file uploads, realtime and identity behind one script tag. This page is itself a Worlds site built on the public SDK: every demo below talks to <b>this instance</b>, as <b>you</b>, for real.</p>
+  <div class="row">
+    <a class="btn primary" data-site-href="universe">🪐 fly the universe</a>
+    <a class="btn" data-site-href="hello">the 5-minute tutorial</a>
+    <a class="btn" data-root-href="/llms.txt">llms.txt</a>
+    <a class="btn" href="https://github.com/enzomaruffa/worlds" target="_blank" rel="noopener">source ↗</a>
+  </div>
+  <div class="chips">
+    <span class="chip"><span class="dot live"></span>instance <b data-base-host>…</b></span>
+    <span class="chip">routing <b id="chipRouting">…</b></span>
+    <span class="chip">api <b id="chipApi">…</b></span>
+    <span class="chip">you <b id="chipYou">…</b></span>
+  </div>
+</header>
+
+<!-- ======================================================================= -->
+<section id="start">
+  <h2>What Worlds is</h2>
+  <p class="lede">A small, self-hostable hosting platform for a team. Sign in with Google once, drop a folder, get a live URL. No pipelines, no keys, no infra. Inspired by Shopify's <em>Quick</em>.</p>
+  <ol class="steps">
+    <li><b>A folder with an <code>index.html</code></b> is a site. Add one tag and the whole platform is on <code>window.worlds</code>:
+      <pre><code>&lt;script src="/worlds.js"&gt;&lt;/script&gt;</code></pre></li>
+    <li><b>Deploy it</b> with the CLI, drag-and-drop, or an MCP tool. It's live at <code>https://&lt;name&gt;.<span data-base-host>your-worlds-host</span></code> in a second. Re-deploy to overwrite.</li>
+    <li><b>Use the batteries.</b> <code>worlds.db</code> for documents, <code>worlds.ai</code> for the model, <code>worlds.uploads</code> for files, <code>worlds.ws</code> / <code>room</code> / <code>rooms</code> / <code>actors</code> for multiplayer, <code>worlds.me()</code> for who's here. Everything is scoped to your site automatically and gated by the sign-in wall.</li>
+  </ol>
+  <div class="callout"><b>What it's not for:</b> public audiences, secrets (there are no permissions — anyone on the instance can read or overwrite any site), heavy compute, cron jobs, public webhooks. Inside the trust boundary it's deliberately simple; point the rest at a real backend.</div>
+  <div class="demo">
+    <div class="demo-head"><span class="dot live"></span><span class="title">this page's own context</span><span class="hint">what the SDK knows before you call anything</span></div>
+    <div class="demo-body">
+<pre><code>await worlds.ready;      <span class="c">// resolves once the site context is loaded</span>
+worlds.site;             <span class="c">// { name, url } — this page is the "docs" site</span>
+await fetch("/api/v1/meta").then(r =&gt; r.json());  <span class="c">// { api_version, build }</span></code></pre>
+      <div class="panel"><div class="out" id="ctxOut">…</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================================= -->
+<section id="deploy">
+  <h2>Deploy a site</h2>
+  <p class="lede">Three equivalent doors into the same <code>POST /api/v1/deploy</code>. Pick whichever is closest to hand.</p>
+  <div class="tabs" data-tabs="deploy">
+    <button class="on" data-tab="cli">CLI</button><button data-tab="drag">Browser</button><button data-tab="mcp">Claude / MCP</button>
+  </div>
+  <div class="tabpanes" data-tabpanes="deploy">
+    <div class="on" data-pane="cli">
+<pre><code><span class="c"># from the repo (or `bun run cli:build` once for a `worlds` binary)</span>
+bun cli/worlds.ts init my-site     <span class="c"># scaffolds index.html + .world.json</span>
+cd my-site &amp;&amp; bun ../cli/worlds.ts deploy
+<span class="c"># → https://my-site.<span data-base-host>your-worlds-host</span></span></code></pre>
+      <p class="lede">The CLI tars the folder and posts it. <code>worlds list</code> shows every world; <code>worlds open</code> opens yours. Point it at this instance with <code>WORLDS_HOST=<span data-base-host>your-worlds-host</span></code>.</p>
+    </div>
+    <div data-pane="drag">
+      <p class="lede">On the <a data-root-href="/">homepage</a>, hit <b>✦ deploy a world</b> and drop the folder onto the dialog. Same endpoint, no tooling.</p>
+      <p><a class="btn" data-root-href="/">open the homepage →</a></p>
+    </div>
+    <div data-pane="mcp">
+<pre><code><span class="c"># Claude Code</span>
+claude mcp add worlds --transport http <span data-root-text>https://your-worlds-host</span>/mcp
+
+<span class="c"># then just ask:</span>
+"Deploy this folder to Worlds as 'my-demo'."</code></pre>
+      <p class="lede">The MCP server exposes <code>deploy_site</code>, <code>list_sites</code>, <code>get_site</code>, <code>my_sites</code>, <code>db_query</code>, <code>read_docs</code> and <code>search_docs</code>. Auth rides your session cookie. More in <a href="#agents">Agents &amp; MCP</a>.</p>
+    </div>
+  </div>
+  <h3>Optional <code>.world.json</code></h3>
+<pre><code>{ "description": "what this is", "category": "games", "spa_fallback": true }</code></pre>
+  <p class="lede">Categories: <code>games</code> · <code>work</code> · <code>tools</code> · <code>experiments</code> · <code>misc</code> (default). They decide which star system your world orbits on the universe map. <code>spa_fallback</code> serves <code>index.html</code> for unknown paths.</p>
+  <h3>Rules of the road</h3>
+  <ul>
+    <li>Reserved names you can't deploy to: <code>api www home hello assets uploads list mcp docs u</code>.</li>
+    <li>Relative URLs inside a site (<code>./style.css</code>); only <code>/worlds.js</code> is absolute. Sites also work in path-routing mode (<code>/app/&lt;name&gt;/</code>) that way.</li>
+    <li>Re-deploys overwrite. The deploy log (<code>GET /api/v1/sites/&lt;name&gt;/deploys</code>) is the audit trail. Only the first uploader can overwrite a site.</li>
+    <li>Sites live forever without a rebuild: <code>/api/v1</code> and <code>/worlds.js</code> are frozen, additive-only.</li>
+  </ul>
+</section>
+
+<!-- ======================================================================= -->
+<section id="identity">
+  <h2>Identity <span class="k">worlds.me()</span></h2>
+  <p class="lede">Everyone on the instance is signed in at the edge, so a site never handles auth. One call tells you who's visiting; the same identity flows into presence, rooms and every document's <code>created_by</code>.</p>
+  <div class="demo">
+    <div class="demo-head"><span class="dot live"></span><span class="title">who are you</span><span class="hint">edit your handle on the homepage ⚙ — it updates everywhere</span></div>
+    <div class="demo-body">
+<pre><code>const me = await worlds.me();
+<span class="c">// { email, name, handle, avatar_url }</span>
+
+<span class="c">// a creator's public page:</span>
+<span class="c">//   </span><span data-root-text>https://your-worlds-host</span><span class="c">/@</span>&lt;handle&gt;</code></pre>
+      <div class="panel">
+        <div class="out" id="meOut">…</div>
+        <div class="row"><a class="btn sm" id="meProfile" href="#">your profile page →</a><span class="status" id="meNote"></span></div>
+      </div>
+    </div>
+  </div>
+  <p class="lede">Two auth modes on the server: <b>google</b> (built-in sign-in; restrict by domain or email) or <b>gateway</b> (trust a verified-email header from oauth2-proxy / IAP / Cloudflare Access). Sites don't know or care which.</p>
+</section>
+
+<!-- ======================================================================= -->
+<section id="db">
+  <h2>Database <span class="k">worlds.db</span></h2>
+  <p class="lede">Named collections of JSON documents (≤256KB each), scoped to your site, with filters, sorting, atomic counters, optimistic concurrency and a realtime change feed over one multiplexed WebSocket.</p>
+  <div class="demo">
+    <div class="demo-head"><span class="dot live"></span><span class="title">a shared to-do board</span><span class="hint">open this page in a second tab — every change streams across</span></div>
+    <div class="demo-body">
+<pre><code>const todos = worlds.db.collection("todos");
+await todos.create({ text, done: false, votes: 0, by: me.name });
+await todos.update(id, { done: true });          <span class="c">// shallow merge</span>
+await todos.increment(id, "votes", 1);          <span class="c">// atomic</span>
+await todos.delete(id);
+const page = await todos.list({
+  filter: { done: false },                        <span class="c">// eq, or {gt,gte,lt,lte,ne,in}</span>
+  sort: "-votes", limit: 20,                      <span class="c">// -field = desc</span>
+});
+const stop = todos.subscribe(ev =&gt; {             <span class="c">// {type: create|update|delete, doc}</span>
+  render(ev);
+});</code></pre>
+      <div class="panel">
+        <div class="row"><input type="text" id="todoInput" placeholder="add something…" autocomplete="off" /><button class="btn primary" id="todoAdd">add</button></div>
+        <div class="row">
+          <label class="chk"><input type="checkbox" id="todoOpenOnly" /> only open</label>
+          <select id="todoSort"><option value="-created_at">newest first</option><option value="-votes">most votes</option><option value="created_at">oldest first</option></select>
+          <span class="status grow"></span><span class="status" id="todoCount"></span>
+        </div>
+        <ul class="items" id="todoList"></ul>
+        <div class="log" id="todoLog"></div>
+      </div>
+    </div>
+  </div>
+  <div class="demo">
+    <div class="demo-head"><span class="dot"></span><span class="title">optimistic concurrency &amp; the collection index</span><span class="hint">no read-modify-write races</span></div>
+    <div class="demo-body">
+<pre><code><span class="c">// pass the updated_at you read; a moved doc rejects with `conflict`</span>
+const doc = await todos.get(id);
+await todos.update(id, { text: "v2" }, { ifUpdatedAt: doc.updated_at }); <span class="c">// ok</span>
+await todos.update(id, { text: "v3" }, { ifUpdatedAt: doc.updated_at }); <span class="c">// → WorldsError conflict</span>
+
+await worlds.db.collections();   <span class="c">// { items: [{ name, docs }] } — what this site has</span></code></pre>
+      <div class="panel">
+        <div class="row"><button class="btn" id="dbConflict">simulate a stale write</button><button class="btn" id="dbCollections">list my collections</button></div>
+        <div class="out" id="dbOut">…</div>
+      </div>
+    </div>
+  </div>
+  <p class="lede">Documents come back as <code>{ id, data, created_by, created_at, updated_at }</code>. Subscriptions survive reconnects (cursor replay); after a long gap the SDK re-lists for you, so renders should be idempotent.</p>
+</section>
+
+<!-- ======================================================================= -->
+<section id="cross">
+  <h2>Cross-world reads <span class="k">worlds.db.site()</span></h2>
+  <p class="lede">Reads are open across worlds — you could see the data by visiting the site anyway — while writes always stay with the owning site. The platform's own registry is just a collection on the <code>home</code> site, which is how the universe map draws itself.</p>
+  <div class="demo">
+    <div class="demo-head"><span class="dot live"></span><span class="title">every world on this instance</span><span class="hint">deploy something — it appears here without a refresh</span></div>
+    <div class="demo-body">
+<pre><code>const sites = worlds.db.site("home").collection("sites");
+const { items } = await sites.list({ sort: "-updated_at", limit: 12 });
+sites.subscribe(ev =&gt; addPlanet(ev.doc));   <span class="c">// live: new deploys pop in</span>
+
+await sites.create({});   <span class="c">// → WorldsError invalid_request: cross-world access is read-only</span></code></pre>
+      <div class="panel">
+        <ul class="items" id="sitesList"></ul>
+        <div class="row"><button class="btn sm" id="crossWrite">try a cross-world write</button><span class="status" id="crossOut"></span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================================= -->
+<section id="ai">
+  <h2>AI <span class="k">worlds.ai</span></h2>
+  <p class="lede">Completions (streaming or not), embeddings and images, with the provider key held server-side. Models are stable aliases — <code>fast</code> and <code>smart</code> — never raw provider ids, so a site keeps working when the vendor rotates models. Per-user daily caps apply.</p>
+  <div class="demo">
+    <div class="demo-head"><span class="dot live"></span><span class="title">streaming completion</span><span class="hint" id="aiModels">models: …</span></div>
+    <div class="demo-body">
+<pre><code>const { text, usage } = await worlds.ai.complete("one-line haiku about deploys");
+
+await worlds.ai.complete({
+  prompt, model: "fast", max_tokens: 200,
+  stream: true, onToken: t =&gt; out.textContent += t,   <span class="c">// resolves with the same {text, model, usage}</span>
+});
+
+<span class="c">// chat-style: { messages: [{role, content}], system, model: "smart" }</span>
+await worlds.ai.models();   <span class="c">// [{ alias: "fast", kind: "chat" }, …]</span></code></pre>
+      <div class="panel">
+        <textarea id="aiPrompt">In two sentences, what's a good use for an internal tool nobody has built yet?</textarea>
+        <div class="row">
+          <select id="aiModel"><option value="fast">fast</option><option value="smart">smart</option></select>
+          <label class="chk"><input type="checkbox" id="aiStream" checked /> stream</label>
+          <button class="btn primary" id="aiRun">ask</button>
+          <span class="status" id="aiUsage"></span>
+        </div>
+        <div class="out" id="aiOut"></div>
+      </div>
+    </div>
+  </div>
+  <div class="demo">
+    <div class="demo-head"><span class="dot"></span><span class="title">embeddings &amp; images</span><span class="hint">image generation spends 1 of your 50 daily images</span></div>
+    <div class="demo-body">
+<pre><code>const { vector } = await worlds.ai.embed("some text");   <span class="c">// number[]</span>
+<span class="c">// cosine similarity between two texts is a few lines away</span>
+
+const { url } = await worlds.ai.image("a tiny ringed planet", { size: "1024" });
+<span class="c">// the image is stored as one of this site's uploads</span></code></pre>
+      <div class="panel">
+        <div class="row"><input type="text" id="embA" value="deploy a folder, get a website" /><input type="text" id="embB" value="ship static files as a site" /><button class="btn" id="embRun">embed</button></div>
+        <div class="out" id="embOut">…</div>
+        <div class="row"><input type="text" id="imgPrompt" value="a tiny ringed planet, flat vector, dark background" /><button class="btn" id="imgRun">generate</button></div>
+        <div class="out" id="imgOut" style="display:none"></div>
+        <img id="imgResult" alt="" style="display:none; max-width:100%; border-radius:8px; border:1px solid var(--rule)" />
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================================= -->
+<section id="uploads">
+  <h2>Uploads <span class="k">worlds.uploads</span></h2>
+  <p class="lede">Per-site file storage: 25MB a file, 1GB a site. Files are served as bytes from <code>/u/&lt;site&gt;/&lt;name&gt;</code> — never as active documents — so an uploaded <code>.html</code> can't run.</p>
+  <div class="demo">
+    <div class="demo-head"><span class="dot live"></span><span class="title">put · list · delete</span><span class="hint">stored under this docs site</span></div>
+    <div class="demo-body">
+<pre><code>const { url, name, bytes } = await worlds.uploads.put(file);   <span class="c">// or put(file, { name })</span>
+const { items } = await worlds.uploads.list();
+await worlds.uploads.delete(name);</code></pre>
+      <div class="panel">
+        <div class="row"><input type="file" id="upFile" /><button class="btn primary" id="upPut">upload</button><button class="btn" id="upList">refresh list</button></div>
+        <div class="out" id="upOut">…</div>
+        <div class="gallery" id="upGallery"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================================= -->
+<section id="ws">
+  <h2>Realtime channels <span class="k">worlds.ws</span></h2>
+  <p class="lede">A stateless topic broadcast: publish to a named channel, everyone subscribed gets it, nothing is stored. The right tool for chat, strokes, buzzers, reactions. Every channel also has presence.</p>
+  <div class="demo">
+    <div class="demo-head"><span class="dot live"></span><span class="title">reactions</span><span class="hint" id="wsPresence">…</span></div>
+    <div class="demo-body">
+<pre><code>const ch = worlds.ws.channel("reactions");
+ch.publish({ emoji: "🎉", cid: worlds.id() });      <span class="c">// ≤16KB, fire-and-forget</span>
+ch.subscribe(msg =&gt; {                                <span class="c">// { payload, from: {handle, name}, at }</span>
+  if (msg.payload.cid === worlds.id()) return;      <span class="c">// skip my own echo (optional)</span>
+  float(msg.payload.emoji, msg.from.name);
+});
+ch.presence(list =&gt; count.textContent = worlds.uniqByHandle(list).length);</code></pre>
+      <div class="panel">
+        <div class="row" id="wsButtons"><button class="btn" data-emoji="🎉">🎉</button><button class="btn" data-emoji="👀">👀</button><button class="btn" data-emoji="🔥">🔥</button><button class="btn" data-emoji="🪐">🪐</button><button class="btn" data-emoji="💯">💯</button></div>
+        <div class="stage" id="wsStage"></div>
+        <div class="log" id="wsLog"></div>
+      </div>
+    </div>
+  </div>
+  <div class="tbl-wrap"><table>
+    <thead><tr><th>need</th><th>use</th></tr></thead>
+    <tbody>
+      <tr><td>Fire an event to everyone, no per-member identity or state</td><td><code>worlds.ws.channel</code></td></tr>
+      <tr><td>Per-member live state + nearby events, scales to a crowd</td><td><code>worlds.actors</code></td></tr>
+      <tr><td>One shared authoritative doc + a roster/lobby (turn-based, boards)</td><td><code>worlds.room</code></td></tr>
+      <tr><td>Many concurrent rooms with join codes (a lobby browser)</td><td><code>worlds.rooms</code></td></tr>
+    </tbody>
+  </table></div>
+  <div class="callout"><b>Trust model:</b> realtime is client-authoritative — peers relay each other's state and the server doesn't validate gameplay. Keep results that matter (scores, unlocks) in <code>worlds.db</code>.</div>
+</section>
+
+<!-- ======================================================================= -->
+<section id="room">
+  <h2>One shared room <span class="k">worlds.room</span></h2>
+  <p class="lede">The two things every multiplayer app re-implements, as one primitive: a <b>roster</b> (who's here, a stable host, ready toggles, start / back-to-lobby) and, if you pass <code>initial</code>, one <b>authoritative document</b> that's load-or-created, kept live and guarded against out-of-order writes. A waiting room is a room with no <code>initial</code>; a board game is a room with one.</p>
+  <div class="demo">
+    <div class="demo-head"><span class="dot live"></span><span class="title">a shared pixel board</span><span class="hint">paint in one tab, watch the other · roster is keyed by handle, so two of your tabs are one member</span></div>
+    <div class="demo-body">
+<pre><code>const r = worlds.room("pixels", {
+  initial: () =&gt; ({ cells: Array(64).fill(null) }),   <span class="c">// the shared doc</span>
+  minPlayers: 1, maxPlayers: 8, autoStart: false,
+  onChange: s =&gt; render(s),      <span class="c">// roster OR state changed</span>
+  onStart:  s =&gt; begin(s),       <span class="c">// on every client</span>
+  onReturn: s =&gt; lobby(s),
+});
+await r.ready;
+await r.merge({ cells: next });  <span class="c">// shallow-merge, monotonic; false on conflict → r.refetch()</span>
+r.toggleReady(); r.start(); r.returnToLobby(); await r.reset();
+r.members; r.isHost; r.state;    <span class="c">// snapshot also has ready, readyCount, allReady, full, started, loaded</span></code></pre>
+      <div class="panel">
+        <div class="row"><div class="board" id="board"></div></div>
+        <div class="members" id="roomMembers"></div>
+        <div class="row">
+          <button class="btn sm" id="roomReady">I'm ready</button>
+          <button class="btn sm" id="roomStart" disabled>start (host)</button>
+          <button class="btn sm" id="roomReturn">back to lobby</button>
+          <button class="btn sm danger" id="roomReset">clear board</button>
+        </div>
+        <div class="status" id="roomStatus"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================================= -->
+<section id="rooms">
+  <h2>Many rooms <span class="k">worlds.rooms</span></h2>
+  <p class="lede">The plural: a live directory of concurrent rooms with private join codes — a lobby browser. Each <code>create</code> / <code>join</code> / <code>joinByCode</code> hands back a normal <code>worlds.room</code> scoped to its own instance. Rooms whose host goes quiet are swept, so the list heals itself after closed tabs.</p>
+  <div class="demo">
+    <div class="demo-head"><span class="dot live"></span><span class="title">tables</span><span class="hint">create one here, join it by code from another tab or a teammate</span></div>
+    <div class="demo-body">
+<pre><code>const hall = worlds.rooms("tables", {
+  maxPlayers: 4,
+  initial: () =&gt; ({ taps: 0 }),          <span class="c">// each table gets its own state</span>
+  onList: rooms =&gt; renderLobby(rooms),  <span class="c">// [{ id, code, name, host, members, count, max, status, private }]</span>
+});
+const table = await hall.create({ name: "Enzo's table" });   <span class="c">// or { private: true }</span>
+const table = await hall.join(id);
+const table = await hall.joinByCode("K7QF");
+table.code; table.id; await table.merge({ taps: table.state.taps + 1 });
+await hall.leave();     <span class="c">// leave the table, keep browsing</span>
+hall.destroy();         <span class="c">// tear the directory down</span></code></pre>
+      <div class="panel">
+        <div class="row"><input type="text" id="hallName" placeholder="table name" autocomplete="off" /><label class="chk"><input type="checkbox" id="hallPrivate" /> private</label><button class="btn primary" id="hallCreate">create</button></div>
+        <div class="row"><input type="text" id="hallCode" placeholder="join by code…" autocomplete="off" maxlength="4" style="text-transform:uppercase" /><button class="btn" id="hallJoinCode">join</button></div>
+        <div class="rooms-list" id="hallList"></div>
+        <div id="hallJoined" style="display:none">
+          <div class="row"><span class="status">you're in <b id="hallJoinedName"></b> · code</span><span class="bigcode" id="hallJoinedCode"></span></div>
+          <div class="members" id="hallMembers"></div>
+          <div class="row"><button class="btn primary" id="hallTap">tap</button><span class="status">shared taps: <b id="hallTaps">0</b></span><button class="btn sm" id="hallLeave" style="margin-left:auto">leave table</button></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================================= -->
+<section id="actors">
+  <h2>Zoned presence <span class="k">worlds.actors</span></h2>
+  <p class="lede">The realtime tier for per-member <b>state</b> at frame rate, plus <b>metadata</b> and one-off <b>events</b>, all routed by the server only to peers in the same <b>zone</b>. Derive the zone from state (a grid cell) and you sync only nearby players no matter how many connect. A joiner gets an instant in-zone snapshot; the server rate-caps the flush.</p>
+  <div class="demo">
+    <div class="demo-head"><span class="dot live"></span><span class="title">a field with six zones</span><span class="hint">move your mouse · you only see peers in your cell · click to ping them</span></div>
+    <div class="demo-body">
+<pre><code>const net = worlds.actors("field", {
+  zoneKey: s =&gt; s.cell,           <span class="c">// same zone = see each other</span>
+  rate: 15,                        <span class="c">// server flush Hz (1..20)</span>
+  metadata: { team: "gold" },
+  <span class="c">// observer: true,             // watch read-only, invisible to peers</span>
+});
+net.set({ x, y, cell });                          <span class="c">// frame state, coalesced</span>
+net.setMetadata({ team: "teal" });                <span class="c">// infrequent fields</span>
+net.send({ t: "ping" });                          <span class="c">// event → in-zone peers</span>
+net.onChange((id, state, peer) =&gt; draw(peer));    <span class="c">// peer = {id, handle, name, state, metadata}</span>
+net.onEvent((id, payload, from) =&gt; ripple(id));
+net.onLeave(id =&gt; remove(id));
+net.others();  net.destroy();</code></pre>
+      <div class="panel">
+        <div class="field" id="field"></div>
+        <div class="row">
+          <span class="status">team</span>
+          <select id="actTeam"><option value="gold">gold</option><option value="teal">teal</option><option value="pink">pink</option><option value="sky">sky</option></select>
+          <label class="chk"><input type="checkbox" id="actObserver" /> observer (invisible)</label>
+          <span class="status" id="actStatus" style="margin-left:auto"></span>
+        </div>
+        <div class="log" id="actLog"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================================= -->
+<section id="idle">
+  <h2>Idle progress <span class="k">worlds.idle</span></h2>
+  <p class="lede">The battery every tend-it game re-implements: remember when the player was last here, credit the (capped) time away, show a "while you were away" summary. The SDK owns the generic half; your game owns how its world advances over N seconds.</p>
+  <div class="demo">
+    <div class="demo-head"><span class="dot live"></span><span class="title">while you were away</span><span class="hint">reload after ~10s to see a credited gap</span></div>
+    <div class="demo-body">
+<pre><code>const idle = worlds.idle("docs-demo", { cap: 8 * 3600, min: 10 });   <span class="c">// cap/min in seconds</span>
+const secs = await idle.elapsed();           <span class="c">// capped seconds away, or null (first / too short)</span>
+if (secs) {
+  const report = { dew: secs * 2, honey: Math.floor(secs / 60) };   <span class="c">// YOUR catch-up math</span>
+  idle.summary(report, { title: "While you were away" });          <span class="c">// self-contained modal</span>
+}
+idle.beat();   <span class="c">// stamp lastSeen = now (also automatic on tab-hide / unload)</span>
+<span class="c">// store: "local" (default) | "db" (per-player doc) | "none" (you pass lastSeen)</span></code></pre>
+      <div class="panel">
+        <div class="out" id="idleOut">…</div>
+        <div class="row"><button class="btn" id="idleBeat">beat()</button><button class="btn" id="idleSummary">show a summary modal</button></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================================= -->
+<section id="utils">
+  <h2>Utilities <span class="k">worlds.*</span></h2>
+  <p class="lede">Small things every multiplayer / collab site re-implements, shipped once so you don't.</p>
+  <div class="demo">
+    <div class="demo-head"><span class="dot"></span><span class="title">toast · id · colorFor · uniqByHandle · esc · countdown</span></div>
+    <div class="demo-body">
+<pre><code>worlds.toast("saved!");                 <span class="c">// transient toast, injects its own element</span>
+worlds.id();                            <span class="c">// stable per-tab id</span>
+worlds.colorFor(handle);                <span class="c">// deterministic hsl(…) — same handle, same color everywhere</span>
+worlds.uniqByHandle(members);           <span class="c">// dedupe a presence list → [{handle, name}]</span>
+worlds.esc(userText);                   <span class="c">// HTML-escape before innerHTML</span>
+const t = worlds.countdown(Date.now() + 10_000, {
+  onTick: ms =&gt; bar.style.width = `${100 - ms / 100}%`,
+  onEnd:  () =&gt; worlds.toast("time!"),
+});   <span class="c">// t.destroy() to cancel</span></code></pre>
+      <div class="panel">
+        <div class="row"><button class="btn" id="utToast">toast</button><span class="status">id(): <code id="utId">…</code></span></div>
+        <div class="row"><input type="text" id="utColorIn" placeholder="any handle…" /><span class="swatch" id="utSwatch"></span><code id="utColor"></code></div>
+        <div class="row"><input type="text" id="utEscIn" value="<b>hi</b> & bye" /><code id="utEsc"></code></div>
+        <div class="row"><button class="btn" id="utCount">10s countdown</button><div class="bar grow"><i id="utBar"></i></div><span class="status" id="utLeft"></span></div>
+        <div class="row"><span class="status">uniqByHandle([enzo, enzo, ana]) →</span><code id="utUniq"></code></div>
+      </div>
+    </div>
+  </div>
+  <p class="lede">Every site also gets an automatic <b>◐ Worlds</b> leave pill (top-left) that flies the visitor back to the universe — no world is a dead end. Opt out with <code>window.__worldsNoLeave = true</code> before the script tag.</p>
+</section>
+
+<!-- ======================================================================= -->
+<section id="notify">
+  <h2>Notify <span class="k">worlds.notify.slack</span></h2>
+  <p class="lede">Post to a Slack channel from a site. Capped per user per day and always stamped with the site and sender — notify, never impersonate. Scheduled reports become "refresh when opened, ping Slack when off".</p>
+  <div class="demo">
+    <div class="demo-head"><span class="dot"></span><span class="title">send a message</span><span class="hint">this posts to a real channel if the instance has a Slack token</span></div>
+    <div class="demo-body">
+<pre><code>await worlds.notify.slack("#my-channel", "the dashboard went red");</code></pre>
+      <div class="panel">
+        <div class="row"><input type="text" id="slackChannel" placeholder="#channel" style="max-width:160px" /><input type="text" id="slackText" value="hello from the Worlds docs" /><button class="btn" id="slackSend">send</button></div>
+        <div class="out" id="slackOut">…</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================================= -->
+<section id="errors">
+  <h2>Errors <span class="k">WorldsError</span></h2>
+  <p class="lede">Every rejected promise is a <code>WorldsError</code> — <code>{ code, message, status, retryAfter? }</code> — and <code>code</code> comes from a frozen registry, so you can branch on it forever. Session expiry redirects to sign-in and transient GET failures retry on their own; you never handle auth or flaky networks yourself.</p>
+  <div class="demo">
+    <div class="demo-head"><span class="dot"></span><span class="title">trigger one</span><span class="hint">real requests, real envelopes</span></div>
+    <div class="demo-body">
+<pre><code>try { await c.create(doc); }
+catch (e) {
+  if (e.code === "quota_exceeded") worlds.toast("easy there!");
+  else if (e.code === "conflict") await refetchAndRetry();
+  else throw e;
+}
+<span class="c">// wire shape: { error: { code, message, retry_after? } }</span></code></pre>
+      <div class="panel">
+        <div class="row">
+          <button class="btn sm" data-err="not_found">not_found</button>
+          <button class="btn sm" data-err="invalid_request">invalid_request</button>
+          <button class="btn sm" data-err="payload_too_large">payload_too_large</button>
+          <button class="btn sm" data-err="conflict">conflict</button>
+          <button class="btn sm" data-err="read_only">cross-world write</button>
+        </div>
+        <div class="out" id="errOut">…</div>
+      </div>
+    </div>
+  </div>
+  <div class="tbl-wrap"><table>
+    <thead><tr><th>code</th><th>status</th><th>when</th></tr></thead>
+    <tbody>
+      <tr><td><code>unauthorized</code></td><td>401</td><td>no session (the SDK redirects to sign-in)</td></tr>
+      <tr><td><code>invalid_request</code></td><td>400</td><td>bad body, unknown model alias, cross-world write</td></tr>
+      <tr><td><code>forbidden</code></td><td>403</td><td>overwriting a site someone else owns</td></tr>
+      <tr><td><code>not_found</code></td><td>404</td><td>no such doc, site, upload, endpoint</td></tr>
+      <tr><td><code>conflict</code> / <code>reserved_name</code></td><td>409</td><td>stale <code>ifUpdatedAt</code>, taken handle · deploying to a reserved name</td></tr>
+      <tr><td><code>replay_expired</code></td><td>410</td><td>a subscription cursor too old to replay (the SDK re-lists for you)</td></tr>
+      <tr><td><code>payload_too_large</code></td><td>413</td><td>doc &gt; 256KB, upload &gt; 25MB, bundle &gt; 100MB</td></tr>
+      <tr><td><code>rate_limited</code> / <code>quota_exceeded</code></td><td>429</td><td>too fast (carries <code>retryAfter</code>) · a daily or per-site cap</td></tr>
+      <tr><td><code>upstream_error</code></td><td>502</td><td>the AI provider failed</td></tr>
+      <tr><td><code>maintenance</code></td><td>503</td><td>database unavailable</td></tr>
+      <tr><td><code>internal</code></td><td>500</td><td>a bug — please report it</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<!-- ======================================================================= -->
+<section id="limits">
+  <h2>Limits &amp; the forever contract</h2>
+  <p class="lede">Quotas are floors: they can go up, never down for existing behavior.</p>
+  <div class="tbl-wrap"><table>
+    <thead><tr><th>thing</th><th>limit</th><th>thing</th><th>limit</th></tr></thead>
+    <tbody>
+      <tr><td>Document size</td><td>256KB</td><td>AI completions</td><td>200 / user / day</td></tr>
+      <tr><td>Collections per site</td><td>50</td><td>AI images</td><td>50 / user / day</td></tr>
+      <tr><td>Documents per collection</td><td>50,000</td><td>AI input</td><td>200,000 chars</td></tr>
+      <tr><td>Upload size</td><td>25MB</td><td>Slack notifies</td><td>50 / user / day</td></tr>
+      <tr><td>Uploads per site</td><td>1GB</td><td>WS payload</td><td>16KB</td></tr>
+      <tr><td>Deploy bundle</td><td>100MB, 2000 files</td><td>Deploys per site</td><td>60 / hour</td></tr>
+    </tbody>
+  </table></div>
+  <h3>The v1 contract never breaks</h3>
+  <p class="lede">Deployed sites are never rebuilt, so <code>/api/v1</code> and <code>/worlds.js</code> are frozen and additive-only: endpoints, fields and error codes are never removed, renamed or retyped. <code>/worlds.js</code> is the evergreen alias (served <code>no-store</code> so a new SDK reaches every site immediately); <code>/v1/worlds.js</code> is pinned and immutable. Your site works in five years without a rebuild. That's the whole deal.</p>
+  <h3>Caching</h3>
+  <p class="lede">Site HTML is <code>no-cache</code> with content-hash ETags, so an overwrite-deploy shows up on the next refresh and unchanged bytes 304. App code (<code>.js/.css</code>) is <code>no-store</code>; binary media gets a real <code>max-age</code>; anything under <code>/vendor/</code> caches for a day. <code>db</code> / <code>me</code> / <code>ai</code> responses are never cached.</p>
+  <p class="lede">Machine-readable: <a data-root-href="/docs/limits.md">limits.md</a> · <a data-root-href="/docs/reference.md">reference.md</a> (generated from the SDK source) · <a data-root-href="/llms-full.txt">llms-full.txt</a>.</p>
+</section>
+
+<!-- ======================================================================= -->
+<section id="how">
+  <h2>How it works</h2>
+  <p class="lede">One Bun + TypeScript server with no runtime npm dependencies. It multiplexes by <code>Host</code>: <code>&lt;site&gt;.&lt;base&gt;</code> serves that site's files, the bare base is the homepage, <code>/api/v1/*</code> is the platform, and one WebSocket at <code>/api/v1/socket</code> carries every subscription, channel and presence on a page.</p>
+  <div class="cards">
+    <div class="card"><h4>Storage</h4><p><b>Postgres</b> by default, or <b>SQLite</b> (<code>WORLDS_DB=sqlite</code>) to run the whole platform off one file — with optional S3 snapshots for durability. Both hold collections, the deploy log, profiles and the change feed.</p></div>
+    <div class="card"><h4>Files</h4><p>Sites and uploads sit behind a <code>BlobStore</code> seam: local disk by default, S3-compatible (AWS, R2, MinIO) when a bucket is set. Bundled apps ship in the image and reads fall through to them.</p></div>
+    <div class="card"><h4>Auth</h4><p><b>google</b>: built-in sign-in, session cookie scoped to <code>*.&lt;base&gt;</code> so one login covers every site; restrict by domain or email. <b>gateway</b>: trust a verified-email header from your proxy.</p></div>
+    <div class="card"><h4>Routing</h4><p><b>subdomain</b> (default) needs wildcard DNS + TLS. <b>path</b> serves sites at <code>/app/&lt;name&gt;/</code> off one origin — no wildcard, works on free Cloudflare — trading per-site origin isolation. This instance: <b id="howRouting">…</b>.</p></div>
+    <div class="card"><h4>AI</h4><p>Gemini behind stable aliases, server-side key only. Streaming rides SSE. Embeddings feed the universe layout, so similar sites cluster as neighbouring planets.</p></div>
+    <div class="card"><h4>The universe</h4><p>The homepage is a 3D galaxy where every site is a planet, sized by visits and coloured by category. It's just another Worlds site on the public SDK, seeded on first boot.</p></div>
+  </div>
+  <h3>Run your own</h3>
+<pre><code>cp .env.example .env        <span class="c"># GOOGLE_CLIENT_ID/SECRET, WORLDS_SESSION_SECRET, GEMINI_API_KEY</span>
+docker compose up           <span class="c"># server + Postgres → http://worlds.localhost:8420</span></code></pre>
+  <p class="lede">The image builds <code>/worlds.js</code> and the generated reference from source, so what a fork serves always matches the code it runs. Full deploy notes in the repo's <code>deploy/README.md</code>.</p>
+  <div class="demo">
+    <div class="demo-head"><span class="dot live"></span><span class="title">platform endpoints</span><span class="hint">plain fetch, same session</span></div>
+    <div class="demo-body stack">
+<pre><code>GET /api/v1/meta          <span class="c">// { api_version, build }</span>
+GET /api/v1/site          <span class="c">// { name, url, status } for the calling site</span>
+GET /api/v1/sites?limit=5 <span class="c">// the directory the homepage lists</span>
+GET /healthz              <span class="c">// "ok" — exempt from the sign-in wall</span></code></pre>
+      <div class="panel"><div class="row"><button class="btn sm" data-get="/api/v1/meta">meta</button><button class="btn sm" data-get="/api/v1/site">site</button><button class="btn sm" data-get="/api/v1/sites?limit=5">sites</button><button class="btn sm" data-get="/healthz">healthz</button></div><div class="out" id="howOut">…</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================================= -->
+<section id="agents">
+  <h2>Agents &amp; MCP</h2>
+  <p class="lede">Worlds is built to be driven by an agent. Everything an LLM needs is served from this instance and generated from the code that runs it, so the docs it reads can't be stale.</p>
+  <div class="cards">
+    <div class="card"><h4>llms.txt</h4><p>The index: one line per doc page with a blurb. <a data-root-href="/llms.txt">/llms.txt</a></p></div>
+    <div class="card"><h4>llms-full.txt</h4><p>Every doc page concatenated — quickstart, the narrative SDK guide, the generated reference and the limits. <a data-root-href="/llms-full.txt">/llms-full.txt</a></p></div>
+    <div class="card"><h4>reference.md</h4><p>The complete SDK surface — every exported type, option and signature with its source comment, plus errors, limits, model aliases, the HTTP table and the MCP tools — regenerated from <code>sdk/src</code> on every build. <a data-root-href="/docs/reference.md">/docs/reference.md</a></p></div>
+    <div class="card"><h4>MCP server</h4><p><code><span data-root-text>https://your-worlds-host</span>/mcp</code> — JSON-RPC over HTTP, no SDK needed. Tools: <code>deploy_site</code> <code>list_sites</code> <code>get_site</code> <code>my_sites</code> <code>db_query</code> <code>read_docs</code> <code>search_docs</code>.</p></div>
+    <div class="card"><h4>world-site skill</h4><p>A Claude skill with the deploy path, an SDK cheat sheet, copy-paste recipes and a starter template. <a href="https://github.com/enzomaruffa/worlds/tree/main/skills/world-site" target="_blank" rel="noopener">skills/world-site ↗</a></p></div>
+    <div class="card"><h4>OpenAPI</h4><p><code>spec/world-v1.yaml</code> is the frozen HTTP contract the SDK sits on; the generated reference renders it as a table.</p></div>
+  </div>
+<pre><code><span class="c"># Claude Code</span>
+claude mcp add worlds --transport http <span data-root-text>https://your-worlds-host</span>/mcp
+
+<span class="c"># Claude Desktop / any MCP client — streamable HTTP, no SSE</span>
+{ "mcpServers": { "worlds": { "url": "<span data-root-text>https://your-worlds-host</span>/mcp" } } }</code></pre>
+</section>
+
+<!-- ======================================================================= -->
+<section id="examples">
+  <h2>Example worlds</h2>
+  <p class="lede">The reference implementations in <code>examples/games/</code> are the best way to learn the SDK in anger. Cards link to the live site when this instance has it deployed.</p>
+  <div class="cards" id="exampleCards"></div>
+</section>
+
+<div class="foot">
+  This page is a Worlds site served at the reserved <code>docs</code> host from the server image, so every fork has it. The narrative guide it follows is <a data-root-href="/docs/sdk.md">sdk.md</a>; the exhaustive one is generated: <a data-root-href="/docs/reference.md">reference.md</a>.
+</div>
+</main>
+</div>
+
+<script>window.__worldsNoLeave = true; // the sidebar already links home; the pill would sit on the brand</script>
+<script src="/worlds.js"></script>
+<script src="./app.js"></script>
+</body>
+</html>
