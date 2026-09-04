@@ -131,7 +131,9 @@ await transport.ready;
   (`POST /api/v1/docs/<name>/rotate {epoch, state}`), which becomes epoch+1 with an empty
   log. Every subscriber gets `onReset`. The server never decodes content, so it never
   compacts on its own; past 4MB of state it sets `onStatus({rotateWanted: true})`.
-- Reconnects resume from the last committed `seq` and receive only the tail.
+- A reconnecting subscription asks for the whole state again (not the tail), so a client can
+  diff and re-send edits it made while the socket was down — that is what `onState` firing
+  again on reconnect is for.
 - A `maintenance` error on the subscription (the room is re-homing after a pod died, or the
   database blinked) is retried with backoff — `onStatus({reconnecting: true})` fires meanwhile —
   and only surfaces through `onError` after eight failed attempts.
