@@ -62,6 +62,10 @@ export function doc(name: string, handlers: DocHandlers): DocTransport {
   // reconnect asks only for the tail we missed instead of the whole state.
   const frame: Record<string, unknown> & { op: string } = { op: "sub", kind: "doc", doc: name };
   let resubAttempts = 0;
+  // A dropped socket is reported as reconnecting until the next doc_state lands.
+  const offConnection = sock.onConnection((state) => {
+    if (state === "closed") handlers.onStatus?.({ bytes: 0, rotateWanted: false, reconnecting: true });
+  });
   const { id, entry, off } = sock.sub(frame, () => {}, {
     onDoc: (f: any) => {
       if (f.op === "doc_state") {
@@ -118,6 +122,9 @@ export function doc(name: string, handlers: DocHandlers): DocTransport {
     send(update: Uint8Array) {
       sock.send({ op: "doc_update", id, epoch, update: toBase64(update) });
     },
-    close: off,
+    close: () => {
+      offConnection();
+      off();
+    },
   };
 }

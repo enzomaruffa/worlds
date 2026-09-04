@@ -69,6 +69,11 @@
     nextId: 1,
     subs: new Map,
     outbox: [],
+    connectionListeners: new Set,
+    onConnection(fn) {
+      this.connectionListeners.add(fn);
+      return () => this.connectionListeners.delete(fn);
+    },
     open() {
       if (this.ws && (this.ws.readyState === 0 || this.ws.readyState === 1))
         return;
@@ -78,6 +83,8 @@
       this.ws = new WebSocket(`${proto}//${location.host}/api/v1/socket${q}`, "worlds.v1");
       this.ws.onopen = () => {
         this.backoff = 1000;
+        for (const fn of this.connectionListeners)
+          fn("open");
         for (const [id, sub] of this.subs) {
           const frame = { ...sub.frame, id };
           if (sub.cursor)
@@ -127,6 +134,8 @@
         }
       };
       this.ws.onclose = () => {
+        for (const fn of this.connectionListeners)
+          fn("closed");
         if (this.subs.size === 0 && this.outbox.length === 0)
           return;
         setTimeout(() => this.open(), this.backoff);
@@ -1150,6 +1159,10 @@
     const ready = new Promise((r) => resolveReady = r);
     const frame = { op: "sub", kind: "doc", doc: name };
     let resubAttempts = 0;
+    const offConnection = sock.onConnection((state) => {
+      if (state === "closed")
+        handlers.onStatus?.({ bytes: 0, rotateWanted: false, reconnecting: true });
+    });
     const { id: id2, entry, off } = sock.sub(frame, () => {}, {
       onDoc: (f) => {
         if (f.op === "doc_state") {
@@ -1211,7 +1224,10 @@
       send(update) {
         sock.send({ op: "doc_update", id: id2, epoch, update: toBase64(update) });
       },
-      close: off
+      close: () => {
+        offConnection();
+        off();
+      }
     };
   }
 

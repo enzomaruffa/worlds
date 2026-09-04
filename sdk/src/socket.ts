@@ -29,6 +29,13 @@ export const sock = {
   nextId: 1,
   subs: new Map<string, Sub>(),
   outbox: [] as Frame[],
+  connectionListeners: new Set<(state: "open" | "closed") => void>(),
+
+  // Connection state for callers that show it (an editor going read-only while offline).
+  onConnection(fn: (state: "open" | "closed") => void): () => void {
+    this.connectionListeners.add(fn);
+    return () => this.connectionListeners.delete(fn);
+  },
 
   open(): void {
     if (this.ws && (this.ws.readyState === 0 || this.ws.readyState === 1)) return;
@@ -39,6 +46,7 @@ export const sock = {
     this.ws = new WebSocket(`${proto}//${location.host}/api/v1/socket${q}`, "worlds.v1");
     this.ws.onopen = () => {
       this.backoff = 1000;
+      for (const fn of this.connectionListeners) fn("open");
       for (const [id, sub] of this.subs) {
         const frame: Frame = { ...sub.frame, id };
         if (sub.cursor) frame.since = sub.cursor;
@@ -83,6 +91,7 @@ export const sock = {
       }
     };
     this.ws.onclose = () => {
+      for (const fn of this.connectionListeners) fn("closed");
       if (this.subs.size === 0 && this.outbox.length === 0) return;
       setTimeout(() => this.open(), this.backoff);
       this.backoff = Math.min(this.backoff * 2, 30000);
