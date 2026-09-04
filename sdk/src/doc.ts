@@ -109,9 +109,13 @@ export function doc(name: string, handlers: DocHandlers): DocTransport {
     onError: (error) => {
       // "maintenance" is the server saying "not right now" — the room is re-homing after a
       // pod died, or the database blinked. Ask again with backoff; anything else is the caller's.
-      if (error.code === "maintenance" && resubAttempts < 8) {
+      const transient = error.code === "maintenance" || (error.code === "invalid_request" && /subscription/.test(error.message));
+      if (transient && resubAttempts < 8) {
         const delay = Math.min(5000, 500 * 2 ** resubAttempts++);
-        setTimeout(() => sock.send({ ...frame, id, since: entry.cursor ?? undefined }), delay);
+        // Without `since`: only a full doc_state lets the client diff and re-send what the room
+        // refused while it was re-homing.
+        entry.cursor = null;
+        setTimeout(() => sock.send({ ...frame, id }), delay);
         handlers.onStatus?.({ bytes: 0, rotateWanted: false, reconnecting: true });
         return;
       }

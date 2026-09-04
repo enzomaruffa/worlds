@@ -544,16 +544,20 @@ async function handleSub(ws: WS, id: string, frame: Record<string, unknown>): Pr
     // A reconnecting client names where it left off; only that epoch's tail is missing.
     const epoch = Number(frame.epoch);
     const since = typeof frame.since === "string" && frame.since ? Number(frame.since) : NaN;
+    // Registered before the room is opened: a client replays its subscription and then its
+    // queued edits back-to-back, and opening the room can take seconds while it re-homes —
+    // an update arriving in that window must find its subscription, not be refused.
+    const client: DocClient = { send: (f) => ws.send(JSON.stringify(f)) };
+    ws.data.subs.set(id, { kind: "doc", key: `${ws.data.site}/${name}`, doc: name, client });
     let room: DocRoomLike;
     try {
       room = await getRoom(ws.data.site, name);
     } catch (e) {
+      ws.data.subs.delete(id);
       const err = asWorldsError(e);
       sendErr(ws, id, err.code, err.message);
       return;
     }
-    const client: DocClient = { send: (f) => ws.send(JSON.stringify(f)) };
-    ws.data.subs.set(id, { kind: "doc", key: `${ws.data.site}/${name}`, doc: name, client });
     try {
       await room.subscribe(client, id);
       const tail = Number.isFinite(epoch) && Number.isFinite(since) ? await room.updatesSince(epoch, since) : null;

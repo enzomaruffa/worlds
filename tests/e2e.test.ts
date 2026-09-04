@@ -1106,6 +1106,28 @@ describe("worlds.doc", () => {
     b.close();
   });
 
+  test("an update sent right behind the sub frame is committed, not refused", async () => {
+    // A reconnecting client replays its subscription and its queued edits back-to-back; the
+    // subscription must exist for the update even while the room is still being opened.
+    const ws = new WebSocket(`ws://localhost:${PORT}/api/v1/socket`, { protocols: ["worlds.v1"], headers: { host: `${S1}.worlds.localhost` } } as never);
+    const frames: any[] = [];
+    ws.onmessage = (m) => frames.push(JSON.parse(String(m.data)));
+    await new Promise((r) => (ws.onopen = r));
+    const d = new Y.Doc();
+    d.get("root", Y.XmlText).insert(0, "raced");
+    ws.send(JSON.stringify({ op: "sub", id: "r1", kind: "doc", doc: "plan-race" }));
+    ws.send(JSON.stringify({ op: "doc_update", id: "r1", epoch: 1, update: b64(Y.encodeStateAsUpdate(d)) }));
+    const deadline = Date.now() + 3000;
+    while (!frames.some((f) => f.op === "doc_ack") && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20));
+    expect(frames.some((f) => f.op === "error")).toBe(false);
+    expect(frames.some((f) => f.op === "doc_ack" && f.seq === 1)).toBe(true);
+    const got = await (await req("GET", "/api/v1/docs/plan-race")).json();
+    const check = new Y.Doc();
+    Y.applyUpdate(check, unb64(got.state));
+    expect(check.get("root", Y.XmlText).toString()).toBe("raced");
+    ws.close();
+  });
+
   test("the HTTP surface reads the same state and a service can append", async () => {
     const a = await client("plan-http");
     a.type("via socket");

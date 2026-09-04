@@ -1205,9 +1205,11 @@
         }
       },
       onError: (error) => {
-        if (error.code === "maintenance" && resubAttempts < 8) {
+        const transient = error.code === "maintenance" || error.code === "invalid_request" && /subscription/.test(error.message);
+        if (transient && resubAttempts < 8) {
           const delay = Math.min(5000, 500 * 2 ** resubAttempts++);
-          setTimeout(() => sock.send({ ...frame, id: id2, since: entry.cursor ?? undefined }), delay);
+          entry.cursor = null;
+          setTimeout(() => sock.send({ ...frame, id: id2 }), delay);
           handlers.onStatus?.({ bytes: 0, rotateWanted: false, reconnecting: true });
           return;
         }
