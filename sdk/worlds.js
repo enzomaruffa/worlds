@@ -1149,10 +1149,12 @@
     let resolveReady = () => {};
     const ready = new Promise((r) => resolveReady = r);
     const frame = { op: "sub", kind: "doc", doc: name };
+    let resubAttempts = 0;
     const { id: id2, entry, off } = sock.sub(frame, () => {}, {
       onDoc: (f) => {
         if (f.op === "doc_state") {
           epoch = f.epoch;
+          resubAttempts = 0;
           seq = f.seq;
           frame.epoch = epoch;
           entry.cursor = String(seq);
@@ -1187,7 +1189,15 @@
           handlers.onStatus?.({ bytes: f.bytes ?? 0, rotateWanted: !!f.rotate_wanted });
         }
       },
-      onError: (error) => handlers.onError?.(error)
+      onError: (error) => {
+        if (error.code === "maintenance" && resubAttempts < 8) {
+          const delay = Math.min(5000, 500 * 2 ** resubAttempts++);
+          setTimeout(() => sock.send({ ...frame, id: id2, since: entry.cursor ?? undefined }), delay);
+          handlers.onStatus?.({ bytes: 0, rotateWanted: false, reconnecting: true });
+          return;
+        }
+        handlers.onError?.(error);
+      }
     });
     return {
       name,

@@ -17,7 +17,7 @@ export interface DocHandlers {
   onReset?(state: Uint8Array, info: { epoch: number; seq: number; reason: string }): void; // replace the local doc
   onRejected?(state: Uint8Array, info: { reason: string; rule?: string }): void; // your update was refused; resync from state
   onAck?(seq: number): void;
-  onStatus?(info: { bytes: number; rotateWanted: boolean }): void; // the doc is large; a compact state would be welcome
+  onStatus?(info: { bytes: number; rotateWanted: boolean; reconnecting?: boolean }): void; // the doc is large; a compact state would be welcome
   onError?(error: { code: string; message: string }): void;
 }
 
@@ -61,10 +61,12 @@ export function doc(name: string, handlers: DocHandlers): DocTransport {
   // The sub frame is replayed on every reconnect; keeping epoch + since on it means a
   // reconnect asks only for the tail we missed instead of the whole state.
   const frame: Record<string, unknown> & { op: string } = { op: "sub", kind: "doc", doc: name };
+  let resubAttempts = 0;
   const { id, entry, off } = sock.sub(frame, () => {}, {
     onDoc: (f: any) => {
       if (f.op === "doc_state") {
         epoch = f.epoch;
+        resubAttempts = 0;
         seq = f.seq;
         frame.epoch = epoch;
         entry.cursor = String(seq);
@@ -95,7 +97,17 @@ export function doc(name: string, handlers: DocHandlers): DocTransport {
         handlers.onStatus?.({ bytes: f.bytes ?? 0, rotateWanted: !!f.rotate_wanted });
       }
     },
-    onError: (error) => handlers.onError?.(error),
+    onError: (error) => {
+      // "maintenance" is the server saying "not right now" — the room is re-homing after a
+      // pod died, or the database blinked. Ask again with backoff; anything else is the caller's.
+      if (error.code === "maintenance" && resubAttempts < 8) {
+        const delay = Math.min(5000, 500 * 2 ** resubAttempts++);
+        setTimeout(() => sock.send({ ...frame, id, since: entry.cursor ?? undefined }), delay);
+        handlers.onStatus?.({ bytes: 0, rotateWanted: false, reconnecting: true });
+        return;
+      }
+      handlers.onError?.(error);
+    },
   });
 
   return {

@@ -260,10 +260,12 @@ export function isOwner(key: string): boolean {
 async function renewLeases(): Promise<void> {
   if (!owned.size || !dbReady() || stopped) return;
   const keys = [...owned];
+  // One statement for every owned key. The list travels as a single text parameter split in SQL:
+  // Bun.sql has no array parameters, and a jsonb parameter is re-encoded as a JSON string.
   try {
     const rows = await sql`
       UPDATE room_leases SET expires_at = now() + (${LEASE_TTL_MS} * interval '1 millisecond')
-      WHERE key = ANY(${keys}) AND owner = ${podId}
+      WHERE key = ANY(string_to_array(${keys.join("\u0001")}, chr(1))) AND owner = ${podId}
       RETURNING key`;
     const kept = new Set((rows as { key: string }[]).map((r) => r.key));
     for (const key of keys) {

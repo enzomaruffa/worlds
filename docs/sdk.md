@@ -132,6 +132,9 @@ await transport.ready;
   log. Every subscriber gets `onReset`. The server never decodes content, so it never
   compacts on its own; past 4MB of state it sets `onStatus({rotateWanted: true})`.
 - Reconnects resume from the last committed `seq` and receive only the tail.
+- A `maintenance` error on the subscription (the room is re-homing after a pod died, or the
+  database blinked) is retried with backoff — `onStatus({reconnecting: true})` fires meanwhile —
+  and only surfaces through `onError` after eight failed attempts.
 - Cursors, selections and presence ride a normal channel: `worlds.ws.channel("doc:" + name)`.
 
 Services and agents use the same document over HTTP with a bearer identity:

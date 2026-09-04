@@ -250,6 +250,26 @@ describe("two pods", () => {
     c.close();
   }, 20000);
 
+  test("a pod keeps the leases of several documents past the TTL", async () => {
+    // Renewal runs one UPDATE over every owned key; with two keys it used to hand Postgres a
+    // malformed array and silently let every lease lapse.
+    const one = await docClient(A, "plan-renew-1", "alice@localhost");
+    const two = await docClient(A, "plan-renew-2", "alice@localhost");
+    one.type("x");
+    await one.next((f) => f.op === "doc_ack" && f.seq === 1);
+    two.type("y");
+    await two.next((f) => f.op === "doc_ack" && f.seq === 1);
+    await new Promise((r) => setTimeout(r, 3500)); // > 2 × WORLDS_LEASE_TTL_MS
+    const admin = new SQL(process.env.DATABASE_URL ?? "postgres://world:world@localhost:5499/world");
+    const rows = await admin`SELECT key, owner, expires_at > now() AS live FROM room_leases WHERE key IN (${`${SITE}/plan-renew-1`}, ${`${SITE}/plan-renew-2`}) ORDER BY key`;
+    await admin.close();
+    expect(rows.map((r: any) => [r.owner, r.live])).toEqual([[A.id, true], [A.id, true]]);
+    one.type("z");
+    await one.next((f) => f.op === "doc_ack" && f.seq === 2, 5000);
+    one.close();
+    two.close();
+  }, 20000);
+
   test("when the owner pod dies, the survivor re-homes the document and keeps every acked edit", async () => {
     const name = "plan-failover";
     const a = await docClient(A, name, "alice@localhost");
