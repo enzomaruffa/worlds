@@ -13,6 +13,7 @@ paths:
     get: { summary: one site }
     delete: { summary: "delete a site you own: files, uploads, collections, documents and the deploy log go; the name is free again" }
   /api/v1/sites/{name}/deploys: { get: { summary: deploy history } }
+  /api/v1/deploys: { get: { summary: "every deploy, newest first (?limit, ?cursor)" } }
   /api/v1/db: { get: { summary: list collections } }
   /api/v1/db/{collection}:
     post: { summary: create document }
