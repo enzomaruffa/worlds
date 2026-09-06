@@ -70,6 +70,7 @@
     subs: new Map,
     outbox: [],
     connectionListeners: new Set,
+    pending: new Map,
     onConnection(fn) {
       this.connectionListeners.add(fn);
       return () => this.connectionListeners.delete(fn);
@@ -100,6 +101,12 @@
         try {
           f = JSON.parse(m2.data);
         } catch {
+          return;
+        }
+        const waiter = f.id && this.pending.get(f.id);
+        if (waiter) {
+          this.pending.delete(f.id);
+          waiter(f);
           return;
         }
         const sub = f.id && this.subs.get(f.id);
@@ -151,6 +158,26 @@
     },
     subscribe(frame, handler, extras = {}) {
       return this.sub(frame, handler, extras).off;
+    },
+    request(frame, timeoutMs = 5000) {
+      return new Promise((resolve, reject) => {
+        this.open();
+        if (!this.ws || this.ws.readyState !== 1)
+          return reject(new WorldsError("upstream_error", "socket is not connected", 503));
+        const id = `q${this.nextId++}`;
+        const timer = setTimeout(() => {
+          this.pending.delete(id);
+          reject(new WorldsError("upstream_error", "socket request timed out", 504));
+        }, timeoutMs);
+        this.pending.set(id, (f) => {
+          clearTimeout(timer);
+          if (f.op === "error")
+            reject(new WorldsError(f.error?.code || "internal", f.error?.message || "realtime error", 500));
+          else
+            resolve(f);
+        });
+        this.ws.send(JSON.stringify({ ...frame, id }));
+      });
     },
     sub(frame, handler, extras = {}) {
       const id = `s${this.nextId++}`;
@@ -301,6 +328,12 @@
         subscribe: (handler) => sock.subscribe({ op: "sub", kind: "channel", channel: name }, handler),
         presence: (handler) => sock.subscribe({ op: "sub", kind: "channel", channel: name, presence: true }, () => {}, { onPresence: handler })
       };
+    },
+    async ping() {
+      const t0 = performance.now();
+      const f = await sock.request({ op: "ping" });
+      const rtt = performance.now() - t0;
+      return { rtt, serverAt: f.at, skew: f.at - (Date.now() - rtt / 2) };
     }
   };
 

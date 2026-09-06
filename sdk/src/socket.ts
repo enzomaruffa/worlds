@@ -1,6 +1,8 @@
 // One multiplexed WebSocket for the whole page: db subscriptions and channels
 // share it. Reconnects with backoff, replays db cursors, and queues frames sent
 // while still connecting so nothing is dropped.
+import { WorldsError } from "./error";
+
 type Frame = Record<string, unknown> & { op: string; id?: string };
 
 // Who a peer is on the wire. Defined here because socket.ts is the bottom of the SDK's
@@ -30,6 +32,9 @@ export const sock = {
   subs: new Map<string, Sub>(),
   outbox: [] as Frame[],
   connectionListeners: new Set<(state: "open" | "closed") => void>(),
+  // One-shot replies keyed by frame id. Checked before `subs`, which only knows about
+  // long-lived subscriptions and drops anything it doesn't recognise.
+  pending: new Map<string, (frame: any) => void>(),
 
   // Connection state for callers that show it (an editor going read-only while offline).
   onConnection(fn: (state: "open" | "closed") => void): () => void {
@@ -58,6 +63,12 @@ export const sock = {
     this.ws.onmessage = (m) => {
       let f: any;
       try { f = JSON.parse(m.data); } catch { return; }
+      const waiter = f.id && this.pending.get(f.id);
+      if (waiter) {
+        this.pending.delete(f.id);
+        waiter(f);
+        return;
+      }
       const sub = f.id && this.subs.get(f.id);
       if (!sub) return;
       if (f.op === "event") {
@@ -106,6 +117,26 @@ export const sock = {
 
   subscribe(frame: Frame, handler: (ev: any) => void, extras: Partial<Sub> = {}): () => void {
     return this.sub(frame, handler, extras).off;
+  },
+
+  // One frame out, one frame back. Never queued: a reply that arrives after a reconnect
+  // would be timing a socket that no longer exists, so a disconnected caller rejects now.
+  request(frame: Frame, timeoutMs = 5000): Promise<any> {
+    return new Promise((resolve, reject) => {
+      this.open();
+      if (!this.ws || this.ws.readyState !== 1) return reject(new WorldsError("upstream_error", "socket is not connected", 503));
+      const id = `q${this.nextId++}`;
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new WorldsError("upstream_error", "socket request timed out", 504));
+      }, timeoutMs);
+      this.pending.set(id, (f) => {
+        clearTimeout(timer);
+        if (f.op === "error") reject(new WorldsError(f.error?.code || "internal", f.error?.message || "realtime error", 500));
+        else resolve(f);
+      });
+      this.ws.send(JSON.stringify({ ...frame, id }));
+    });
   },
 
   // Like subscribe, but hands back the subscription id and its entry — for primitives
