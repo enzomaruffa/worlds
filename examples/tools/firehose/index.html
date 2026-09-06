@@ -200,7 +200,7 @@
   const siteUrls = new Map();
   async function refreshSiteUrls() {
     try {
-      const data = await apiGet("/api/v1/sites?limit=200");
+      const data = await apiGet("/api/v1/sites?limit=100");
       for (const s of data.items || []) siteUrls.set(s.name, s.url);
     } catch {
       // best-effort — the relative fallback still links somewhere sensible
