@@ -1,0 +1,596 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Live Wire · Worlds</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #09090b;
+    --surface: #0c0c0f;
+    --surface-2: #131318;
+    --border: #27272a;
+    --gold: #f59e0b;
+    --text: #e4e4e7;
+    --muted: #a1a1aa;
+    --danger: #ef4444;
+    --good: #22c55e;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.5 "Space Grotesk", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: flex; flex-direction: column; min-height: 100vh;
+  }
+  ::selection { background: rgba(245, 158, 11, .35); }
+  button, input { font-family: inherit; }
+  .mono, .doc-id, .doc-json, .tape-body { font-family: "SFMono-Regular", ui-monospace, Menlo, Consolas, monospace; }
+
+  header.topbar {
+    display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .6rem 1rem;
+    padding: .75rem 1.1rem; border-bottom: 1px solid var(--border); background: var(--surface); flex-shrink: 0;
+  }
+  .topbar-left { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+  .topbar-left h1 { font-size: 1.05rem; margin: 0; letter-spacing: .01em; }
+  .topbar-left h1 span { color: var(--gold); }
+  .conn { display: flex; align-items: center; gap: .4rem; font-size: .78rem; color: var(--muted); }
+  .conn-dot {
+    width: .5rem; height: .5rem; border-radius: 50%; background: var(--muted); transition: background-color .3s ease, box-shadow .3s ease;
+  }
+  .conn-dot.conn-live { background: var(--good); box-shadow: 0 0 8px rgba(34, 197, 94, .6); }
+  .conn-dot.conn-connecting { background: var(--gold); box-shadow: 0 0 8px rgba(245, 158, 11, .5); }
+  .conn-dot.conn-offline { background: var(--danger); box-shadow: 0 0 8px rgba(239, 68, 68, .5); }
+  .who { font-size: .78rem; color: var(--muted); }
+  .who b { color: var(--text); font-weight: 600; }
+
+  .note {
+    margin: 0; padding: .5rem 1.1rem; font-size: .76rem; color: var(--muted);
+    border-bottom: 1px solid var(--border); background: var(--surface); flex-shrink: 0;
+  }
+
+  main.panes {
+    flex: 1; min-height: 0; display: grid;
+    grid-template-columns: 260px 260px 1fr;
+    gap: 1px; background: var(--border); overflow: hidden;
+  }
+  .pane { background: var(--surface); display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+  .pane-head {
+    padding: .7rem .9rem; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: .45rem; flex-shrink: 0;
+  }
+  .pane-head h2 { margin: 0; font-size: .74rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 600; }
+  .pane-sub { font-size: .74rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pane-head input {
+    width: 100%; padding: .4rem .6rem; border-radius: .4rem; border: 1px solid var(--border);
+    background: var(--surface-2); color: var(--text); font-size: .8rem;
+  }
+  .pane-head input:focus { outline: none; border-color: var(--gold); }
+  .pane-body { flex: 1; overflow-y: auto; padding: .45rem; }
+  .empty { color: #52525b; font-size: .8rem; padding: 1rem .5rem; text-align: center; }
+
+  .site-row, .coll-row {
+    padding: .55rem .6rem; border-radius: .5rem; cursor: pointer; margin-bottom: .3rem; border: 1px solid transparent;
+  }
+  .site-row:hover, .coll-row:hover { background: var(--surface-2); }
+  .site-row.selected, .coll-row.selected { background: var(--surface-2); border-color: var(--gold); }
+  .site-row .name { font-weight: 600; font-size: .86rem; }
+  .site-row .desc {
+    color: var(--muted); font-size: .74rem; margin-top: .2rem; line-height: 1.4;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .site-row .meta { margin-top: .4rem; display: flex; align-items: center; gap: .35rem; flex-wrap: wrap; }
+  .pill {
+    padding: .12rem .45rem; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border);
+    font-size: .68rem; color: var(--muted); white-space: nowrap;
+  }
+  .pill.cols { color: var(--text); }
+
+  .coll-row { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
+  .coll-row .name { font-size: .82rem; font-weight: 500; overflow: hidden; text-overflow: ellipsis; }
+  .coll-row .count { font-size: .72rem; color: var(--muted); white-space: nowrap; }
+
+  .doc-controls {
+    display: flex; gap: .5rem; padding: .6rem .9rem; border-bottom: 1px solid var(--border); flex-shrink: 0; flex-wrap: wrap;
+  }
+  .doc-controls input {
+    flex: 1; min-width: 160px; padding: .4rem .6rem; border-radius: .4rem; border: 1px solid var(--border);
+    background: var(--surface-2); color: var(--text); font-size: .78rem;
+  }
+  .doc-controls input:focus { outline: none; border-color: var(--gold); }
+  .doc-controls button {
+    padding: .4rem .9rem; border-radius: .4rem; border: 1px solid var(--gold); background: transparent;
+    color: var(--gold); cursor: pointer; font-size: .78rem; font-weight: 600;
+  }
+  .doc-controls button:hover { background: rgba(245, 158, 11, .12); }
+
+  .doc-row {
+    border: 1px solid var(--border); border-radius: .5rem; margin-bottom: .4rem; background: var(--surface-2);
+    overflow: hidden; transition: background-color 1s ease;
+  }
+  .doc-row-head { display: flex; align-items: center; gap: .6rem; padding: .5rem .7rem; cursor: pointer; font-size: .78rem; }
+  .doc-toggle { color: var(--muted); width: .9rem; flex-shrink: 0; display: inline-block; transition: transform .15s ease; }
+  .doc-toggle.open { transform: rotate(90deg); }
+  .doc-id { color: var(--text); flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; max-width: 34ch; }
+  .doc-by { color: var(--muted); flex-shrink: 0; }
+  .doc-time { color: #71717a; margin-left: auto; font-size: .72rem; flex-shrink: 0; }
+  .doc-body { border-top: 1px solid var(--border); }
+  .doc-json {
+    margin: 0; padding: .6rem .7rem; font-size: .72rem; white-space: pre; overflow-x: auto;
+    max-height: 260px; overflow-y: auto; color: #c9c9d1; background: var(--surface);
+  }
+  .doc-row.deleted { opacity: .45; text-decoration: line-through; }
+
+  .load-more {
+    margin: .1rem .9rem .7rem; padding: .5rem; border-radius: .4rem; border: 1px solid var(--border);
+    background: var(--surface-2); color: var(--text); cursor: pointer; font-size: .78rem; flex-shrink: 0;
+  }
+  .load-more:hover { border-color: var(--gold); }
+  .load-more:disabled { opacity: .6; cursor: default; }
+
+  .tape { border-top: 1px solid var(--border); flex-shrink: 0; max-height: 160px; display: flex; flex-direction: column; }
+  .tape-head {
+    padding: .35rem .9rem; font-size: .66rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted);
+    border-bottom: 1px solid var(--border); flex-shrink: 0;
+  }
+  .tape-body { overflow-y: auto; padding: .3rem .7rem; font-size: .7rem; color: #9a9aa2; }
+  .tape-row { padding: .15rem 0; border-bottom: 1px dashed rgba(255, 255, 255, .05); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tape-row .t-time { color: #5c5c66; margin-right: .45rem; }
+  .tape-row .t-create { color: var(--good); font-weight: 600; }
+  .tape-row .t-update { color: var(--gold); font-weight: 600; }
+  .tape-row .t-delete { color: var(--danger); font-weight: 600; }
+
+  @media (max-width: 900px) {
+    main.panes { grid-template-columns: 1fr; grid-auto-rows: auto; overflow-y: auto; }
+    .pane-sites .pane-body, .pane-collections .pane-body { max-height: 32vh; }
+    .pane-documents .pane-body { max-height: 44vh; }
+  }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-left">
+    <h1><span>Live</span> Wire</h1>
+    <span class="conn"><span class="conn-dot conn-connecting" id="connDot"></span><span id="connLabel">connecting…</span></span>
+  </div>
+  <div class="who" id="whoami">…</div>
+</header>
+
+<p class="note">Any signed-in person can read any site's collections — Live Wire just makes that visible, it doesn't change it. Cross-site access is read-only.</p>
+
+<main class="panes">
+  <section class="pane pane-sites">
+    <div class="pane-head">
+      <h2>Sites</h2>
+      <input id="siteSearch" placeholder="search name or description…" autocomplete="off" />
+    </div>
+    <div class="pane-body" id="sitesList"><div class="empty">loading sites…</div></div>
+  </section>
+
+  <section class="pane pane-collections">
+    <div class="pane-head">
+      <h2>Collections</h2>
+      <span class="pane-sub" id="collectionsSiteLabel">select a site</span>
+    </div>
+    <div class="pane-body" id="collectionsList"><div class="empty">pick a site to see its collections</div></div>
+  </section>
+
+  <section class="pane pane-documents">
+    <div class="pane-head">
+      <h2>Documents</h2>
+      <span class="pane-sub" id="docsCollectionLabel">select a collection</span>
+    </div>
+    <div class="doc-controls">
+      <input id="filterInput" placeholder='filter — {"field":"value"} or field=value' autocomplete="off" />
+      <input id="sortInput" placeholder="sort — -field" autocomplete="off" />
+      <button id="applyBtn" type="button">apply</button>
+    </div>
+    <div class="pane-body" id="docsList"><div class="empty">pick a site and a collection</div></div>
+    <button class="load-more" id="loadMoreBtn" type="button" hidden>load more</button>
+    <div class="tape">
+      <div class="tape-head">event tape</div>
+      <div class="tape-body" id="tapeBody"></div>
+    </div>
+  </section>
+</main>
+
+<script src="/worlds.js"></script>
+<script>
+(async function () {
+  "use strict";
+
+  // ---------- tiny DOM helpers ----------
+  const $ = (sel) => document.querySelector(sel);
+  function el(tag, attrs, ...children) {
+    attrs = attrs || {};
+    const e = document.createElement(tag);
+    if (attrs.class) e.className = attrs.class;
+    if (attrs.title != null) e.title = attrs.title;
+    if (attrs.text != null) e.textContent = attrs.text;
+    if (attrs.style) Object.assign(e.style, attrs.style);
+    if (attrs.onclick) e.addEventListener("click", attrs.onclick);
+    for (const c of children) if (c != null) e.appendChild(typeof c === "string" ? document.createTextNode(c) : c);
+    return e;
+  }
+  function clear(node) { while (node.firstChild) node.removeChild(node.firstChild); }
+  function debounce(fn, ms) {
+    let t;
+    return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
+  }
+  function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
+  function reportError(e, fallback) {
+    if (e instanceof worlds.WorldsError) worlds.toast(`${e.code}: ${e.message}`);
+    else worlds.toast(fallback || (e && e.message) || "something went wrong");
+    console.error(e);
+  }
+
+  // ---------- elements ----------
+  const whoamiEl = $("#whoami");
+  const connDotEl = $("#connDot");
+  const connLabelEl = $("#connLabel");
+  const siteSearchEl = $("#siteSearch");
+  const sitesListEl = $("#sitesList");
+  const collectionsListEl = $("#collectionsList");
+  const collectionsSiteLabelEl = $("#collectionsSiteLabel");
+  const docsListEl = $("#docsList");
+  const docsCollectionLabelEl = $("#docsCollectionLabel");
+  const filterInputEl = $("#filterInput");
+  const sortInputEl = $("#sortInput");
+  const applyBtnEl = $("#applyBtn");
+  const loadMoreBtnEl = $("#loadMoreBtn");
+  const tapeBodyEl = $("#tapeBody");
+
+  // ---------- state ----------
+  const state = {
+    siteRows: new Map(),        // site name -> { row, countEl }
+    selectedSite: null,
+    selectedSiteRow: null,
+    selectedCollection: null,
+    selectedCollRow: null,
+    unsub: null,
+    docRows: new Map(),         // doc id -> row element
+    filterObj: null,
+    sortText: "",
+    cursor: null,
+  };
+
+  // ---------- connection indicator (worlds.ws.ping over the live socket) ----------
+  function setConn(status) {
+    connDotEl.className = "conn-dot conn-" + status;
+    connLabelEl.textContent = status === "live" ? "live" : status === "offline" ? "offline" : "connecting…";
+  }
+  (async function pingLoop() {
+    await sleep(700); // give the socket a moment to open before the first probe
+    for (;;) {
+      try { await worlds.ws.ping(); setConn("live"); }
+      catch { setConn("offline"); }
+      await sleep(5000);
+    }
+  })();
+
+  // ---------- identity ----------
+  try {
+    const me = await worlds.me();
+    clear(whoamiEl);
+    whoamiEl.append("signed in as ", el("b", { text: me.name || me.handle }), ` (@${me.handle})`);
+  } catch (e) {
+    reportError(e, "could not load identity");
+  }
+
+  // ---------- sites pane ----------
+  async function fetchSites(q) {
+    const qs = new URLSearchParams({ limit: "100" });
+    if (q) qs.set("q", q);
+    const res = await fetch(`/api/v1/sites?${qs}`, { headers: { "x-worlds-csrf": "1" } });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const err = (data && data.error) || {};
+      throw new worlds.WorldsError(err.code || "internal", err.message || res.statusText, res.status, err.retry_after);
+    }
+    return data;
+  }
+
+  function siteRow(site) {
+    const countEl = el("span", { class: "pill cols", text: "…" });
+    const row = el(
+      "div",
+      { class: "site-row", onclick: () => selectSite(site, row) },
+      el("div", { class: "name", text: site.name }),
+      el("div", { class: "desc", text: site.description || "(no description)" }),
+      el(
+        "div",
+        { class: "meta" },
+        el("span", { class: "pill", text: site.category || "misc" }),
+        el("span", { class: "pill", text: `${site.visits_30d ?? 0} visits` }),
+        el("span", {
+          class: "pill",
+          text: "@" + ((site.creator && site.creator.handle) || "?"),
+          style: { color: worlds.colorFor((site.creator && site.creator.handle) || site.name) },
+        }),
+        countEl,
+      ),
+    );
+    state.siteRows.set(site.name, { row, countEl });
+    return row;
+  }
+
+  async function loadCollectionCounts(sites) {
+    const concurrency = 5;
+    let i = 0;
+    async function worker() {
+      while (i < sites.length) {
+        const site = sites[i++];
+        const entry = state.siteRows.get(site.name);
+        if (!entry) continue;
+        try {
+          const page = await worlds.db.site(site.name).collections();
+          const n = (page.items || []).length;
+          entry.countEl.textContent = `${n} col${n === 1 ? "" : "s"}`;
+        } catch {
+          entry.countEl.textContent = "?";
+        }
+      }
+    }
+    await Promise.all(new Array(Math.min(concurrency, sites.length)).fill(0).map(worker));
+  }
+
+  async function loadSites(q) {
+    clear(sitesListEl);
+    state.siteRows.clear();
+    sitesListEl.appendChild(el("div", { class: "empty", text: "loading sites…" }));
+    try {
+      const data = await fetchSites(q);
+      const sites = data.items || [];
+      clear(sitesListEl);
+      if (!sites.length) {
+        sitesListEl.appendChild(el("div", { class: "empty", text: q ? `no sites match "${q}"` : "no sites yet" }));
+        return;
+      }
+      for (const site of sites) sitesListEl.appendChild(siteRow(site));
+      loadCollectionCounts(sites);
+    } catch (e) {
+      clear(sitesListEl);
+      sitesListEl.appendChild(el("div", { class: "empty", text: "failed to load sites" }));
+      reportError(e, "failed to load sites");
+    }
+  }
+
+  siteSearchEl.addEventListener("input", debounce(() => loadSites(siteSearchEl.value.trim()), 300));
+
+  // ---------- collections pane ----------
+  function collRow(name, docsCount) {
+    return el(
+      "div",
+      { class: "coll-row", onclick: (e) => selectCollection(name, e.currentTarget) },
+      el("span", { class: "name", text: name }),
+      el("span", { class: "count", text: `${docsCount} doc${docsCount === 1 ? "" : "s"}` }),
+    );
+  }
+
+  async function selectSite(site, row) {
+    if (state.selectedSiteRow) state.selectedSiteRow.classList.remove("selected");
+    row.classList.add("selected");
+    state.selectedSiteRow = row;
+    state.selectedSite = site.name;
+    collectionsSiteLabelEl.textContent = site.name;
+    teardownCollectionView();
+    clear(collectionsListEl);
+    collectionsListEl.appendChild(el("div", { class: "empty", text: "loading collections…" }));
+    try {
+      const page = await worlds.db.site(site.name).collections();
+      const items = (page.items || [])
+        .slice()
+        .sort((a, b) => (a.name ?? a.collection ?? "").localeCompare(b.name ?? b.collection ?? ""));
+      clear(collectionsListEl);
+      if (!items.length) {
+        collectionsListEl.appendChild(el("div", { class: "empty", text: "this site has no collections yet" }));
+        return;
+      }
+      for (const c of items) {
+        const name = c.name ?? c.collection;
+        const count = c.docs ?? c.count ?? 0;
+        collectionsListEl.appendChild(collRow(name, count));
+      }
+      const entry = state.siteRows.get(site.name);
+      if (entry) entry.countEl.textContent = `${items.length} col${items.length === 1 ? "" : "s"}`;
+    } catch (e) {
+      clear(collectionsListEl);
+      collectionsListEl.appendChild(el("div", { class: "empty", text: "failed to load collections" }));
+      reportError(e, "failed to load collections");
+    }
+  }
+
+  // ---------- documents pane ----------
+  function teardownCollectionView() {
+    if (state.unsub) { state.unsub(); state.unsub = null; }
+    state.selectedCollection = null;
+    if (state.selectedCollRow) { state.selectedCollRow.classList.remove("selected"); state.selectedCollRow = null; }
+    state.docRows.clear();
+    state.cursor = null;
+    clear(docsListEl);
+    docsListEl.appendChild(el("div", { class: "empty", text: "pick a collection" }));
+    loadMoreBtnEl.hidden = true;
+    docsCollectionLabelEl.textContent = "select a collection";
+  }
+
+  function parseFilterInput(text) {
+    const t = text.trim();
+    if (!t) return null;
+    if (t.startsWith("{")) {
+      let parsed;
+      try { parsed = JSON.parse(t); } catch { throw new Error('filter JSON is invalid — try {"field":"value"}'); }
+      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw new Error("filter must be a JSON object");
+      return parsed;
+    }
+    const m = t.match(/^([\w.-]+)\s*[:=]\s*(.*)$/);
+    if (!m) throw new Error('filter must look like {"field":"value"} or field=value');
+    let val;
+    try { val = JSON.parse(m[2]); } catch { val = m[2]; }
+    return { [m[1]]: val };
+  }
+
+  function getPath(obj, path) {
+    return path.split(".").reduce((o, k) => (o == null ? undefined : o[k]), obj);
+  }
+  function matchesFilter(data, filterObj) {
+    if (!filterObj) return true;
+    return Object.entries(filterObj).every(([k, v]) => JSON.stringify(getPath(data, k)) === JSON.stringify(v));
+  }
+
+  function fmtTime(iso) {
+    try { return new Date(iso).toLocaleString(); } catch { return iso; }
+  }
+
+  function docRow(doc) {
+    const toggle = el("span", { class: "doc-toggle", text: "▸" });
+    const pre = el("pre", { class: "doc-json" });
+    pre.textContent = JSON.stringify(doc.data, null, 2);
+    const body = el("div", { class: "doc-body" }, pre);
+    body.hidden = true;
+    const head = el(
+      "div",
+      {
+        class: "doc-row-head",
+        onclick: () => { body.hidden = !body.hidden; toggle.classList.toggle("open", !body.hidden); },
+      },
+      toggle,
+      el("span", { class: "doc-id", text: doc.id, title: doc.id }),
+      el("span", {
+        class: "doc-by",
+        text: "@" + (doc.created_by || "?"),
+        style: { color: worlds.colorFor(doc.created_by || doc.id) },
+      }),
+      el("span", { class: "doc-time", text: fmtTime(doc.updated_at), title: doc.updated_at }),
+    );
+    const row = el("div", { class: "doc-row" }, head, body);
+    row.dataset.id = doc.id;
+    return row;
+  }
+
+  function flash(row, color) {
+    row.style.backgroundColor = color;
+    requestAnimationFrame(() => requestAnimationFrame(() => { row.style.backgroundColor = ""; }));
+  }
+
+  function addTape(site, collection, ev) {
+    const line = el(
+      "div",
+      { class: "tape-row" },
+      el("span", { class: "t-time", text: new Date().toLocaleTimeString() }),
+      el("span", { class: "t-" + ev.type, text: ev.type }),
+      ` ${site}/${collection} · ${ev.doc.id}`,
+    );
+    tapeBodyEl.insertBefore(line, tapeBodyEl.firstChild);
+    while (tapeBodyEl.children.length > 50) tapeBodyEl.removeChild(tapeBodyEl.lastChild);
+  }
+
+  function handleEvent(site, collection, ev) {
+    addTape(site, collection, ev);
+
+    if (ev.type === "delete") {
+      const row = state.docRows.get(ev.doc.id);
+      if (row) {
+        row.classList.add("deleted");
+        setTimeout(() => { row.remove(); state.docRows.delete(ev.doc.id); }, 900);
+      }
+      return;
+    }
+
+    const existing = state.docRows.get(ev.doc.id);
+    if (existing) {
+      const fresh = docRow(ev.doc);
+      existing.replaceWith(fresh);
+      state.docRows.set(ev.doc.id, fresh);
+      flash(fresh, "rgba(245, 158, 11, .35)");
+      return;
+    }
+
+    if (ev.type === "create" && !matchesFilter(ev.doc.data, state.filterObj)) return;
+    const emptyEl = docsListEl.querySelector(".empty");
+    if (emptyEl) emptyEl.remove();
+    const row = docRow(ev.doc);
+    docsListEl.insertBefore(row, docsListEl.firstChild);
+    state.docRows.set(ev.doc.id, row);
+    flash(row, ev.type === "create" ? "rgba(34, 197, 94, .35)" : "rgba(245, 158, 11, .35)");
+  }
+
+  async function selectCollection(name, row) {
+    if (state.unsub) { state.unsub(); state.unsub = null; }
+    if (state.selectedCollRow) state.selectedCollRow.classList.remove("selected");
+    row.classList.add("selected");
+    state.selectedCollRow = row;
+    state.selectedCollection = name;
+    state.docRows.clear();
+    state.cursor = null;
+    docsCollectionLabelEl.textContent = `${state.selectedSite} / ${name}`;
+    clear(docsListEl);
+    docsListEl.appendChild(el("div", { class: "empty", text: "loading documents…" }));
+    loadMoreBtnEl.hidden = true;
+
+    state.unsub = worlds.db.site(state.selectedSite).collection(name).subscribe((ev) => handleEvent(state.selectedSite, name, ev));
+    await loadDocsPage(true);
+  }
+
+  async function loadDocsPage(reset) {
+    if (!state.selectedSite || !state.selectedCollection) return;
+    const opts = { limit: 50 };
+    if (state.filterObj) opts.filter = state.filterObj;
+    if (state.sortText) opts.sort = state.sortText;
+    if (!reset && state.cursor) opts.cursor = state.cursor;
+
+    loadMoreBtnEl.disabled = true;
+    loadMoreBtnEl.textContent = "loading…";
+    try {
+      const page = await worlds.db.site(state.selectedSite).collection(state.selectedCollection).list(opts);
+      if (reset) { state.docRows.clear(); clear(docsListEl); }
+      if (reset && !page.items.length) {
+        docsListEl.appendChild(el("div", { class: "empty", text: "no documents in this collection yet" }));
+      }
+      for (const doc of page.items) {
+        const row = docRow(doc);
+        docsListEl.appendChild(row);
+        state.docRows.set(doc.id, row);
+      }
+      state.cursor = page.next_cursor;
+      loadMoreBtnEl.hidden = !state.cursor;
+    } catch (e) {
+      if (reset) {
+        clear(docsListEl);
+        docsListEl.appendChild(el("div", { class: "empty", text: "failed to load documents" }));
+      }
+      reportError(e, "failed to load documents");
+    } finally {
+      loadMoreBtnEl.disabled = false;
+      loadMoreBtnEl.textContent = "load more";
+    }
+  }
+
+  loadMoreBtnEl.addEventListener("click", () => loadDocsPage(false));
+
+  function applyFilters() {
+    let parsed;
+    try {
+      parsed = parseFilterInput(filterInputEl.value);
+    } catch (e) {
+      worlds.toast(e.message);
+      return;
+    }
+    state.filterObj = parsed;
+    state.sortText = sortInputEl.value.trim();
+    if (state.selectedCollection) loadDocsPage(true);
+  }
+  applyBtnEl.addEventListener("click", applyFilters);
+  for (const inp of [filterInputEl, sortInputEl]) {
+    inp.addEventListener("keydown", (e) => { if (e.key === "Enter") applyFilters(); });
+  }
+
+  // ---------- boot ----------
+  loadSites();
+})();
+</script>
+</body>
+</html>
