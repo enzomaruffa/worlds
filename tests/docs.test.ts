@@ -48,6 +48,11 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await docs.closeAllRooms();
+  // The sqlite env above is set in beforeAll, which is too late if another test file
+  // already imported the server modules — config reads process.env at import time, so
+  // these rows can land in a shared database instead. Unremoved they accumulate across
+  // runs until the per-site document cap trips, and the whole file fails on quota.
+  await db.sql`DELETE FROM docs WHERE site = ${SITE}`.catch(() => {});
   await rm(dataDir, { recursive: true, force: true });
 });
 
