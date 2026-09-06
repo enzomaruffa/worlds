@@ -437,6 +437,26 @@ describe("platform surfaces", () => {
 });
 
 describe("realtime", () => {
+  test("ping is answered with a pong carrying the same id and a server clock", async () => {
+    const ws = new WebSocket(`ws://localhost:${PORT}/api/v1/socket`, "worlds.v1");
+    const before = Date.now();
+    const pong = await new Promise<Record<string, unknown>>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("no pong within 3s")), 3000);
+      ws.onopen = () => ws.send(JSON.stringify({ op: "ping", id: "q1" }));
+      ws.onmessage = (m) => {
+        const f = JSON.parse(String(m.data));
+        if (f.op === "pong") {
+          clearTimeout(timer);
+          resolve(f);
+        }
+      };
+    });
+    ws.close();
+    expect(pong.id).toBe("q1");
+    expect(typeof pong.at).toBe("number");
+    expect(pong.at as number).toBeGreaterThanOrEqual(before);
+  });
+
   test("db subscription receives create events over the socket", async () => {
     const ws = new WebSocket(`ws://localhost:${PORT}/api/v1/socket`, "worlds.v1");
     const got: Record<string, unknown>[] = [];

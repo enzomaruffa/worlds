@@ -511,6 +511,12 @@ export const websocket = {
     if (frame.op === "ameta") return handleSetMeta(ws, frame);
     if (frame.op === "aevent") return handleActorEvent(ws, frame);
     if (frame.op === "doc_update") return handleDocUpdate(ws, id, frame);
+    // One send to one socket, so it stays out of the fan-out budget — a client measuring
+    // its own latency must not spend the allowance it is trying to measure.
+    if (frame.op === "ping") {
+      ws.send(JSON.stringify({ op: "pong", id, at: Date.now() }));
+      return;
+    }
     // Unknown ops are ignored (forward-compat rule).
   },
 

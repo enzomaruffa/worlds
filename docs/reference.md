@@ -24,6 +24,7 @@ worlds.uploads.put: (file: Blob, opts?: { name?: string; }) => Promise<any>
 worlds.uploads.list: () => Promise<any>
 worlds.uploads.delete: (name: string) => Promise<any>
 worlds.ws.channel: <T = any>(name: string) => Channel<T>
+worlds.ws.ping: () => Promise<Pong>
 worlds.notify.slack: (target: string, text: string) => Promise<any>
 worlds.room: <T extends Record<string, any> = any>(name: string, opts?: RoomOptions<T>) => Room<T>
 worlds.rooms: <T extends Record<string, any> = any>(name: string, opts?: RoomsOptions<T>) => Hall<T>
@@ -225,10 +226,23 @@ export interface Channel<T = any> {
 }
 ```
 
+### `interface Pong`
+
+```ts
+export interface Pong {
+  rtt: number;      // ms, this socket's round trip
+  serverAt: number; // the server's Date.now() when it replied
+  skew: number;     // serverAt - the local clock's midpoint of the trip, in ms
+}
+```
+
 ### `ws`
 
 ```ts
 ws.channel: <T = any>(name: string) => Channel<T>
+// Round trip over the live socket. `skew` assumes a symmetric path, which real
+// networks often aren't — treat it as an estimate, not a measurement.
+ws.ping: () => Promise<Pong>
 ```
 
 Named pub/sub channels for multiplayer/collab, multiplexed over the one socket.
@@ -759,10 +773,6 @@ export class WorldsError extends Error {
 ## shared types
 
 Source: `sdk/src/socket.ts`
-
-One multiplexed WebSocket for the whole page: db subscriptions and channels
-share it. Reconnects with backoff, replays db cursors, and queues frames sent
-while still connecting so nothing is dropped.
 
 ### `interface Person`
 

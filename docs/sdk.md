@@ -155,6 +155,18 @@ const stop = ch.subscribe(msg => { /* {payload, from: {handle, name}, at} */ });
 ch.presence(list => { /* [{handle, name}] currently on this channel */ });
 ```
 
+**Latency.** `worlds.ws.ping()` measures the live socket and stays out of the publish
+budget, so a page can measure itself without spending what it is measuring:
+
+```js
+const { rtt, serverAt, skew } = await worlds.ws.ping();
+```
+
+`rtt` is the round trip in ms. `skew` is how far the server's clock is ahead of yours,
+derived by assuming the trip is symmetric — often it isn't, so use it to line up shared
+deadlines, not as a measurement. Rejects if the socket is disconnected rather than
+queueing, since a reply that lands after a reconnect would be timing a different socket.
+
 ## Rooms — `worlds.room` / `worlds.rooms`
 
 A **room** is one named shared space for everyone on the site. It rolls the two
