@@ -102,6 +102,7 @@ async function main() {
     safe("room", initRoom),
     safe("rooms", initRooms),
     safe("actors", initActors),
+    safe("doc", initDoc),
     safe("idle", initIdle),
     safe("utils", initUtils),
     safe("notify", initNotify),
@@ -562,6 +563,72 @@ async function initActors() {
   $("actTeam").onchange = () => { net.setMetadata({ team: $("actTeam").value }); mine.style.background = teamColor($("actTeam").value); };
   $("actObserver").onchange = connect;
   connect();
+}
+
+// ---- doc: a shared Yjs notepad -----------------------------------------------
+async function initDoc() {
+  const ta = $("docText");
+  const status = $("docStatus");
+  const log = logger($("docLog"));
+  const Y = await import("https://cdn.jsdelivr.net/npm/yjs@13/+esm");
+  let ydoc = null;
+  let transport = null;
+
+  const setStatus = (extra) => {
+    status.innerHTML = `epoch <b>${transport.epoch}</b> · seq <b>${transport.seq}</b> · ${esc(extra)}`;
+  };
+  const render = () => {
+    const next = ydoc.getText("body").toString();
+    if (ta.value === next) return;
+    const pos = Math.min(ta.selectionStart ?? next.length, next.length);
+    ta.value = next; // programmatic writes fire no input event, so nothing echoes back
+    try { ta.setSelectionRange(pos, pos); } catch { /* not focused */ }
+  };
+  // The recipe's rule: reset and rejection both mean replace, never merge — the local
+  // doc is rebuilt from the server's state by reopening the transport on a fresh Y.Doc.
+  function open() {
+    ydoc = new Y.Doc();
+    transport = worlds.doc("notepad", {
+      onState: (state, info) => {
+        Y.applyUpdate(ydoc, state, "server");
+        ta.disabled = false;
+        render();
+        log(`<span class="ev">state</span> epoch ${info.epoch} seq ${info.seq} · ${info.bytes} bytes`);
+        setStatus("live");
+      },
+      onUpdate: (update, info) => {
+        Y.applyUpdate(ydoc, update, "server");
+        log(`<span class="ev">update</span> seq ${info.seq} committed`);
+        setStatus("live");
+      },
+      onAck: (seq) => { log(`<span class="ev">ack</span> seq ${seq} — yours is on disk`); setStatus("live"); },
+      onReset: (state, info) => { log(`<span class="ev">reset</span> epoch ${info.epoch} (${esc(info.reason)}) — rebuilding`); transport.close(); open(); },
+      onRejected: (state, info) => { log(`<span class="ev">rejected</span> ${esc(info.reason)} ${esc(info.rule || "")} — resyncing`); transport.close(); open(); },
+      onStatus: (info) => { if (info.reconnecting) setStatus("reconnecting…"); },
+      onError: (e) => { log(`<span class="ev">error</span> ${esc(e.code)}: ${esc(e.message)}`); status.textContent = `${e.code}: ${e.message}`; },
+    });
+    ydoc.on("update", (u, origin) => { if (origin !== "server") transport.send(u); });
+    ydoc.getText("body").observe(render);
+  }
+  // Turn the textarea's new value into a minimal Yjs edit: the changed middle only, so
+  // two people typing in different places don't overwrite each other.
+  ta.addEventListener("input", () => {
+    const text = ydoc.getText("body");
+    const cur = text.toString();
+    const next = ta.value;
+    let head = 0;
+    while (head < cur.length && head < next.length && cur[head] === next[head]) head++;
+    let tail = 0;
+    while (tail < cur.length - head && tail < next.length - head && cur[cur.length - 1 - tail] === next[next.length - 1 - tail]) tail++;
+    ydoc.transact(() => {
+      if (cur.length - head - tail > 0) text.delete(head, cur.length - head - tail);
+      if (next.length - head - tail > 0) text.insert(head, next.slice(head, next.length - tail));
+    });
+  });
+  $("docList").onclick = async () => {
+    try { show($("docOut"), await worlds.docs.list(), "ok"); } catch (e) { fail($("docOut"), e); }
+  };
+  open();
 }
 
 // ---- idle --------------------------------------------------------------------

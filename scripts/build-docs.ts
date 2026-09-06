@@ -20,6 +20,7 @@ const MODULES: { file: string; title: string; only?: string[] }[] = [
   { file: "room.ts", title: "worlds.room — one shared room" },
   { file: "rooms.ts", title: "worlds.rooms — many rooms (lobby browser)" },
   { file: "actors.ts", title: "worlds.actors — zoned per-member presence" },
+  { file: "doc.ts", title: "worlds.doc / worlds.docs — server-held collaborative documents" },
   { file: "idle.ts", title: "worlds.idle — offline progress" },
   { file: "notify.ts", title: "worlds.notify — Slack" },
   { file: "util.ts", title: "utilities — id, colorFor, uniqByHandle, esc, countdown" },
