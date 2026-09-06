@@ -1354,6 +1354,12 @@ describe("connectors", () => {
         args: { create_issue: { teamId: "PINNED" } },
         stamp: { create_issue: ["description"] },
       } },
+    }, {
+      // Granted, but the operator never set the token — the first thing a real setup hits.
+      name: "halfwired",
+      url: `http://localhost:${stub.port}/mcp`,
+      token_env: "NEVER_SET_TOKEN",
+      sites: { [GRANTED]: { tools: ["create_issue"] } },
     }]);
     cdir = await mkdtemp(join(tmpdir(), "worlds-connect-"));
     cproc = Bun.spawn(["bun", "server/index.ts"], {
@@ -1372,7 +1378,7 @@ describe("connectors", () => {
 
   test("a granted site lists its connector; an ungranted one sees nothing", async () => {
     const mine = await (await creq("GET", "/api/v1/connect")).json();
-    expect(mine.items).toEqual([{ name: "linear", tools: ["create_issue", "boom"] }]);
+    expect(mine.items).toContainEqual({ name: "linear", tools: ["create_issue", "boom"] });
     const theirs = await (await creq("GET", "/api/v1/connect", { site: UNGRANTED })).json();
     expect(theirs.items).toEqual([]);
   });
@@ -1388,6 +1394,13 @@ describe("connectors", () => {
     expect((await res.json()).error.code).toBe("not_found");
     const missing = await creq("POST", "/api/v1/connect/nope/call", { body: { tool: "x", args: {} } });
     expect((await missing.json()).error.code).toBe("not_found");
+  });
+
+  test("a connector with no token names the missing variable instead of failing vaguely", async () => {
+    const res = await creq("POST", "/api/v1/connect/halfwired/call", { body: { tool: "create_issue", args: {} } });
+    const err = (await res.json()).error;
+    expect(err.code).toBe("upstream_error");
+    expect(err.message).toContain("NEVER_SET_TOKEN");
   });
 
   test("a granted connector still refuses a tool outside the allowlist", async () => {
