@@ -19,6 +19,8 @@ all behind the sign-in gate, so it's safe to keep simple.
    - **MCP**: connect `<your-worlds-host>/mcp` and call `deploy_site(name, files)`.
    - **Browser**: drag the folder onto your Worlds host.
 4. It's live at `https://<name>.<your-worlds-host>`. Re-deploy to update (overwrite; no versioning).
+   Delete a site you own with `worlds delete <name> --yes` or the MCP `delete_site` tool — files, uploads,
+   collections, documents and the deploy log go with it; the name is free again.
 
 ## The SDK (`worlds.js`) — one tag, no keys
 

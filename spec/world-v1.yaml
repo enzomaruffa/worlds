@@ -9,7 +9,9 @@ paths:
   /api/v1/site: { get: { summary: calling site context (Host-derived) } }
   /api/v1/deploy: { post: { summary: multipart tarball -> live site } }
   /api/v1/sites: { get: { summary: site directory } }
-  /api/v1/sites/{name}: { get: { summary: one site } }
+  /api/v1/sites/{name}:
+    get: { summary: one site }
+    delete: { summary: "delete a site you own: files, uploads, collections, documents and the deploy log go; the name is free again" }
   /api/v1/sites/{name}/deploys: { get: { summary: deploy history } }
   /api/v1/db: { get: { summary: list collections } }
   /api/v1/db/{collection}:

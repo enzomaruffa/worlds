@@ -21,7 +21,8 @@ The 30-second version:
 1. A folder with an **`index.html`** at its root. Add `<script src="/worlds.js"></script>`.
 2. Optional `.world.json`: `{"description":"…","category":"games|work|tools|experiments|misc"}`.
 3. Deploy — `worlds deploy`, the MCP `deploy_site` tool (`<your-worlds-host>/mcp`), or drag-drop.
-4. Live at `https://<name>.<your-worlds-host>`. Re-deploy to overwrite.
+4. Live at `https://<name>.<your-worlds-host>`. Re-deploy to overwrite. `worlds delete <name> --yes`, the ✕ on its
+   homepage card, or the MCP `delete_site` tool removes a site you own — everything it stored goes with it.
 
 ### The SDK (all on the global `worlds`, no keys/config, behind the sign-in gate)
 

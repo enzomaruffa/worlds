@@ -5,6 +5,7 @@ import { identityFrom, requireCsrf } from "./identity";
 import { store } from "./blobstore";
 import { initDb, sql, requireDb, onDbReady } from "./db";
 import { handleDeploy, handleDeployFolder } from "./deploy";
+import { handleDeleteSite } from "./remove";
 import { serveSite, siteNotFound } from "./staticsite";
 import { getSiteOr404, listSites, publicSite, siteUrl, bumpVisit, getSite } from "./sites";
 import * as dbapi from "./dbapi";
@@ -123,7 +124,7 @@ async function llmsTxt(full: boolean): Promise<Response> {
       "",
       "- [llms-full.txt](/llms-full.txt): every page above in one file",
       "- [interactive docs](/docs): the human-facing site — every primitive explained and running live",
-      "- [MCP](/mcp): deploy_site, list_sites, get_site, my_sites, db_query, read_docs, search_docs",
+      "- [MCP](/mcp): deploy_site, delete_site, list_sites, get_site, my_sites, db_query, read_docs, search_docs",
     );
     return new Response(lines.join("\n"), { headers });
   }
@@ -168,6 +169,7 @@ async function api(req: Request, url: URL, site: string): Promise<Response> {
       await overlayCreators(items);
       return json({ items, next_cursor: null });
     }
+    if (p.length === 2 && method === "DELETE") return handleDeleteSite(req, p[1]!);
     if (p.length === 2 && method === "GET") {
       const entry = universeEntry(await getSiteOr404(p[1]!));
       await overlayCreators([entry]); // the display handle, as the list endpoint returns

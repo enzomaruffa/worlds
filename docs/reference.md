@@ -833,6 +833,7 @@ The SDK is a thin client over these endpoints (`spec/world-v1.yaml`, frozen and 
 | POST | `/api/v1/deploy` | multipart tarball -> live site |
 | GET | `/api/v1/sites` | site directory |
 | GET | `/api/v1/sites/{name}` | one site |
+| DELETE | `/api/v1/sites/{name}` | delete a site you own: files, uploads, collections, documents and the deploy log go; the name is free again |
 | GET | `/api/v1/sites/{name}/deploys` | deploy history |
 | GET | `/api/v1/db` | list collections |
 | POST | `/api/v1/db/{collection}` | create document |
@@ -895,6 +896,14 @@ Get one site's metadata and universe layout by name.
 ### `my_sites`
 
 List the sites you (the calling identity) created or contributed to.
+
+### `delete_site`
+
+Delete a site you own. Its files, uploads, collections, documents and deploy log are removed and the name is free again. Irreversible.
+
+| argument | type | |
+|---|---|---|
+| `name` (required) | string | the site name |
 
 ### `db_query`
 

@@ -30,6 +30,8 @@ export interface BlobStore {
   listUploads(site: string): Promise<UploadInfo[]>;
   deleteUpload(site: string, name: string): Promise<boolean>;
   uploadsBytes(site: string): Promise<number>;
+  // Everything stored under a site — its files and its uploads.
+  removeSite(site: string): Promise<void>;
 }
 
 // Reject path traversal; join into a clean relative key/path. The check has to run on
@@ -131,6 +133,11 @@ export class LocalBlobStore implements BlobStore {
 
   async uploadsBytes(site: string): Promise<number> {
     return (await this.listUploads(site)).reduce((n, f) => n + f.size, 0);
+  }
+
+  async removeSite(site: string): Promise<void> {
+    await rm(this.abs("sites", site), { recursive: true, force: true });
+    await rm(this.abs("uploads", site), { recursive: true, force: true });
   }
 }
 
@@ -240,6 +247,11 @@ export class S3BlobStore implements BlobStore {
   async uploadsBytes(site: string): Promise<number> {
     return (await this.listUploads(site)).reduce((n, f) => n + f.size, 0);
   }
+
+  async removeSite(site: string): Promise<void> {
+    await this.deletePrefix(`sites/${safeRel(site)}/`);
+    await this.deletePrefix(`uploads/${safeRel(site)}/`);
+  }
 }
 
 // Two sources at once: writes go to `primary` (e.g. S3); reads fall through
@@ -286,6 +298,11 @@ export class LayeredBlobStore implements BlobStore {
   }
   uploadsBytes(site: string): Promise<number> {
     return this.primary.uploadsBytes(site);
+  }
+  async removeSite(site: string): Promise<void> {
+    // Both layers, as deleteUpload does: reads fall through, so a site left in the
+    // fallback would keep serving after its owner deleted it.
+    await Promise.all([this.primary.removeSite(site), this.fallback.removeSite(site)]);
   }
 }
 

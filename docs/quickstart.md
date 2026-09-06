@@ -10,6 +10,10 @@ worlds deploy            # → https://my-site.<your-worlds-host>
 No CLI? Drag the folder onto your Worlds homepage in the browser, or give Claude the
 MCP URL (`<your-worlds-host>/mcp`) and say "deploy this".
 
+Done with a site? `worlds delete my-site --yes`, the ✕ on its card on the homepage, or the MCP
+`delete_site` tool. Only the owner (the first uploader) can; files, uploads, collections,
+documents and the deploy log go with it, and the name is free to deploy again.
+
 Add superpowers with one script tag — no keys, no config:
 
 ```html

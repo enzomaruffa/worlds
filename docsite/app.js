@@ -238,7 +238,14 @@ async function initCross() {
   for (const d of page.items) liveSites.set(d.data.name, d.data);
   for (const d of [...page.items].reverse().slice(-12)) row(d.data, false);
   sites.subscribe((ev) => {
-    if (ev.type === "delete") return;
+    if (ev.type === "delete") {
+      const gone = ev.doc?.name || ev.doc?.data?.name;
+      shown.get(gone)?.remove();
+      shown.delete(gone);
+      liveSites.delete(gone);
+      renderExamples();
+      return;
+    }
     liveSites.set(ev.doc.data.name, ev.doc.data);
     row(ev.doc.data, ev.type === "create");
     renderExamples();
