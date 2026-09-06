@@ -91,28 +91,27 @@ export async function call(req: Request, site: string, name: string): Promise<Re
     VALUES (${id}, ${cfg.name}, ${tool}, ${site}, ${profile.handle}, ${who.email}, ${jsonParam(stored)}, 'pending')`;
 
   const started = Date.now();
+  let settled = false;
+  const record = async (outcome: string, detail: string | null) => {
+    if (settled) return;
+    settled = true;
+    await sql`UPDATE connector_calls SET outcome = ${outcome}, detail = ${detail}, ms = ${Date.now() - started} WHERE id = ${id}`.catch(() => {});
+  };
   try {
     const out = await callTool(cfg.name, { url: cfg.url, token }, tool, sent);
-    const ms = Date.now() - started;
     if (out.isError) {
       const detail = String(out.value).slice(0, 300);
-      await finish(id, "error", detail, ms);
+      await record("error", detail);
       // The tool's own message, not an HTTP body — safe to surface, and the caller needs
       // it to be actionable.
       throw new WorldsError("upstream_error", `connector: ${detail}`);
     }
-    await finish(id, "ok", null, ms);
+    await record("ok", null);
     return json({ ok: true, connector: cfg.name, tool, result: out.value });
   } catch (e) {
-    const err = e as WorldsError;
-    if (err?.code !== "upstream_error" || !String(err.message).startsWith("connector: ")) {
-      const timedOut = String(err?.message ?? "").includes("timed out");
-      await finish(id, timedOut ? "timeout" : "error", String(err?.message ?? "").slice(0, 300), Date.now() - started);
-    }
+    const message = String((e as Error)?.message ?? "");
+    await record(message.includes("timed out") ? "timeout" : "error", message.slice(0, 300));
     throw e;
   }
 }
 
-async function finish(id: string, outcome: string, detail: string | null, ms: number): Promise<void> {
-  await sql`UPDATE connector_calls SET outcome = ${outcome}, detail = ${detail}, ms = ${ms} WHERE id = ${id}`.catch(() => {});
-}
