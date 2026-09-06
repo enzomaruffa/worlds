@@ -163,22 +163,46 @@
     },
     request(frame, timeoutMs = 5000) {
       return new Promise((resolve, reject) => {
-        this.open();
-        if (!this.ws || this.ws.readyState !== 1)
-          return reject(new WorldsError("upstream_error", "socket is not connected", 503));
         const id = `q${this.nextId++}`;
+        let settled = false;
         const timer = setTimeout(() => {
+          settled = true;
           this.pending.delete(id);
           reject(new WorldsError("upstream_error", "socket request timed out", 504));
         }, timeoutMs);
-        this.pending.set(id, (f) => {
-          clearTimeout(timer);
+        const finish = (fn) => {
+          if (!settled) {
+            settled = true;
+            clearTimeout(timer);
+            fn();
+          }
+        };
+        this.pending.set(id, (f) => finish(() => {
           if (f.op === "error")
             reject(new WorldsError(f.error?.code || "internal", f.error?.message || "realtime error", 500));
           else
             resolve(f);
-        });
-        this.ws.send(JSON.stringify({ ...frame, id }));
+        }));
+        const send = () => {
+          if (settled)
+            return;
+          if (this.ws && this.ws.readyState === 1)
+            this.ws.send(JSON.stringify({ ...frame, id }));
+          else
+            finish(() => {
+              this.pending.delete(id);
+              reject(new WorldsError("upstream_error", "socket is not connected", 503));
+            });
+        };
+        this.open();
+        if (this.ws && this.ws.readyState === 1)
+          send();
+        else {
+          const off = this.onConnection(() => {
+            off();
+            send();
+          });
+        }
       });
     },
     sub(frame, handler, extras = {}) {

@@ -122,23 +122,35 @@ export const sock = {
     return this.sub(frame, handler, extras).off;
   },
 
-  // One frame out, one frame back. Never queued: a reply that arrives after a reconnect
-  // would be timing a socket that no longer exists, so a disconnected caller rejects now.
+  // One frame out, one frame back. Not queued across a reconnect — a reply that landed
+  // afterwards would be timing a socket that no longer exists — but a caller on a page
+  // that has only just loaded waits for the first connect rather than failing, since the
+  // socket opens lazily and would otherwise still be CONNECTING.
   request(frame: Frame, timeoutMs = 5000): Promise<any> {
     return new Promise((resolve, reject) => {
-      this.open();
-      if (!this.ws || this.ws.readyState !== 1) return reject(new WorldsError("upstream_error", "socket is not connected", 503));
       const id = `q${this.nextId++}`;
+      let settled = false;
       const timer = setTimeout(() => {
+        settled = true;
         this.pending.delete(id);
         reject(new WorldsError("upstream_error", "socket request timed out", 504));
       }, timeoutMs);
-      this.pending.set(id, (f) => {
-        clearTimeout(timer);
+      const finish = (fn: () => void) => { if (!settled) { settled = true; clearTimeout(timer); fn(); } };
+      this.pending.set(id, (f) => finish(() => {
         if (f.op === "error") reject(new WorldsError(f.error?.code || "internal", f.error?.message || "realtime error", 500));
         else resolve(f);
-      });
-      this.ws.send(JSON.stringify({ ...frame, id }));
+      }));
+
+      const send = () => {
+        if (settled) return;
+        if (this.ws && this.ws.readyState === 1) this.ws.send(JSON.stringify({ ...frame, id }));
+        else finish(() => { this.pending.delete(id); reject(new WorldsError("upstream_error", "socket is not connected", 503)); });
+      };
+      this.open();
+      if (this.ws && this.ws.readyState === 1) send();
+      // WebSocket connect is always async, so registering after open() cannot miss it.
+      // A "closed" first event falls through to send(), which rejects on the dead socket.
+      else { const off = this.onConnection(() => { off(); send(); }); }
     });
   },
 
