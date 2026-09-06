@@ -546,6 +546,25 @@ describe("realtime actors", () => {
       };
     });
 
+  test("an event with `to` reaches only that member", async () => {
+    const a = mk(), b = mk(), c = mk();
+    await Promise.all([opened(a), opened(b), opened(c)]);
+    sub(a, "a1", "A", "z9", "secret");
+    sub(b, "b1", "B", "z9", "secret");
+    sub(c, "c1", "C", "z9", "secret");
+    await Bun.sleep(120);
+    const toB = waitFor(b, (f) => f.op === "actor_event");
+    let cGot = false;
+    c.onmessage = (m) => { if (JSON.parse(String(m.data)).op === "actor_event") cGot = true; };
+    a.send(JSON.stringify({ op: "aevent", id: "aevent", channel: "secret", cid: "A", to: "B", payload: { card: 7 } }));
+    const ev = await toB;
+    await Bun.sleep(150); // C had every chance to receive it
+    a.close(); b.close(); c.close();
+    expect(ev.payload.card).toBe(7);
+    expect(ev.from.id).toBe("A");
+    expect(cGot).toBe(false);
+  });
+
   test("a joiner gets an in-zone last-value snapshot of existing members", async () => {
     const a = mk(), b = mk();
     await Promise.all([opened(a), opened(b)]);

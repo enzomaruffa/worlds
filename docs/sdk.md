@@ -291,6 +291,7 @@ const net = worlds.actors("race", {
 net.set({ x, y, cell });                          // frame STATE (zone via zoneKey)
 net.setMetadata({ level: 6 });                    // merge METADATA (infrequent)
 net.send({ t: "horn" });                          // one-off EVENT to in-zone peers
+net.send({ key }, { to: peerId });                // …or to exactly one member
 net.onChange((id, state, peer) => draw(peer));    // peer = {id, handle, name, state, metadata}
 net.onEvent((id, payload, from) => honk(id));     // a peer's discrete event (from = {id,handle,name})
 net.onLeave((id) => remove(id));                  // peer left my zone or disconnected
@@ -302,7 +303,9 @@ net.destroy();                                    // unsubscribe + drop listener
 derive from state — make it **spatial** (a grid cell) and you sync only nearby peers
 no matter how many connect. `set` is fire-and-forget at frame rate (coalesced to the
 latest between flushes); `setMetadata` merges and rides the same flush; `send` is
-delivered immediately, never stored. All three payloads are ephemeral (≤16KB each) —
+delivered immediately, never stored. `send(payload, {to: id})` reaches one member
+instead of the zone — that's how you deal a hand or a key card without putting the
+secret in shared state where every player can read it. All three payloads are ephemeral (≤16KB each) —
 keep anything that must survive a reload in `worlds.db` / `worlds.room`. Pass
 `observer: true` to watch a zone read-only — you still get snapshots/updates/events
 but stay invisible to peers and your `set`/`send` are no-ops (replays, leaderboards,

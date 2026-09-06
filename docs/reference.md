@@ -449,6 +449,7 @@ const net = worlds.actors("race", { zoneKey: s => s.cell, rate: 15, metadata: { 
 net.set({ x, y, cell });                       // frame state
 net.setMetadata({ level: 6 });                 // infrequent metadata
 net.send({ t: "horn" });                       // one-off event to in-zone peers
+net.send({ key }, { to: peerId });              // …or to one member, for hidden info
 net.onChange((id, state, peer) => draw(peer)); // peer.state + peer.metadata
 net.onEvent((id, payload, from) => honk(id));  // a peer's discrete event
 net.onLeave(id => remove(id));
@@ -493,7 +494,7 @@ export interface ActorRecord<T = any> extends ActorFrom {
 export interface Actors<T = any> {
   set(state: T): void;
   setMetadata(patch: Record<string, any>): void;
-  send(payload: any): void;
+  send(payload: any, opts?: { to?: string }): void;
   others(): ActorRecord<T>[];
   onChange(fn: (id: string, state: T, peer: ActorRecord<T>) => void): () => void;
   onEvent(fn: (id: string, payload: any, from: ActorFrom) => void): () => void;
