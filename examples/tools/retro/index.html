@@ -1,0 +1,834 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Retro · Worlds</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #09090b;
+    --surface: #0c0c0f;
+    --surface-2: #131318;
+    --border: #27272a;
+    --gold: #f59e0b;
+    --gold-bright: #fbbf24;
+    --text: #e4e4e7;
+    --muted: #a1a1aa;
+    --danger: #ef4444;
+    --good: #22c55e;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background:
+      radial-gradient(1200px 600px at 50% -10%, rgba(245,158,11,.06), transparent 60%),
+      var(--bg);
+    color: var(--text);
+    font-family: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--gold); }
+  .wrap { width: min(1080px, 95vw); margin: 0 auto; padding: 1.25rem 0 4rem; }
+
+  header.top {
+    display: flex; align-items: center; gap: .75rem;
+    padding: .25rem 0 1rem; border-bottom: 1px solid var(--border); margin-bottom: 1.25rem;
+  }
+  .brand { display: flex; align-items: center; gap: .65rem; }
+  .logo {
+    width: 40px; height: 40px; border-radius: 11px; flex: none;
+    display: grid; place-items: center; font-size: 1.3rem;
+    background: linear-gradient(160deg, #1a1a1f, #0b0b0e);
+    border: 1px solid var(--border);
+  }
+  .brand h1 { margin: 0; font-size: 1.15rem; letter-spacing: .02em; font-weight: 700; }
+  .brand .sub { font-size: .75rem; color: var(--muted); margin-top: .1rem; letter-spacing: .02em; }
+  .me-chip {
+    margin-left: auto; display: flex; align-items: center; gap: .5rem;
+    padding: .35rem .6rem; border-radius: 999px;
+    background: var(--surface); border: 1px solid var(--border);
+    font-size: .78rem; color: var(--muted); white-space: nowrap;
+  }
+  .me-chip .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--good); box-shadow: 0 0 8px var(--good); }
+  .me-chip b { color: var(--text); font-weight: 600; }
+
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 1.1rem 1.15rem; }
+  .hidden { display: none !important; }
+  #boot { padding: 40px 18px; text-align: center; color: var(--muted); }
+
+  h2 { margin: .1rem 0 .3rem; font-size: 1.15rem; }
+  .hint { color: var(--muted); font-size: .85rem; margin: 0 0 1rem; line-height: 1.5; }
+  .lab { font-size: .68rem; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); }
+
+  input, textarea {
+    font-family: inherit; font-size: .9rem; color: var(--text);
+    background: var(--surface-2); border: 1px solid var(--border); border-radius: 9px;
+    padding: .55rem .7rem; outline: none;
+  }
+  input:focus, textarea:focus { border-color: var(--gold); box-shadow: 0 0 0 3px rgba(245,158,11,.12); }
+  textarea { resize: vertical; width: 100%; font-family: inherit; }
+
+  button { font-family: inherit; font-size: .88rem; font-weight: 600; cursor: pointer; }
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: .4rem;
+    padding: .6rem 1rem; border-radius: 10px; border: 1px solid var(--border);
+    background: var(--surface-2); color: var(--text);
+    transition: border-color .15s ease, transform .05s ease, opacity .15s ease;
+  }
+  .btn:hover:not(:disabled) { border-color: var(--muted); }
+  .btn:active:not(:disabled) { transform: translateY(1px); }
+  .btn:disabled { opacity: .45; cursor: not-allowed; }
+  .btn.primary { background: linear-gradient(160deg, var(--gold-bright), var(--gold)); color: #1a1205; border-color: transparent; }
+  .btn.primary:hover:not(:disabled) { filter: brightness(1.05); }
+  .btn.ghost { background: transparent; }
+  .btn.sm { padding: .4rem .7rem; font-size: .8rem; }
+  .icon-btn {
+    flex: none; width: 30px; height: 30px; border-radius: 8px;
+    display: inline-grid; place-items: center; font-size: .95rem; font-weight: 600;
+    color: var(--muted); background: var(--surface-2); border: 1px solid var(--border);
+  }
+  .icon-btn:hover { color: var(--text); border-color: var(--muted); }
+  .icon-btn.del:hover { color: var(--danger); border-color: var(--danger); }
+
+  footer.foot { text-align: center; color: var(--muted); font-size: .7rem; margin-top: 1.5rem; }
+
+  /* ── Boards directory ─────────────────────────── */
+  .boardlist { list-style: none; margin: 0 0 1rem; padding: 0; display: flex; flex-direction: column; gap: .55rem; }
+  .boardrow {
+    display: flex; align-items: center; gap: .75rem;
+    background: var(--surface-2); border: 1px solid var(--border); border-radius: 11px; padding: .7rem .8rem;
+  }
+  .boardrow .meta { flex: 1; min-width: 0; }
+  .boardrow .nm { font-weight: 600; font-size: .95rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .boardrow .sub { font-size: .75rem; color: var(--muted); margin-top: .1rem; }
+  .code { font-family: ui-monospace, monospace; letter-spacing: .08em; color: var(--gold); }
+  .empty-note { color: var(--muted); font-size: .85rem; font-style: italic; padding: 1rem .25rem; text-align: center; list-style: none; }
+  .createRow { display: flex; gap: .5rem; flex-wrap: wrap; margin-bottom: .9rem; }
+  .createRow input { flex: 1; min-width: 180px; }
+  .tablebar { display: flex; gap: .5rem; align-items: center; }
+  .tablebar input { width: 110px; text-transform: uppercase; letter-spacing: .08em; }
+
+  /* ── Board screen ──────────────────────────────── */
+  .boardhead { display: flex; align-items: center; gap: .6rem; margin-bottom: .8rem; }
+  .boardhead .code { font-size: .85rem; }
+  .boardhead .spacer { flex: 1; }
+
+  .phasebar { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; margin-bottom: .9rem; }
+  .phasepill {
+    font-size: .72rem; text-transform: uppercase; letter-spacing: .08em;
+    padding: .3rem .7rem; border-radius: 999px; border: 1px solid var(--border); color: var(--muted);
+  }
+  .phasepill.done { color: var(--good); border-color: rgba(34,197,94,.35); }
+  .phasepill.current { color: #1a1205; background: var(--gold); border-color: var(--gold); font-weight: 700; }
+
+  .rosterbar { display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; margin-bottom: .8rem; font-size: .78rem; color: var(--muted); }
+  .rosterbar .rp {
+    display: inline-flex; align-items: center; gap: .35rem;
+    background: var(--surface-2); border: 1px solid var(--border); border-radius: 999px; padding: .2rem .6rem;
+  }
+  .rosterbar .rp::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--c, var(--muted)); }
+
+  .toolsbar { display: flex; gap: .6rem; flex-wrap: wrap; margin-bottom: .8rem; }
+  .toolsbar > div {
+    display: flex; align-items: center; gap: .4rem; flex-wrap: wrap;
+    background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: .45rem .65rem;
+    font-size: .8rem;
+  }
+  .toolsbar b { font-variant-numeric: tabular-nums; }
+
+  .connectorNote {
+    font-size: .8rem; color: var(--muted); background: var(--surface-2);
+    border: 1px dashed var(--border); border-radius: 10px; padding: .6rem .75rem; margin-bottom: .9rem;
+  }
+
+  .columns { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: .9rem; }
+  .col { background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; padding: .75rem; display: flex; flex-direction: column; gap: .6rem; }
+  .colhead { display: flex; align-items: center; gap: .5rem; }
+  .colTitle { font-weight: 600; font-size: .92rem; }
+  input.colTitle.editable { flex: 1; min-width: 0; background: transparent; border: 1px solid transparent; padding: .2rem .3rem; }
+  input.colTitle.editable:hover { border-color: var(--border); }
+  .colCount { margin-left: auto; font-size: .72rem; color: var(--muted); }
+  .addnote { display: flex; flex-direction: column; gap: .4rem; }
+  .addnote textarea { font-size: .82rem; }
+  .notelist { display: flex; flex-direction: column; gap: .5rem; }
+
+  .note {
+    position: relative; background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: .6rem .7rem; font-size: .85rem;
+  }
+  .note.hidden-note { color: var(--muted); font-style: italic; text-align: center; border-style: dashed; }
+  .notetext { white-space: pre-wrap; word-break: break-word; }
+  .notemeta { display: flex; align-items: center; gap: .5rem; margin-top: .4rem; font-size: .7rem; color: var(--muted); }
+  .notemeta .votes { color: var(--gold); font-weight: 600; }
+  .note .del { position: absolute; top: .35rem; right: .35rem; width: 24px; height: 24px; font-size: .8rem; }
+  .dot-btn { margin-top: .5rem; width: 100%; }
+
+  /* ── Actions / filing panel ────────────────────── */
+  .honest { margin-bottom: 1rem; }
+  .honest p { font-size: .78rem; color: var(--muted); margin: 0 0 .4rem; line-height: 1.5; }
+  .filelist { list-style: none; margin: 0 0 1rem; padding: 0; display: flex; flex-direction: column; gap: .5rem; }
+  .filerow {
+    display: flex; align-items: center; gap: .7rem;
+    background: var(--surface-2); border: 1px solid var(--border); border-radius: 11px; padding: .6rem .8rem;
+  }
+  .filecheck input { width: 17px; height: 17px; accent-color: var(--gold); }
+  .filemeta { flex: 1; min-width: 0; }
+  .filetext { font-size: .85rem; }
+  .filesub { font-size: .7rem; color: var(--muted); margin-top: .2rem; }
+  .filestatus { font-size: .78rem; white-space: nowrap; }
+  .filestatus .muted { color: var(--muted); }
+  .fileActions { display: flex; justify-content: flex-end; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="top">
+      <div class="brand">
+        <div class="logo">📝</div>
+        <div>
+          <h1>Retro</h1>
+          <div class="sub">Worlds · sprint retros</div>
+        </div>
+      </div>
+      <div class="me-chip"><span class="dot"></span><span>you are <b id="meName">…</b></span></div>
+    </header>
+
+    <div id="boot" class="card">Connecting to Worlds…</div>
+
+    <!-- ── BOARDS DIRECTORY ── -->
+    <section id="screenBoards" class="card hidden">
+      <h2>Open boards</h2>
+      <p class="hint">One board per squad or sprint. Start a new one, join an open board below, or punch in a private code someone shared.</p>
+      <ul class="boardlist" id="boardList"></ul>
+      <div class="createRow">
+        <input id="boardNameInput" placeholder="e.g. Sprint 42 retro" maxlength="60" />
+        <button class="btn primary" id="btnNewBoard">New board</button>
+        <button class="btn ghost" id="btnNewPrivateBoard">New private board</button>
+      </div>
+      <div class="tablebar">
+        <input id="codeInput" maxlength="4" placeholder="CODE" />
+        <button class="btn" id="btnJoinCode">Join by code</button>
+      </div>
+    </section>
+
+    <!-- ── BOARD ── -->
+    <section id="screenBoard" class="card hidden">
+      <div class="boardhead">
+        <button class="btn ghost" id="btnLeaveBoard">← Boards</button>
+        <span class="code" id="boardCode"></span>
+        <span class="spacer"></span>
+        <button class="btn ghost" id="btnCopyInvite">Copy invite</button>
+      </div>
+
+      <div class="phasebar" id="phaseBar"></div>
+      <div class="rosterbar" id="rosterBar"></div>
+
+      <div class="toolsbar">
+        <div id="timerBox"></div>
+        <div id="votesBox" class="hidden"></div>
+        <div id="dotsCfgBox"></div>
+      </div>
+
+      <p class="connectorNote hidden" id="connectorNote">No Linear connector is granted to this site yet — an operator needs to grant one before notes can be filed as issues.</p>
+
+      <div class="columns" id="columnsView"></div>
+
+      <div class="hidden" id="actionsView">
+        <div class="honest">
+          <p>Hiding notes until reveal is cosmetic: any signed-in person can read the underlying documents. Fine for a team retro, not a security boundary.</p>
+          <p>Issues are filed under the platform's own Linear credential, not yours — the connector layer stamps every call with this board and who asked.</p>
+        </div>
+        <ul class="filelist" id="fileList"></ul>
+        <div class="fileActions">
+          <button class="btn primary" id="btnFileSelected">File selected as Linear issues</button>
+        </div>
+      </div>
+    </section>
+
+    <footer class="foot">Built on Worlds · notes and votes are shared &amp; survive reload</footer>
+  </div>
+
+  <script src="/worlds.js"></script>
+  <script>
+  (() => {
+    "use strict";
+
+    const ROOM_NAME = "retro";
+    const NOTES_COLLECTION = "notes";
+    const PHASES = ["brainstorm", "group", "vote", "actions"];
+    const PHASE_LABEL = { brainstorm: "Brainstorm", group: "Group", vote: "Vote", actions: "Actions" };
+
+    // ── DOM ──────────────────────────────────────────────────
+    const $ = (id) => document.getElementById(id);
+    const boot = $("boot");
+    const screens = { boards: $("screenBoards"), board: $("screenBoard") };
+    function showScreen(name) {
+      boot.classList.add("hidden");
+      for (const k in screens) screens[k].classList.toggle("hidden", k !== name);
+    }
+
+    const { toast, esc, uniqByHandle, colorFor } = worlds;
+
+    // ── Worlds handles ───────────────────────────────────────
+    // Many concurrent boards: worlds.rooms is the directory (lobby browser + join
+    // codes); each board is one worlds.room carrying the small shared doc below.
+    // Notes are NOT part of this doc — see NOTES_COLLECTION.
+    function blankBoard() {
+      return {
+        phase: "brainstorm",
+        columns: ["Went well", "To improve", "Action items"],
+        timerEndsAt: 0,
+        votesPerPerson: 5,
+        votes: {}, // handle -> dots already spent
+      };
+    }
+    const hall = worlds.rooms(ROOM_NAME, { minPlayers: 1, maxPlayers: 0, initial: blankBoard, onList: renderBoardsList });
+
+    // ── Runtime state ────────────────────────────────────────
+    let me = null;                 // {handle,name}
+    let ROOM = null;                // joined board (worlds.room) or null
+    let unsubRoom = null;
+    let unsubNotes = null;
+    let board = null;               // normalized ROOM state
+    let presence = [];              // [{handle,name,isHost,isMe}]
+    let notes = [];                 // [Doc] one per sticky note, this board only
+    let linearAvailable = false;
+    const selectedForFiling = new Set();
+    let busyAddNote = false;
+    let busyVote = false;
+    let busyPhase = false;
+    let busyFile = false;
+    let activeCountdown = null;
+    let activeCountdownEndsAt = 0;
+
+    function normalizeBoard(data) {
+      const b = Object.assign(blankBoard(), data || {});
+      if (!Array.isArray(b.columns) || !b.columns.length) b.columns = blankBoard().columns;
+      if (!b.votes || typeof b.votes !== "object") b.votes = {};
+      if (PHASES.indexOf(b.phase) < 0) b.phase = "brainstorm";
+      if (typeof b.votesPerPerson !== "number" || b.votesPerPerson <= 0) b.votesPerPerson = 5;
+      return b;
+    }
+
+    function notesInColumn(i) {
+      const list = notes.filter((n) => n.data.column === i);
+      if (board.phase === "vote" || board.phase === "actions") {
+        list.sort((a, b) => (b.data.votes || 0) - (a.data.votes || 0));
+      } else {
+        list.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+      }
+      return list;
+    }
+
+    // ── Phase control (host-only) ────────────────────────────
+    async function advancePhase() {
+      if (busyPhase || !ROOM || !ROOM.isHost || !board) return;
+      const i = PHASES.indexOf(board.phase);
+      if (i < 0 || i >= PHASES.length - 1) return;
+      busyPhase = true;
+      try { await ROOM.merge({ phase: PHASES[i + 1] }); }
+      finally { busyPhase = false; }
+    }
+
+    async function renameColumn(i, text) {
+      if (!ROOM || !ROOM.isHost || !board) return;
+      const cols = board.columns.slice();
+      const v = text.trim().slice(0, 40);
+      if (!v || v === cols[i]) return;
+      cols[i] = v;
+      await ROOM.merge({ columns: cols });
+    }
+
+    async function setVotesPerPerson(n) {
+      if (!ROOM || !ROOM.isHost) return;
+      n = Math.max(1, Math.min(20, n));
+      await ROOM.merge({ votesPerPerson: n });
+    }
+
+    // ── Timer ─────────────────────────────────────────────────
+    async function startTimer(minutes) {
+      if (!ROOM || !ROOM.isHost) return;
+      await ROOM.merge({ timerEndsAt: Date.now() + minutes * 60000 });
+    }
+    async function clearTimer() {
+      if (!ROOM || !ROOM.isHost) return;
+      await ROOM.merge({ timerEndsAt: 0 });
+    }
+    function fmtMs(ms) {
+      const s = Math.max(0, Math.ceil(ms / 1000));
+      const mm = String(Math.floor(s / 60)).padStart(2, "0");
+      const ss = String(s % 60).padStart(2, "0");
+      return `${mm}:${ss}`;
+    }
+    function renderTimerText(msLeft) {
+      const t = $("timerText");
+      if (!t) return;
+      t.textContent = msLeft <= 0 ? "Time's up" : fmtMs(msLeft);
+    }
+    // Recreated only when the shared deadline itself changes, so every client's
+    // countdown ticks off the one field in board.timerEndsAt instead of its own clock.
+    function applyCountdown() {
+      const endsAt = board.timerEndsAt || 0;
+      if (endsAt === activeCountdownEndsAt) return;
+      if (activeCountdown) { activeCountdown.destroy(); activeCountdown = null; }
+      activeCountdownEndsAt = endsAt;
+      if (endsAt > Date.now()) {
+        activeCountdown = worlds.countdown(endsAt, {
+          onTick: (msLeft) => renderTimerText(msLeft),
+          onEnd: () => renderTimerText(0),
+        });
+      }
+    }
+
+    // ── Notes ─────────────────────────────────────────────────
+    async function addNote(columnIdx, rawText) {
+      const text = rawText.trim().slice(0, 240);
+      if (!text || busyAddNote || !ROOM || !board || board.phase !== "brainstorm") return;
+      busyAddNote = true;
+      try {
+        await worlds.db.collection(NOTES_COLLECTION).create({
+          roomId: ROOM.id,
+          column: columnIdx,
+          text,
+          author: me.handle,
+          authorName: me.name || me.handle,
+          votes: 0,
+          filed_as: null,
+          filed_url: null,
+        });
+      } catch (e) {
+        toast("Couldn't add that note.");
+        console.error("[retro] addNote failed", e);
+      } finally {
+        busyAddNote = false;
+      }
+    }
+
+    async function deleteNote(id) {
+      try { await worlds.db.collection(NOTES_COLLECTION).delete(id); }
+      catch (e) { toast("Couldn't delete that note."); console.error("[retro] deleteNote failed", e); }
+    }
+
+    // Dot voting: the note's own tally is incremented atomically (no read-modify-write
+    // race). The per-person dot budget lives in board.votes and is a plain room merge
+    // with no precondition, so two votes from the same handle landing in the same tick
+    // could clobber each other — acceptable for a soft cap, not a security control.
+    async function castVote(note) {
+      if (!board || board.phase !== "vote" || busyVote || !ROOM) return;
+      const used = (board.votes && board.votes[me.handle]) || 0;
+      if (used >= board.votesPerPerson) { toast("You're out of dots."); return; }
+      busyVote = true;
+      try {
+        await worlds.db.collection(NOTES_COLLECTION).increment(note.id, "votes", 1);
+        const nextVotes = Object.assign({}, board.votes, { [me.handle]: used + 1 });
+        await ROOM.merge({ votes: nextVotes });
+      } catch (e) {
+        toast("Couldn't cast that vote.");
+        console.error("[retro] castVote failed", e);
+      } finally {
+        busyVote = false;
+      }
+    }
+
+    // ── Filing (the point of the site) ───────────────────────
+    async function fileSelected() {
+      if (!ROOM || !ROOM.isHost || busyFile || !linearAvailable) return;
+      const selected = notes.filter((n) => selectedForFiling.has(n.id));
+      if (!selected.length) { toast("Select at least one note to file."); return; }
+      const notesCol = worlds.db.collection(NOTES_COLLECTION);
+      busyFile = true;
+      render();
+      for (const note of selected) {
+        if (note.data.filed_as) continue; // no double-file; there is no idempotency key
+        try {
+          // No teamId, projectId or labels here — which team/project/labels an issue
+          // lands in is pinned by operator config, not chosen on this page. That's
+          // what stops this board filing into the wrong team even if someone rewrites
+          // its JavaScript in devtools.
+          const issue = await worlds.connect.call("linear", "create_issue", {
+            title: note.data.text.slice(0, 80),
+            description: `${note.data.text}\n\nVotes: ${note.data.votes}`,
+          });
+          await notesCol.update(note.id, { filed_as: issue.identifier, filed_url: issue.url });
+        } catch (e) {
+          toast(e.message);
+          if (e.code === "quota_exceeded" || e.code === "rate_limited") break;
+        }
+      }
+      busyFile = false;
+      render();
+    }
+
+    // ── Rendering ─────────────────────────────────────────────
+    function render() {
+      if (!ROOM || !board) return;
+      renderPhaseBar();
+      renderRoster();
+      applyCountdown();
+      renderTimerBox();
+      renderVotesBox();
+      renderDotsCfg();
+      $("connectorNote").classList.toggle("hidden", linearAvailable);
+      const isActions = board.phase === "actions";
+      $("columnsView").classList.toggle("hidden", isActions);
+      $("actionsView").classList.toggle("hidden", !isActions);
+      if (isActions) renderActionsView(); else renderColumns();
+    }
+
+    function renderPhaseBar() {
+      const el = $("phaseBar");
+      el.innerHTML = "";
+      const curIdx = PHASES.indexOf(board.phase);
+      PHASES.forEach((p, i) => {
+        const pill = document.createElement("span");
+        pill.className = "phasepill" + (i === curIdx ? " current" : i < curIdx ? " done" : "");
+        pill.textContent = PHASE_LABEL[p];
+        el.appendChild(pill);
+      });
+      if (ROOM.isHost && curIdx < PHASES.length - 1) {
+        const btn = document.createElement("button");
+        btn.className = "btn primary sm";
+        btn.textContent = `Next: ${PHASE_LABEL[PHASES[curIdx + 1]]} →`;
+        btn.disabled = busyPhase;
+        btn.addEventListener("click", advancePhase);
+        el.appendChild(btn);
+      }
+    }
+
+    function renderRoster() {
+      const el = $("rosterBar");
+      const base = presence.length ? presence : (me ? [{ handle: me.handle, name: me.name || me.handle }] : []);
+      const list = uniqByHandle(base);
+      const hostHandle = (presence.find((p) => p.isHost) || {}).handle;
+      el.innerHTML = `<span class="lab">${list.length} here</span>` + list.map((p) => {
+        const isMe = me && p.handle === me.handle;
+        const isHost = p.handle === hostHandle;
+        return `<span class="rp" style="--c:${colorFor(p.handle)}">${esc(p.name)}${isMe ? " (you)" : ""}${isHost ? " · host" : ""}</span>`;
+      }).join("");
+    }
+
+    function renderTimerBox() {
+      const el = $("timerBox");
+      const isHost = ROOM.isHost;
+      const endsAt = board.timerEndsAt || 0;
+      const initial = !endsAt ? "No timer" : (endsAt <= Date.now() ? "Time's up" : fmtMs(endsAt - Date.now()));
+      const controls = isHost
+        ? `<button class="icon-btn tbtn" type="button" data-m="1">1m</button>
+           <button class="icon-btn tbtn" type="button" data-m="3">3m</button>
+           <button class="icon-btn tbtn" type="button" data-m="5">5m</button>
+           <button class="icon-btn tbtn" type="button" data-m="10">10m</button>
+           <button class="btn ghost sm" type="button" id="btnClearTimer">Clear</button>`
+        : "";
+      el.innerHTML = `<span class="lab">Timer</span><b id="timerText">${initial}</b>${controls}`;
+      if (isHost) {
+        el.querySelectorAll(".tbtn").forEach((b) => b.addEventListener("click", () => startTimer(Number(b.dataset.m))));
+        $("btnClearTimer").addEventListener("click", clearTimer);
+      }
+    }
+
+    function renderVotesBox() {
+      const el = $("votesBox");
+      if (board.phase !== "vote") { el.classList.add("hidden"); return; }
+      el.classList.remove("hidden");
+      const used = (board.votes && board.votes[me.handle]) || 0;
+      const left = Math.max(0, board.votesPerPerson - used);
+      el.innerHTML = `<span class="lab">Your dots</span> <b>${left}</b> / ${board.votesPerPerson} left`;
+    }
+
+    function renderDotsCfg() {
+      const el = $("dotsCfgBox");
+      const editable = ROOM.isHost && (board.phase === "brainstorm" || board.phase === "group");
+      if (editable) {
+        el.innerHTML = `<span class="lab">Dots per person</span>
+          <button class="icon-btn" type="button" id="dotsDown">−</button>
+          <b>${board.votesPerPerson}</b>
+          <button class="icon-btn" type="button" id="dotsUp">+</button>`;
+        $("dotsDown").addEventListener("click", () => setVotesPerPerson(board.votesPerPerson - 1));
+        $("dotsUp").addEventListener("click", () => setVotesPerPerson(board.votesPerPerson + 1));
+      } else {
+        el.innerHTML = `<span class="lab">Dots per person</span> <b>${board.votesPerPerson}</b>`;
+      }
+    }
+
+    function renderColumns() {
+      const wrap = $("columnsView");
+      wrap.innerHTML = "";
+      board.columns.forEach((title, i) => {
+        const col = document.createElement("div");
+        col.className = "col";
+
+        const head = document.createElement("div");
+        head.className = "colhead";
+        if (ROOM.isHost) {
+          const inp = document.createElement("input");
+          inp.className = "colTitle editable";
+          inp.value = title;
+          inp.maxLength = 40;
+          inp.addEventListener("change", () => renameColumn(i, inp.value));
+          head.appendChild(inp);
+        } else {
+          const h = document.createElement("div");
+          h.className = "colTitle";
+          h.textContent = title;
+          head.appendChild(h);
+        }
+        const count = document.createElement("span");
+        count.className = "colCount";
+        count.textContent = notesInColumn(i).length + (notesInColumn(i).length === 1 ? " note" : " notes");
+        head.appendChild(count);
+        col.appendChild(head);
+
+        if (board.phase === "brainstorm") col.appendChild(buildAddNoteForm(i));
+
+        const list = document.createElement("div");
+        list.className = "notelist";
+        for (const note of notesInColumn(i)) list.appendChild(buildNoteCard(note));
+        col.appendChild(list);
+
+        wrap.appendChild(col);
+      });
+    }
+
+    function buildAddNoteForm(i) {
+      const form = document.createElement("div");
+      form.className = "addnote";
+      const ta = document.createElement("textarea");
+      ta.placeholder = "Add a note…";
+      ta.maxLength = 240;
+      ta.rows = 2;
+      const btn = document.createElement("button");
+      btn.className = "btn primary sm";
+      btn.textContent = "Add";
+      const submit = () => { const v = ta.value; ta.value = ""; addNote(i, v); };
+      btn.addEventListener("click", submit);
+      ta.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } });
+      form.append(ta, btn);
+      return form;
+    }
+
+    // Any signed-in person can read every note doc regardless of phase (reads are
+    // open, see the honest note in the UI) — this is a cosmetic mask on your OWN
+    // client, not an access control.
+    function buildNoteCard(note) {
+      const card = document.createElement("div");
+      card.className = "note";
+      const mine = me && note.data.author === me.handle;
+      if (board.phase === "brainstorm" && !mine) {
+        card.classList.add("hidden-note");
+        card.innerHTML = `<span>🙈 hidden until reveal</span>`;
+        return card;
+      }
+
+      const text = document.createElement("div");
+      text.className = "notetext";
+      text.textContent = note.data.text;
+      card.appendChild(text);
+
+      const meta = document.createElement("div");
+      meta.className = "notemeta";
+      let metaHtml = `<span class="author">${esc(note.data.authorName || note.data.author)}</span>`;
+      if (board.phase === "vote" || board.phase === "actions") {
+        metaHtml += `<span class="votes">● ${note.data.votes || 0}</span>`;
+      }
+      meta.innerHTML = metaHtml;
+      card.appendChild(meta);
+
+      if (mine && board.phase === "brainstorm") {
+        const del = document.createElement("button");
+        del.className = "icon-btn del";
+        del.type = "button";
+        del.textContent = "×";
+        del.title = "Delete note";
+        del.addEventListener("click", () => deleteNote(note.id));
+        card.appendChild(del);
+      }
+
+      if (board.phase === "vote") {
+        const used = (board.votes && board.votes[me.handle]) || 0;
+        const left = board.votesPerPerson - used;
+        const btn = document.createElement("button");
+        btn.className = "btn dot-btn";
+        btn.type = "button";
+        btn.textContent = "+1 dot";
+        btn.disabled = left <= 0 || busyVote;
+        btn.addEventListener("click", () => castVote(note));
+        card.appendChild(btn);
+      }
+
+      return card;
+    }
+
+    function renderActionsView() {
+      const ul = $("fileList");
+      ul.innerHTML = "";
+      const sorted = notes.slice().sort((a, b) => (b.data.votes || 0) - (a.data.votes || 0));
+      if (!sorted.length) {
+        ul.innerHTML = `<li class="empty-note">No notes were added on this board.</li>`;
+      }
+      for (const note of sorted) {
+        const li = document.createElement("li");
+        li.className = "filerow";
+        const filed = !!note.data.filed_as;
+        const checked = selectedForFiling.has(note.id);
+        const canPick = ROOM.isHost && !filed && linearAvailable;
+        li.innerHTML = `
+          <label class="filecheck">
+            <input type="checkbox" ${checked ? "checked" : ""} ${canPick ? "" : "disabled"} />
+          </label>
+          <div class="filemeta">
+            <div class="filetext">${esc(note.data.text)}</div>
+            <div class="filesub">${esc(board.columns[note.data.column] || "")} · ${note.data.votes || 0} votes · ${esc(note.data.authorName || note.data.author)}</div>
+          </div>
+          <div class="filestatus">${filed
+            ? `<a href="${esc(note.data.filed_url)}" target="_blank" rel="noopener">${esc(note.data.filed_as)}</a>`
+            : (linearAvailable ? "" : "<span class='muted'>no connector</span>")}</div>`;
+        const cb = li.querySelector("input[type=checkbox]");
+        if (cb && canPick) {
+          cb.addEventListener("change", () => {
+            if (cb.checked) selectedForFiling.add(note.id); else selectedForFiling.delete(note.id);
+          });
+        }
+        ul.appendChild(li);
+      }
+      const fileBtn = $("btnFileSelected");
+      fileBtn.disabled = !ROOM.isHost || !linearAvailable || busyFile;
+      fileBtn.textContent = busyFile ? "Filing…" : "File selected as Linear issues";
+    }
+
+    // ── Boards directory (worlds.rooms) ──────────────────────
+    function renderBoardsList(list) {
+      const ul = $("boardList");
+      ul.innerHTML = "";
+      if (!list.length) {
+        ul.innerHTML = `<li class="empty-note">No open boards yet — start one!</li>`;
+        return;
+      }
+      for (const b of list) {
+        const li = document.createElement("li");
+        li.className = "boardrow";
+        const who = b.count === 1 ? "1 here" : `${b.count} here`;
+        li.innerHTML =
+          `<div class="meta"><div class="nm">${esc(b.name)}</div>` +
+          `<div class="sub">${who} · <span class="code">${esc(b.code)}</span></div></div>`;
+        const btn = document.createElement("button");
+        btn.className = "btn primary";
+        btn.textContent = "Join";
+        btn.addEventListener("click", () => joinBoard(() => hall.join(b.id)));
+        li.appendChild(btn);
+        ul.appendChild(li);
+      }
+    }
+
+    function mountRoom(room) {
+      if (unsubRoom) { try { unsubRoom(); } catch (_) {} }
+      if (unsubNotes) { try { unsubNotes(); } catch (_) {} }
+      if (activeCountdown) { activeCountdown.destroy(); activeCountdown = null; activeCountdownEndsAt = 0; }
+      ROOM = room;
+      board = null; presence = []; notes = []; selectedForFiling.clear();
+      location.hash = room.code;
+      $("boardCode").textContent = "code " + room.code;
+      showScreen("board");
+
+      unsubRoom = room.onChange((s) => {
+        board = normalizeBoard(s.state);
+        presence = s.members || [];
+        render();
+      });
+
+      const notesCol = worlds.db.collection(NOTES_COLLECTION);
+      notesCol.list({ filter: { roomId: room.id }, limit: 500 })
+        .then((page) => { notes = page.items; render(); })
+        .catch((e) => console.error("[retro] notes list failed", e));
+
+      // subscribe() is site-wide (every board's notes), so filter to this room.
+      unsubNotes = notesCol.subscribe((ev) => {
+        if (!ev || !ev.doc || ev.doc.data.roomId !== room.id) return;
+        const idx = notes.findIndex((n) => n.id === ev.doc.id);
+        if (ev.type === "delete") { if (idx >= 0) notes.splice(idx, 1); }
+        else if (idx >= 0) notes[idx] = ev.doc;
+        else notes.push(ev.doc);
+        render();
+      });
+    }
+
+    async function joinBoard(fn) {
+      try { mountRoom(await fn()); }
+      catch (e) {
+        toast(e && e.code === "conflict" ? "That board is full." : "Couldn't join that board.");
+        console.error("[retro] join failed", e);
+      }
+    }
+
+    function leaveBoard() {
+      if (unsubRoom) { try { unsubRoom(); } catch (_) {} unsubRoom = null; }
+      if (unsubNotes) { try { unsubNotes(); } catch (_) {} unsubNotes = null; }
+      if (activeCountdown) { activeCountdown.destroy(); activeCountdown = null; activeCountdownEndsAt = 0; }
+      hall.leave().catch(() => {});
+      ROOM = null; board = null; presence = []; notes = []; selectedForFiling.clear();
+      history.replaceState(null, "", location.pathname);
+      showScreen("boards");
+    }
+
+    // ── Wiring ────────────────────────────────────────────────
+    $("btnLeaveBoard").addEventListener("click", leaveBoard);
+    $("btnCopyInvite").addEventListener("click", async () => {
+      const link = location.origin + location.pathname + "#" + ROOM.code;
+      try { await navigator.clipboard.writeText(link); toast("Invite link copied!"); }
+      catch (e) { toast("Couldn't copy — share the code instead."); }
+    });
+    $("btnNewBoard").addEventListener("click", () => {
+      const name = $("boardNameInput").value.trim() || `${me.name || me.handle}'s retro`;
+      joinBoard(() => hall.create({ name }));
+    });
+    $("btnNewPrivateBoard").addEventListener("click", () => {
+      const name = $("boardNameInput").value.trim() || `${me.name || me.handle}'s retro`;
+      joinBoard(() => hall.create({ name, private: true }));
+    });
+    $("btnJoinCode").addEventListener("click", () => {
+      const code = $("codeInput").value.trim().toUpperCase();
+      if (code.length < 4) { toast("Enter the 4-letter code."); return; }
+      joinBoard(() => hall.joinByCode(code));
+    });
+    $("codeInput").addEventListener("keydown", (e) => { if (e.key === "Enter") $("btnJoinCode").click(); });
+    $("btnFileSelected").addEventListener("click", fileSelected);
+
+    // ── Boot ──────────────────────────────────────────────────
+    (async () => {
+      try {
+        await worlds.ready;
+        me = await worlds.me();
+        $("meName").textContent = me.name || me.handle;
+
+        try {
+          const { items } = await worlds.connect.list();
+          linearAvailable = (items || []).some((it) => it.name === "linear");
+        } catch (e) {
+          linearAvailable = false; // no grant reads the same as an empty list — feature-detect, don't crash
+        }
+
+        hall.onList(renderBoardsList);
+
+        // Deep link: #CODE drops you straight into a shared board.
+        const code = (location.hash || "").replace(/^#/, "").trim().toUpperCase();
+        if (code.length >= 4) {
+          await joinBoard(() => hall.joinByCode(code));
+          if (!ROOM) showScreen("boards");
+        } else {
+          showScreen("boards");
+        }
+      } catch (e) {
+        boot.classList.remove("hidden");
+        boot.textContent = "Couldn't connect to Worlds. Refresh to retry.";
+        console.error("[retro] boot failed", e);
+      }
+    })();
+  })();
+  </script>
+</body>
+</html>
