@@ -46,8 +46,9 @@ The 30-second version:
 
 ### What Worlds is NOT for
 
-External/public audiences, secrets (no permissions — everyone on your instance can read/overwrite
-any site), heavy/long compute, scheduled jobs, public webhooks. Point those at a real backend.
+External/public audiences, secrets (a site is owned by whoever deployed it first, but every
+signed-in person can read and write any site's `worlds.db` data), heavy/long compute,
+scheduled jobs, public webhooks. Point those at a real backend.
 
 ---
 

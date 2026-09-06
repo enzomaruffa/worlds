@@ -11,6 +11,7 @@ Quotas are floors — they can go up, never down for existing behavior.
 | Uploads per site | 1GB |
 | AI completions | 200 / user / day |
 | AI images | 50 / user / day |
+| AI prompt size | 200,000 characters |
 | Slack notifies | 50 / user / day |
 | WS payload | 16KB |
 | Document update (`worlds.doc`) | 512KB |

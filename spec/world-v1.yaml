@@ -52,7 +52,7 @@ components:
           properties:
             code:
               enum: [unauthorized, not_found, rate_limited, payload_too_large, quota_exceeded,
-                     invalid_request, reserved_name, conflict, replay_expired, maintenance,
-                     upstream_error, internal]
+                     invalid_request, reserved_name, forbidden, conflict, replay_expired,
+                     maintenance, upstream_error, internal]
             message: { type: string }
             retry_after: { type: number }
