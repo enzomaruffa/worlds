@@ -117,6 +117,8 @@
           sub.handler({ type: f.type, doc: f.doc });
         } else if (f.op === "msg") {
           sub.handler({ payload: f.payload, from: f.from, at: f.at });
+        } else if (f.op === "platform" && sub.onPlatform) {
+          sub.onPlatform(f.members || []);
         } else if (f.op === "presence" && sub.onPresence) {
           sub.onPresence(f.members);
         } else if (f.op === "actors_snapshot" && sub.onSnapshot) {
@@ -328,6 +330,9 @@
         subscribe: (handler) => sock.subscribe({ op: "sub", kind: "channel", channel: name }, handler),
         presence: (handler) => sock.subscribe({ op: "sub", kind: "channel", channel: name, presence: true }, () => {}, { onPresence: handler })
       };
+    },
+    platform(handler) {
+      return sock.subscribe({ op: "sub", kind: "platform" }, () => {}, { onPlatform: handler });
     },
     async ping() {
       const t0 = performance.now();

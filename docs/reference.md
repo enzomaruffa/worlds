@@ -24,6 +24,7 @@ worlds.uploads.put: (file: Blob, opts?: { name?: string; }) => Promise<any>
 worlds.uploads.list: () => Promise<any>
 worlds.uploads.delete: (name: string) => Promise<any>
 worlds.ws.channel: <T = any>(name: string) => Channel<T>
+worlds.ws.platform: (handler: (members: PlatformMember[]) => void) => () => void
 worlds.ws.ping: () => Promise<Pong>
 worlds.notify.slack: (target: string, text: string) => Promise<any>
 worlds.room: <T extends Record<string, any> = any>(name: string, opts?: RoomOptions<T>) => Room<T>
@@ -226,6 +227,16 @@ export interface Channel<T = any> {
 }
 ```
 
+### `interface PlatformMember`
+
+```ts
+export interface PlatformMember {
+  handle: string;
+  name: string;
+  site: string; // the world they are in right now
+}
+```
+
 ### `interface Pong`
 
 ```ts
@@ -240,6 +251,9 @@ export interface Pong {
 
 ```ts
 ws.channel: <T = any>(name: string) => Channel<T>
+// Who is signed in across the whole instance, and which world each is in. Read-only:
+// there is no publish side, so this never becomes a way into another site's channel.
+ws.platform: (handler: (members: PlatformMember[]) => void) => () => void
 // Round trip over the live socket. `skew` assumes a symmetric path, which real
 // networks often aren't — treat it as an estimate, not a measurement.
 ws.ping: () => Promise<Pong>

@@ -155,6 +155,20 @@ const stop = ch.subscribe(msg => { /* {payload, from: {handle, name}, at} */ });
 ch.presence(list => { /* [{handle, name}] currently on this channel */ });
 ```
 
+**Who's on the instance.** Channels and actors are scoped to one site, so nothing else can
+see across worlds. `worlds.ws.platform()` can — read-only, so it never becomes a way into
+another site's traffic:
+
+```js
+worlds.ws.platform(members => {
+  // [{handle, name, site}] — everyone signed in, and the world they're in
+});
+```
+
+Fires on subscribe and again whenever anyone connects or disconnects. Two tabs on one site
+count once; the same person in two worlds appears twice. Departure is socket close, so
+someone who loses their connection lingers until the socket actually drops.
+
 **Latency.** `worlds.ws.ping()` measures the live socket and stays out of the publish
 budget, so a page can measure itself without spending what it is measuring:
 

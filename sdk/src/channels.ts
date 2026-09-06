@@ -14,6 +14,12 @@ export interface Channel<T = any> {
   presence(handler: (members: Person[]) => void): () => void;
 }
 
+export interface PlatformMember {
+  handle: string;
+  name: string;
+  site: string; // the world they are in right now
+}
+
 export interface Pong {
   rtt: number;      // ms, this socket's round trip
   serverAt: number; // the server's Date.now() when it replied
@@ -30,6 +36,12 @@ export const ws = {
       presence: (handler: (members: Person[]) => void) =>
         sock.subscribe({ op: "sub", kind: "channel", channel: name, presence: true }, () => {}, { onPresence: handler }),
     };
+  },
+
+  // Who is signed in across the whole instance, and which world each is in. Read-only:
+  // there is no publish side, so this never becomes a way into another site's channel.
+  platform(handler: (members: PlatformMember[]) => void): () => void {
+    return sock.subscribe({ op: "sub", kind: "platform" }, () => {}, { onPlatform: handler });
   },
 
   // Round trip over the live socket. `skew` assumes a symmetric path, which real
