@@ -1,0 +1,480 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Cursor Party · Worlds</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #09090b;
+    --surface: #0c0c0f;
+    --border: #27272a;
+    --gold: #f59e0b;
+    --text: #e4e4e7;
+    --muted: #a1a1aa;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+  body {
+    background:
+      radial-gradient(1200px 600px at 50% -10%, rgba(245, 158, 11, .07), transparent 60%),
+      var(--bg);
+    color: var(--text);
+    font-family: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  #stage {
+    position: fixed;
+    inset: 0;
+    touch-action: none;
+    cursor: none;
+  }
+  body.no-pointer #stage { cursor: auto; }
+
+  /* ── HUD ──────────────────────────────────────────── */
+  #hud {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    gap: .9rem;
+    padding: .85rem 1.1rem;
+    background: linear-gradient(to bottom, rgba(9, 9, 11, .85), transparent);
+    pointer-events: none;
+  }
+  #hud > * { pointer-events: auto; }
+  .brand {
+    display: flex;
+    align-items: baseline;
+    gap: .4rem;
+    font-weight: 600;
+    letter-spacing: .02em;
+    font-size: 1.02rem;
+    white-space: nowrap;
+  }
+  .brand .accent { color: var(--gold); }
+  .brand small {
+    color: var(--muted);
+    font-weight: 400;
+    font-size: .72rem;
+    letter-spacing: .04em;
+  }
+  #count {
+    display: flex;
+    align-items: center;
+    gap: .4rem;
+    font-size: .78rem;
+    color: var(--muted);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: .3rem .7rem;
+    white-space: nowrap;
+  }
+  #count .dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: #22c55e;
+    box-shadow: 0 0 0 3px rgba(34, 197, 94, .18);
+    flex: none;
+  }
+  #count b { color: var(--text); font-weight: 600; }
+
+  #reactions {
+    margin-left: auto;
+    display: flex;
+    gap: .35rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: .3rem;
+  }
+  #reactions button {
+    appearance: none;
+    border: none;
+    background: transparent;
+    border-radius: 999px;
+    width: 2.1rem;
+    height: 2.1rem;
+    font-size: 1.1rem;
+    line-height: 1;
+    cursor: pointer;
+    display: grid;
+    place-items: center;
+    transition: background .15s ease, transform .1s ease;
+  }
+  #reactions button:hover { background: #1a1a20; }
+  #reactions button:active { transform: scale(.88); }
+
+  #hint {
+    position: fixed;
+    left: 50%;
+    bottom: 1.4rem;
+    transform: translateX(-50%);
+    z-index: 20;
+    font-size: .78rem;
+    color: var(--muted);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: .45rem 1rem;
+    pointer-events: none;
+    transition: opacity .6s ease;
+  }
+  #hint.hide { opacity: 0; }
+
+  /* ── Cursors ──────────────────────────────────────── */
+  .cursor {
+    position: absolute;
+    top: 0; left: 0;
+    z-index: 10;
+    pointer-events: none;
+    will-change: transform;
+    color: var(--c, var(--gold));
+  }
+  .cursor svg { display: block; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .5)); }
+  .cursor .pill {
+    position: absolute;
+    left: 16px;
+    top: 16px;
+    white-space: nowrap;
+    font-size: .72rem;
+    font-weight: 600;
+    letter-spacing: .01em;
+    color: #0b0b0d;
+    background: var(--c, var(--gold));
+    border-radius: 6px;
+    padding: .18rem .5rem;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, .35);
+  }
+  .cursor.self { z-index: 11; }
+  .cursor.self .pill { opacity: .85; }
+
+  /* ── Click ripple ────────────────────────────────── */
+  .ripple {
+    position: absolute;
+    top: 0; left: 0;
+    z-index: 5;
+    width: 18px;
+    height: 18px;
+    margin: -9px 0 0 -9px;
+    border-radius: 50%;
+    border: 2px solid var(--c, var(--gold));
+    pointer-events: none;
+    animation: ripple .6s ease-out forwards;
+  }
+  @keyframes ripple {
+    from { transform: scale(.2); opacity: .9; }
+    to   { transform: scale(4.5); opacity: 0; }
+  }
+
+  /* ── Floating emoji ───────────────────────────────── */
+  .emoji-fx {
+    position: absolute;
+    top: 0; left: 0;
+    z-index: 15;
+    font-size: 1.7rem;
+    pointer-events: none;
+    animation: emoji-float 1.4s ease-out forwards;
+  }
+  @keyframes emoji-float {
+    0%   { transform: translate(-50%, -10px) scale(.5); opacity: 0; }
+    15%  { opacity: 1; transform: translate(-50%, -30px) scale(1); }
+    100% { transform: translate(-50%, -140px) scale(1.15); opacity: 0; }
+  }
+
+  /* ── No-pointer fallback (roster only) ───────────── */
+  #roster {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 30;
+    align-items: center;
+    justify-content: center;
+  }
+  body.no-pointer #reactions,
+  body.no-pointer #hint { display: none; }
+  body.no-pointer #roster { display: flex; }
+  #roster .panel {
+    width: min(360px, 88vw);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 1.4rem;
+  }
+  #roster h2 { margin: 0 0 .2rem; font-size: 1.05rem; }
+  #roster p { margin: 0 0 1rem; color: var(--muted); font-size: .8rem; }
+  #roster ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .5rem; }
+  #roster li { display: flex; align-items: center; gap: .55rem; font-size: .85rem; }
+  #roster .swatch { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+</style>
+</head>
+<body>
+
+<div id="hud">
+  <div class="brand"><span class="accent">Cursor</span> Party <small>WORLDS</small></div>
+  <div id="count"><span class="dot"></span><b id="countNum">1</b>&nbsp;online</div>
+  <div id="reactions">
+    <button data-emoji="👍" title="thumbs up">👍</button>
+    <button data-emoji="🔥" title="fire">🔥</button>
+    <button data-emoji="😂" title="laugh">😂</button>
+    <button data-emoji="🎉" title="party">🎉</button>
+    <button data-emoji="👀" title="eyes">👀</button>
+  </div>
+</div>
+
+<div id="stage"></div>
+
+<div id="hint">move your mouse · click to ripple · react below</div>
+
+<div id="roster">
+  <div class="panel">
+    <h2>Cursor Party</h2>
+    <p id="rosterCount">1 person here — no pointer detected, so here's who's around.</p>
+    <ul id="rosterList"></ul>
+  </div>
+</div>
+
+<script src="/worlds.js"></script>
+<script>
+(() => {
+  "use strict";
+
+  const { id, esc, colorFor, toast } = worlds;
+
+  // ── Config ──────────────────────────────────────────
+  const CHANNEL = "cursor-party";
+  const SEND_HZ = 15;              // network set() rate — matches actor default
+  const STALE_MS = 5000;           // drop a remote cursor silent this long
+  const SMOOTH_RATE = 12;          // exponential-smoothing constant for remote interpolation
+  const REACTIONS = ["👍", "🔥", "😂", "🎉", "👀"];
+
+  // ── DOM ─────────────────────────────────────────────
+  const stage = document.getElementById("stage");
+  const countNum = document.getElementById("countNum");
+  const hint = document.getElementById("hint");
+  const rosterList = document.getElementById("rosterList");
+  const rosterCount = document.getElementById("rosterCount");
+  const clientId = id();
+
+  // ── State ───────────────────────────────────────────
+  // myPos/myColor/myName describe this tab; net.set() broadcasts myPos on a
+  // timer, independent of how often pointer events actually fire.
+  let myName = "guest";
+  let myColor = colorFor(clientId);
+  let myPos = { x: 0.5, y: 0.5 };
+  let myEl = null;
+
+  // remotes: peer id -> { el, pillEl, target:{x,y}, cur:{x,y}, name, color, lastSeen }
+  const remotes = new Map();
+  let net = null;
+
+  function viewport() {
+    return { w: window.innerWidth, h: window.innerHeight };
+  }
+
+  function makeCursorEl(color, name, self) {
+    const el = document.createElement("div");
+    el.className = self ? "cursor self" : "cursor";
+    el.style.setProperty("--c", color);
+    el.innerHTML =
+      '<svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">' +
+      '<path d="M4 3 L4 19.5 L8.7 15.6 L11.8 22 L14.6 20.7 L11.4 14.1 L17.5 14.1 Z" ' +
+      'stroke="rgba(0,0,0,.35)" stroke-width="1" stroke-linejoin="round"/></svg>' +
+      '<div class="pill"></div>';
+    el.querySelector(".pill").textContent = name;
+    stage.appendChild(el);
+    return el;
+  }
+
+  function place(el, x, y) {
+    const { w, h } = viewport();
+    el.style.transform = "translate3d(" + (x * w).toFixed(1) + "px," + (y * h).toFixed(1) + "px,0)";
+  }
+
+  function updateCount() {
+    const n = remotes.size + 1;
+    countNum.textContent = String(n);
+    rosterCount.textContent = n + (n === 1 ? " person here" : " people here");
+  }
+
+  function renderRoster() {
+    const rows = [{ name: myName + " (you)", color: myColor }];
+    for (const r of remotes.values()) rows.push({ name: r.name, color: r.color });
+    rosterList.innerHTML = rows
+      .map((r) => '<li><span class="swatch" style="background:' + r.color + '"></span>' + esc(r.name) + "</li>")
+      .join("");
+  }
+
+  function ensureRemote(peerId, name, color) {
+    let r = remotes.get(peerId);
+    if (!r) {
+      const el = makeCursorEl(color, name, false);
+      r = { el, target: { x: 0.5, y: 0.5 }, cur: { x: 0.5, y: 0.5 }, name, color, lastSeen: Date.now() };
+      remotes.set(peerId, r);
+      updateCount();
+      renderRoster();
+    }
+    return r;
+  }
+
+  function dropRemote(peerId) {
+    const r = remotes.get(peerId);
+    if (!r) return;
+    r.el.remove();
+    remotes.delete(peerId);
+    updateCount();
+    renderRoster();
+  }
+
+  // ── Effects: click ripple + floating emoji ─────────
+  function spawnRipple(x, y, color) {
+    const { w, h } = viewport();
+    const el = document.createElement("div");
+    el.className = "ripple";
+    el.style.setProperty("--c", color);
+    el.style.transform = "translate3d(" + (x * w).toFixed(1) + "px," + (y * h).toFixed(1) + "px,0)";
+    stage.appendChild(el);
+    el.addEventListener("animationend", () => el.remove(), { once: true });
+  }
+
+  function spawnEmoji(x, y, emoji) {
+    const { w, h } = viewport();
+    const el = document.createElement("div");
+    el.className = "emoji-fx";
+    el.textContent = emoji;
+    el.style.transform = "translate3d(" + (x * w).toFixed(1) + "px," + (y * h).toFixed(1) + "px,0)";
+    stage.appendChild(el);
+    el.addEventListener("animationend", () => el.remove(), { once: true });
+  }
+
+  // ── Pointer input ───────────────────────────────────
+  function setMyPos(clientX, clientY) {
+    const { w, h } = viewport();
+    myPos = { x: clamp01(clientX / w), y: clamp01(clientY / h) };
+    if (myEl) place(myEl, myPos.x, myPos.y);
+  }
+  function clamp01(v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
+
+  const anyPointer = !(window.matchMedia && window.matchMedia("(any-pointer: none)").matches);
+  if (!anyPointer) document.body.classList.add("no-pointer");
+
+  if (anyPointer) {
+    window.addEventListener("mousemove", (e) => setMyPos(e.clientX, e.clientY), { passive: true });
+    window.addEventListener(
+      "touchmove",
+      (e) => { if (e.touches[0]) setMyPos(e.touches[0].clientX, e.touches[0].clientY); },
+      { passive: true },
+    );
+    window.addEventListener(
+      "touchstart",
+      (e) => { if (e.touches[0]) setMyPos(e.touches[0].clientX, e.touches[0].clientY); },
+      { passive: true },
+    );
+
+    function onClickAt(clientX, clientY) {
+      const { w, h } = viewport();
+      const x = clamp01(clientX / w), y = clamp01(clientY / h);
+      spawnRipple(x, y, myColor);
+      if (net) net.send({ t: "click", x, y });
+    }
+    window.addEventListener("pointerdown", (e) => onClickAt(e.clientX, e.clientY));
+
+    for (const btn of document.querySelectorAll("#reactions button")) {
+      btn.addEventListener("click", () => {
+        const emoji = btn.getAttribute("data-emoji");
+        spawnEmoji(myPos.x, myPos.y, emoji);
+        if (net) net.send({ t: "emoji", emoji, x: myPos.x, y: myPos.y });
+      });
+    }
+
+    let hintTimer = setTimeout(() => hint.classList.add("hide"), 4500);
+    window.addEventListener("pointerdown", () => { clearTimeout(hintTimer); hint.classList.add("hide"); }, { once: true });
+  }
+
+  // ── Render loop: rAF drives smoothing, setInterval drives the network ─
+  let lastFrame = performance.now();
+  function frame(now) {
+    const dt = Math.min(0.1, (now - lastFrame) / 1000);
+    lastFrame = now;
+    const k = Math.min(1, SMOOTH_RATE * dt);
+    for (const r of remotes.values()) {
+      r.cur.x += (r.target.x - r.cur.x) * k;
+      r.cur.y += (r.target.y - r.cur.y) * k;
+      place(r.el, r.cur.x, r.cur.y);
+    }
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+
+  // background tabs pause rAF entirely, so the network tick lives on its own timer
+  setInterval(() => { if (net) net.set(myPos); }, Math.round(1000 / SEND_HZ));
+
+  // stale sweep — a safety net beside onLeave, for peers that vanish without one
+  setInterval(() => {
+    const now = Date.now();
+    for (const [peerId, r] of remotes) if (now - r.lastSeen > STALE_MS) dropRemote(peerId);
+  }, 1000);
+
+  window.addEventListener("resize", () => {
+    if (myEl) place(myEl, myPos.x, myPos.y);
+    for (const r of remotes.values()) place(r.el, r.cur.x, r.cur.y);
+  });
+
+  // ── Boot ────────────────────────────────────────────
+  (async () => {
+    try { await worlds.ready; } catch (_) { /* site context is optional */ }
+    try {
+      const info = await worlds.me();
+      if (info && info.handle) myName = info.name || info.handle;
+    } catch (_) { myName = "guest-" + clientId.slice(0, 5); }
+    myColor = colorFor(myName);
+
+    if (anyPointer) {
+      myEl = makeCursorEl(myColor, myName, true);
+      place(myEl, myPos.x, myPos.y);
+    }
+    renderRoster();
+
+    net = worlds.actors(CHANNEL, { rate: SEND_HZ });
+    net.set(myPos);
+
+    net.onChange((peerId, state, peer) => {
+      if (!state) return;
+      const name = peer.name || peer.handle || "guest";
+      const color = colorFor(peer.handle || peerId);
+      const r = ensureRemote(peerId, name, color);
+      r.target.x = clamp01(state.x);
+      r.target.y = clamp01(state.y);
+      r.lastSeen = Date.now();
+    });
+
+    net.onEvent((peerId, payload, from) => {
+      if (!payload) return;
+      const color = colorFor(from.handle || peerId);
+      const r = remotes.get(peerId);
+      const x = typeof payload.x === "number" ? payload.x : (r ? r.target.x : 0.5);
+      const y = typeof payload.y === "number" ? payload.y : (r ? r.target.y : 0.5);
+      if (payload.t === "click") spawnRipple(x, y, color);
+      else if (payload.t === "emoji" && payload.emoji) spawnEmoji(x, y, String(payload.emoji).slice(0, 8));
+    });
+
+    net.onLeave((peerId) => dropRemote(peerId));
+
+    toast("You're in as " + myName);
+  })();
+})();
+</script>
+</body>
+</html>
