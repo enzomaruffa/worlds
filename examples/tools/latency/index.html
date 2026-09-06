@@ -1,0 +1,385 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Latency Mesh · Worlds</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #09090b;
+    --surface: #0c0c0f;
+    --surface-2: #131318;
+    --border: #27272a;
+    --border-soft: #1c1c20;
+    --gold: #f59e0b;
+    --gold-bright: #fbbf24;
+    --text: #e4e4e7;
+    --muted: #a1a1aa;
+    --muted-2: #71717a;
+    --danger: #ef4444;
+    --good: #22c55e;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background:
+      radial-gradient(1200px 600px at 50% -10%, rgba(245,158,11,.06), transparent 60%),
+      var(--bg);
+    color: var(--text);
+    font-family: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+  .wrap { width: min(760px, 94vw); margin: 0 auto; padding: 1.25rem 0 4rem; }
+
+  /* ── Header ─────────────────────────────── */
+  header.top {
+    display: flex; align-items: center; gap: .75rem;
+    padding: .25rem 0 1rem;
+    border-bottom: 1px solid var(--border-soft);
+    margin-bottom: 1.25rem;
+  }
+  .badge {
+    width: 42px; height: 42px; border-radius: 11px; flex: none;
+    display: grid; place-items: center;
+    background: linear-gradient(160deg, #1a1a1f, #0b0b0e);
+    border: 1px solid var(--border);
+    box-shadow: 0 0 0 1px rgba(245,158,11,.08) inset;
+    font-size: 1.35rem;
+  }
+  .titles h1 { margin: 0; font-size: 1.18rem; letter-spacing: .04em; font-weight: 600; }
+  .titles h1 .accent { color: var(--gold); }
+  .titles p { margin: .1rem 0 0; font-size: .78rem; color: var(--muted-2); letter-spacing: .02em; }
+  .me-chip {
+    margin-left: auto; display: flex; align-items: center; gap: .5rem;
+    padding: .35rem .6rem; border-radius: 999px;
+    background: var(--surface); border: 1px solid var(--border);
+    font-size: .78rem; color: var(--muted); white-space: nowrap;
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted-2); flex: none; }
+  .dot.live { background: var(--good); box-shadow: 0 0 8px var(--good); }
+  .dot.down { background: var(--danger); box-shadow: 0 0 8px var(--danger); }
+
+  /* ── Cards ──────────────────────────────── */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 1.1rem 1.15rem;
+  }
+  .card + .card { margin-top: 1rem; }
+  .section-label {
+    font-size: .7rem; text-transform: uppercase; letter-spacing: .18em;
+    color: var(--muted-2); margin: 0 0 .65rem;
+  }
+
+  /* ── Hero RTT ───────────────────────────── */
+  .rtt-big { font-size: 3rem; font-weight: 700; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+  .rtt-big .unit { font-size: 1.2rem; font-weight: 500; color: var(--muted); margin-left: .3rem; }
+  .rtt-sub { display: flex; gap: 1.1rem; flex-wrap: wrap; margin-top: .5rem; font-size: .82rem; color: var(--muted); }
+  .rtt-sub b { color: var(--text); font-variant-numeric: tabular-nums; }
+
+  /* ── Matrix ─────────────────────────────── */
+  .matrix-scroll { overflow-x: auto; border-radius: 10px; border: 1px solid var(--border-soft); }
+  table.matrix { border-collapse: collapse; width: 100%; font-size: .82rem; }
+  table.matrix th, table.matrix td {
+    padding: .5rem .7rem; text-align: center; white-space: nowrap;
+    border-bottom: 1px solid var(--border-soft); border-right: 1px solid var(--border-soft);
+    font-variant-numeric: tabular-nums;
+  }
+  table.matrix thead th { background: var(--surface-2); color: var(--muted); font-weight: 500; }
+  table.matrix th.rowhead { background: var(--surface-2); text-align: left; color: var(--muted); font-weight: 500; }
+  table.matrix td.diag { background: rgba(245,158,11,.08); color: var(--gold-bright); font-weight: 700; }
+  table.matrix td.good { color: var(--good); }
+  table.matrix td.warn { color: var(--gold); }
+  table.matrix td.bad { color: var(--danger); }
+  .who { display: inline-flex; align-items: center; gap: .4rem; }
+  .chip { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+  .idsuf { color: var(--muted-2); font-size: .74rem; }
+  .matrix-empty { padding: 1.4rem .5rem; text-align: center; color: var(--muted); font-size: .88rem; }
+  .best-host { margin-top: .85rem; font-size: .84rem; color: var(--muted); }
+  .best-host b { color: var(--gold-bright); }
+
+  /* ── Validation ─────────────────────────── */
+  table.valid { border-collapse: collapse; width: 100%; font-size: .82rem; }
+  table.valid th {
+    text-align: left; color: var(--muted-2); font-weight: 500; font-size: .72rem;
+    text-transform: uppercase; letter-spacing: .08em; padding: 0 .6rem .5rem 0;
+  }
+  table.valid td { padding: .4rem .6rem .4rem 0; border-top: 1px solid var(--border-soft); font-variant-numeric: tabular-nums; }
+  table.valid td.good { color: var(--good); }
+  table.valid td.bad { color: var(--danger); }
+  .valid-empty { color: var(--muted); font-size: .85rem; }
+
+  /* ── Note ───────────────────────────────── */
+  .note {
+    margin: 1.1rem 0 0; padding: .8rem .95rem; border-radius: 10px;
+    background: var(--surface); border: 1px solid var(--border-soft);
+    color: var(--muted); font-size: .8rem; line-height: 1.55;
+  }
+  .note b { color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="badge">📡</div>
+    <div class="titles">
+      <h1>Latency <span class="accent">Mesh</span></h1>
+      <p>Server RTT for every connected client, derived into a peer-to-peer matrix</p>
+    </div>
+    <div class="me-chip"><span class="dot" id="connDot"></span><span id="meLabel">connecting…</span></div>
+  </header>
+
+  <section class="card">
+    <div class="section-label">Your link to the server</div>
+    <div class="rtt-big" id="rttBig">-- <span class="unit">ms</span></div>
+    <div class="rtt-sub">
+      <span>p50 <b id="rttP50">--</b> ms</span>
+      <span>p99 <b id="rttP99">--</b> ms</span>
+      <span id="sampleCount">0 samples</span>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="section-label">Peer matrix — derived, not measured pairwise</div>
+    <div class="matrix-scroll">
+      <table class="matrix" id="matrixTable" hidden></table>
+    </div>
+    <div class="matrix-empty" id="matrixEmpty">Nobody else is connected yet. Open this page in another tab to see the mesh fill in.</div>
+    <div class="best-host" id="bestHost"></div>
+  </section>
+
+  <section class="card">
+    <div class="section-label">Derived vs. observed</div>
+    <div id="validationBox"><p class="valid-empty">Waiting on peer probes…</p></div>
+  </section>
+
+  <p class="note">
+    Every off-diagonal cell is <b>(rttA + rttB) / 2</b> — a peer's true one-way latency, estimated by halving each side's own
+    round trip to the server. That assumes a symmetric path, and real networks often aren't symmetric, so treat the matrix as
+    an estimate. The <b>observed</b> column measures actual one-way transit for each peer update (using clock-skew-corrected
+    timestamps from <code>worlds.ws.ping()</code>), so you can see how far reality drifts from the estimate — that gap is
+    mostly server-side queueing, not propagation.
+  </p>
+</div>
+
+<script src="/worlds.js"></script>
+<script>
+(() => {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+
+  const myId = worlds.id();
+  let me = { handle: "you", name: "you" };
+
+  const samples = [];
+  let myP50 = null;
+  let myP99 = null;
+  let mySkewMs = 0;
+  let probeCounter = 0;
+
+  // id -> { handle, name, rtt_p50, lastProbe, obs: number[] }
+  const peers = new Map();
+
+  function fmt(n) {
+    return n == null || !Number.isFinite(n) ? "--" : String(Math.round(n));
+  }
+
+  function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  function heat(ms) {
+    if (ms < 50) return "good";
+    if (ms < 150) return "warn";
+    return "bad";
+  }
+
+  function pushSample(rtt) {
+    samples.push(rtt);
+    if (samples.length > 30) samples.shift();
+    const sorted = [...samples].sort((a, b) => a - b);
+    const pct = (p) => sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))];
+    myP50 = pct(0.5);
+    myP99 = pct(0.99);
+  }
+
+  // Actor state is coalesced server-side and isn't rate-limited like channel
+  // publishes (capped at 40/s per socket), so it's the right transport for a
+  // value every client updates on its own ~2s cadence.
+  const mesh = worlds.actors("latency-mesh", { rate: 4 });
+
+  function broadcast() {
+    if (myP50 == null) return;
+    mesh.set({
+      rtt_p50: Math.round(myP50),
+      rtt_p99: Math.round(myP99),
+      probe: ++probeCounter,
+      sentAt: Date.now() + mySkewMs,
+    });
+  }
+
+  mesh.onChange((id, state, rec) => {
+    if (!state || typeof state.rtt_p50 !== "number") return;
+    const p = peers.get(id) || { obs: [] };
+    if (
+      typeof state.sentAt === "number" &&
+      typeof state.probe === "number" &&
+      (p.lastProbe === undefined || state.probe > p.lastProbe)
+    ) {
+      const nowServer = Date.now() + mySkewMs;
+      const observed = nowServer - state.sentAt;
+      if (Number.isFinite(observed)) {
+        p.obs.push(observed);
+        if (p.obs.length > 10) p.obs.shift();
+      }
+      p.lastProbe = state.probe;
+    }
+    p.handle = rec.handle;
+    p.name = rec.name;
+    p.rtt_p50 = state.rtt_p50;
+    peers.set(id, p);
+    renderMatrix();
+    renderValidation();
+  });
+
+  mesh.onLeave((id) => {
+    peers.delete(id);
+    renderMatrix();
+    renderValidation();
+  });
+
+  function roster() {
+    const others = [];
+    for (const [id, p] of peers) {
+      if (typeof p.rtt_p50 !== "number") continue;
+      others.push({ id, name: p.name || p.handle || "anon", rtt: p.rtt_p50 });
+    }
+    others.sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+    return [{ id: myId, name: me.name || me.handle || "you", rtt: myP50, isSelf: true }, ...others];
+  }
+
+  function who(m) {
+    return `<span class="who"><span class="chip" style="background:${worlds.colorFor(m.id)}"></span>${worlds.esc(m.name)} <span class="idsuf">#${worlds.esc(m.id.slice(-4))}</span></span>`;
+  }
+
+  function renderMatrix() {
+    const r = roster();
+    const table = $("matrixTable");
+    const empty = $("matrixEmpty");
+
+    if (r.length <= 1 || myP50 == null) {
+      table.hidden = true;
+      empty.hidden = false;
+      $("bestHost").textContent = "";
+      return;
+    }
+    table.hidden = false;
+    empty.hidden = true;
+
+    const thead = `<thead><tr><th></th>${r.map((m) => `<th>${who(m)}</th>`).join("")}</tr></thead>`;
+    const rows = r
+      .map((row) => {
+        const cells = r
+          .map((col) => {
+            if (col.id === row.id) return `<td class="diag">${fmt(row.rtt)}</td>`;
+            const derived = (row.rtt + col.rtt) / 2;
+            return `<td class="${heat(derived)}">${fmt(derived)}</td>`;
+          })
+          .join("");
+        return `<tr><th class="rowhead">${who(row)}</th>${cells}</tr>`;
+      })
+      .join("");
+    table.innerHTML = `${thead}<tbody>${rows}</tbody>`;
+
+    // Best host = lowest mean derived latency to everyone else in the mesh.
+    let best = null;
+    for (const c of r) {
+      const rest = r.filter((x) => x.id !== c.id);
+      if (!rest.length) continue;
+      const mean = rest.reduce((s, d) => s + (c.rtt + d.rtt) / 2, 0) / rest.length;
+      if (!best || mean < best.mean) best = { m: c, mean };
+    }
+    $("bestHost").innerHTML = best
+      ? `Best host right now: <b>${worlds.esc(best.m.name)}${best.m.isSelf ? " (you)" : ""}</b> — ${fmt(best.mean)}ms mean to everyone else`
+      : "";
+  }
+
+  function renderValidation() {
+    const box = $("validationBox");
+    const entries = [...peers.entries()].filter(([, p]) => p.obs && p.obs.length && typeof p.rtt_p50 === "number");
+    if (myP50 == null || !entries.length) {
+      box.innerHTML = `<p class="valid-empty">${peers.size ? "Waiting on peer probes…" : "No peers yet — you're the only one here."}</p>`;
+      return;
+    }
+    const rows = entries
+      .map(([id, p]) => {
+        const derived = (myP50 + p.rtt_p50) / 2;
+        const observed = p.obs.reduce((a, b) => a + b, 0) / p.obs.length;
+        const delta = observed - derived;
+        const sign = delta >= 0 ? "+" : "";
+        return `<tr>
+          <td>${who({ id, name: p.name || p.handle || "anon" })}</td>
+          <td>${fmt(derived)}ms</td>
+          <td>${fmt(observed)}ms</td>
+          <td class="${delta >= 0 ? "bad" : "good"}">${sign}${fmt(delta)}ms</td>
+        </tr>`;
+      })
+      .join("");
+    box.innerHTML = `<table class="valid">
+      <thead><tr><th>Peer</th><th>Derived</th><th>Observed</th><th>Δ</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+  }
+
+  function renderHeader() {
+    $("rttBig").innerHTML = myP50 == null ? `-- <span class="unit">ms</span>` : `${fmt(myP50)} <span class="unit">ms</span>`;
+    $("rttP50").textContent = fmt(myP50);
+    $("rttP99").textContent = fmt(myP99);
+    $("sampleCount").textContent = `${samples.length} sample${samples.length === 1 ? "" : "s"}`;
+    $("meLabel").textContent = me.name || me.handle || "you";
+  }
+
+  async function pingLoop() {
+    for (;;) {
+      try {
+        const r = await worlds.ws.ping();
+        mySkewMs = r.skew;
+        pushSample(r.rtt);
+        renderHeader();
+        broadcast();
+        renderMatrix();
+        $("connDot").classList.add("live");
+        $("connDot").classList.remove("down");
+      } catch (e) {
+        $("connDot").classList.remove("live");
+        $("connDot").classList.add("down");
+        console.warn("[latency-mesh] ping failed", e);
+      }
+      await sleep(2000);
+    }
+  }
+
+  (async () => {
+    try {
+      await worlds.ready;
+      me = await worlds.me();
+    } catch (e) {
+      console.error("[latency-mesh] boot", e);
+    }
+    renderHeader();
+    renderMatrix();
+    renderValidation();
+    pingLoop();
+  })();
+})();
+</script>
+</body>
+</html>
