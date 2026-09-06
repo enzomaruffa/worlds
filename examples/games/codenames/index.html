@@ -1,0 +1,1252 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Codenames · Worlds</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #09090b;
+    --surface: #0c0c0f;
+    --surface-2: #131318;
+    --surface-3: #1a1a20;
+    --border: #27272a;
+    --border-soft: #1c1c20;
+    --gold: #f59e0b;
+    --gold-bright: #fbbf24;
+    --text: #e4e4e7;
+    --muted: #a1a1aa;
+    --muted-2: #71717a;
+    --red: #ef4444;
+    --red-dim: #7f1d1d;
+    --blue: #3b82f6;
+    --blue-dim: #1e3a8a;
+    --neutral: #a8a29e;
+    --good: #22c55e;
+    --assassin: #0a0a0a;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background:
+      radial-gradient(1200px 600px at 50% -10%, rgba(245,158,11,.06), transparent 60%),
+      var(--bg);
+    color: var(--text);
+    font-family: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+  a { color: var(--gold); }
+  .wrap { width: min(720px, 96vw); margin: 0 auto; padding: 1.1rem 0 4rem; }
+
+  /* ── Header ─────────────────────────────── */
+  header.top {
+    display: flex; align-items: center; gap: .75rem;
+    padding: .25rem 0 1rem;
+    border-bottom: 1px solid var(--border-soft);
+    margin-bottom: 1.1rem;
+  }
+  .badge {
+    width: 42px; height: 42px; border-radius: 11px; flex: none;
+    display: grid; place-items: center;
+    background: linear-gradient(160deg, #1a1a1f, #0b0b0e);
+    border: 1px solid var(--border);
+    box-shadow: 0 0 0 1px rgba(245,158,11,.08) inset;
+    font-size: 1.3rem;
+  }
+  .titles h1 { margin: 0; font-size: 1.14rem; letter-spacing: .05em; font-weight: 700; }
+  .titles h1 .accent { color: var(--gold); }
+  .titles p { margin: .1rem 0 0; font-size: .76rem; color: var(--muted-2); }
+  .me-chip {
+    margin-left: auto; display: flex; align-items: center; gap: .5rem;
+    padding: .35rem .6rem; border-radius: 999px;
+    background: var(--surface); border: 1px solid var(--border);
+    font-size: .78rem; color: var(--muted); white-space: nowrap;
+  }
+  .me-chip .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--good); box-shadow: 0 0 8px var(--good); }
+
+  /* ── Cards / surfaces ───────────────────── */
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 14px; padding: 1.05rem 1.1rem;
+  }
+  .card + .card, .card + .teams-grid, .teams-grid + .card { margin-top: 1rem; }
+  .section-label {
+    font-size: .68rem; text-transform: uppercase; letter-spacing: .16em;
+    color: var(--muted-2); margin: 0 0 .6rem; display: flex; align-items: center; gap: .4rem;
+  }
+  .count-pill { color: var(--muted-2); font-weight: 400; text-transform: none; letter-spacing: 0; }
+  .hidden { display: none !important; }
+  .center { text-align: center; }
+  .muted { color: var(--muted); }
+  .tiny { font-size: .74rem; color: var(--muted-2); }
+  #boot { text-align: center; padding: 4rem 1rem; color: var(--muted); }
+  footer.foot { margin-top: 2rem; text-align: center; font-size: .72rem; color: var(--muted-2); }
+
+  /* ── Buttons ────────────────────────────── */
+  button {
+    font-family: inherit; font-size: .9rem; font-weight: 600;
+    cursor: pointer; border-radius: 10px; border: 1px solid transparent;
+    padding: .68rem 1rem; transition: transform .06s ease, filter .15s ease, background .15s ease, border-color .15s ease;
+    color: #0a0a0b;
+  }
+  button:active:not(:disabled) { transform: translateY(1px); }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  .btn-primary { background: linear-gradient(180deg, var(--gold-bright), var(--gold)); }
+  .btn-primary:hover:not(:disabled) { filter: brightness(1.06); }
+  .btn-ghost { background: var(--surface-2); color: var(--text); border-color: var(--border); }
+  .btn-ghost:hover:not(:disabled) { border-color: #3f3f46; }
+  .btn-block { width: 100%; }
+  .btn-row { display: flex; gap: .6rem; flex-wrap: wrap; }
+  .btn-row > button { flex: 1; min-width: 120px; }
+  .btn-team {
+    flex: 1; min-width: 0; font-size: .82rem; padding: .55rem .5rem;
+    background: var(--surface-2); color: var(--text); border: 1px solid var(--border);
+  }
+  .btn-team-outline { flex: 1; min-width: 0; font-size: .82rem; padding: .55rem .5rem; background: transparent; color: var(--text); border: 1px solid var(--border); }
+  .team-col.red .btn-team:hover:not(:disabled), .team-col.red .btn-team-outline:hover:not(:disabled) { border-color: var(--red); }
+  .team-col.blue .btn-team:hover:not(:disabled), .team-col.blue .btn-team-outline:hover:not(:disabled) { border-color: var(--blue); }
+
+  /* ── Roster (lobby / spectators) ────────── */
+  ul.roster, ul.member-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .4rem; }
+  ul.roster li, ul.member-list li {
+    display: flex; align-items: center; gap: .55rem;
+    padding: .42rem .6rem; border-radius: 9px;
+    background: var(--surface-2); border: 1px solid var(--border-soft);
+    font-size: .87rem;
+  }
+  ul.roster li .pdot, ul.member-list li .pdot {
+    width: 7px; height: 7px; border-radius: 50%; background: var(--good); flex: none;
+    box-shadow: 0 0 6px rgba(34,197,94,.6);
+  }
+  .you { color: var(--gold); font-size: .66rem; margin-left: auto; letter-spacing: .1em; text-transform: uppercase; }
+
+  /* ── Tables (lobby browser) ─────────────── */
+  .tablehead { display: flex; align-items: center; justify-content: space-between; gap: .75rem; margin-bottom: 1rem; }
+  .tablehead .code { font-family: ui-monospace, monospace; font-size: .8rem; color: var(--gold); letter-spacing: .12em; }
+  ul.tablelist { list-style: none; margin: 0 0 1rem; padding: 0; display: flex; flex-direction: column; gap: .55rem; }
+  ul.tablelist li.tablerow {
+    display: flex; align-items: center; gap: .75rem;
+    padding: .7rem .8rem; border-radius: 11px;
+    background: var(--surface-2); border: 1px solid var(--border-soft);
+  }
+  .tablerow .meta { flex: 1; min-width: 0; }
+  .tablerow .nm { font-weight: 600; font-size: .95rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tablerow .sub { font-size: .78rem; color: var(--muted-2); margin-top: .12rem; }
+  .tablerow .sub .code { font-family: ui-monospace, monospace; letter-spacing: .1em; color: var(--gold); }
+  .tablerow .sub .playing { color: var(--good); }
+  .tablerow button { flex: none; padding: .5rem .9rem; }
+  .empty-note { color: var(--muted-2); font-size: .85rem; font-style: italic; text-align: center; padding: 1.1rem .25rem; }
+  .tablebar { display: flex; gap: .55rem; flex-wrap: wrap; align-items: center; }
+  .tablebar input {
+    flex: 1; min-width: 120px; padding: .62rem .8rem; border-radius: 10px;
+    border: 1px solid var(--border); background: var(--surface-2); color: var(--text);
+    font: inherit; font-size: .88rem; text-transform: uppercase; letter-spacing: .12em;
+  }
+  .tablebar input:focus { outline: none; border-color: var(--gold); }
+  .tablebar button { flex: none; }
+  #inviteLink { text-transform: none; letter-spacing: normal; }
+
+  /* ── Lobby: team columns ────────────────── */
+  .teams-grid { display: grid; grid-template-columns: 1fr 1fr; gap: .8rem; }
+  @media (max-width: 480px) { .teams-grid { grid-template-columns: 1fr; } }
+  .team-col {
+    border-radius: 14px; padding: 1rem; background: var(--surface);
+    border: 1px solid var(--border);
+  }
+  .team-col.red { border-color: rgba(239,68,68,.35); }
+  .team-col.blue { border-color: rgba(59,130,246,.35); }
+  .team-head { display: flex; align-items: center; gap: .5rem; font-weight: 700; letter-spacing: .08em; font-size: .92rem; margin-bottom: .7rem; }
+  .team-dot { width: 10px; height: 10px; border-radius: 50%; }
+  .team-col.red .team-dot { background: var(--red); box-shadow: 0 0 8px rgba(239,68,68,.6); }
+  .team-col.blue .team-dot { background: var(--blue); box-shadow: 0 0 8px rgba(59,130,246,.6); }
+  .spymaster-slot {
+    font-size: .85rem; padding: .55rem .65rem; border-radius: 9px; margin-bottom: .6rem;
+    background: var(--surface-2); border: 1px dashed var(--border);
+  }
+  .role-tag { font-size: .64rem; letter-spacing: .1em; color: var(--gold); font-weight: 700; margin-right: .35rem; }
+  .role-tag.empty { color: var(--muted-2); }
+  .member-list { margin-bottom: .7rem; min-height: 2.2rem; }
+  .team-actions { display: flex; gap: .5rem; }
+
+  /* ── Game screen ────────────────────────── */
+  .scoreband { display: flex; align-items: center; justify-content: space-between; gap: .6rem; margin-bottom: .7rem; }
+  .teampill {
+    display: flex; align-items: center; gap: .4rem; padding: .4rem .75rem;
+    border-radius: 999px; font-size: .82rem; font-weight: 700; letter-spacing: .05em;
+    background: var(--surface-2); border: 1px solid var(--border);
+  }
+  .teampill.red { color: #fecaca; border-color: rgba(239,68,68,.4); }
+  .teampill.blue { color: #bfdbfe; border-color: rgba(59,130,246,.4); }
+  .teampill b { font-size: 1rem; }
+  .turn-indicator {
+    flex: 1; text-align: center; font-size: .85rem; font-weight: 700; letter-spacing: .06em;
+    padding: .4rem .5rem; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border);
+  }
+  .turn-indicator.red { color: #fecaca; border-color: rgba(239,68,68,.5); }
+  .turn-indicator.blue { color: #bfdbfe; border-color: rgba(59,130,246,.5); }
+  .turn-indicator.over { color: var(--gold-bright); border-color: var(--gold); }
+
+  .warn-banner {
+    text-align: center; font-size: .8rem; color: var(--gold-bright);
+    background: rgba(245,158,11,.08); border: 1px solid rgba(245,158,11,.3);
+    border-radius: 10px; padding: .5rem .7rem; margin: 0 0 .8rem;
+  }
+
+  .clue-bar { margin-bottom: .9rem; }
+  .clue-form { display: flex; gap: .5rem; flex-wrap: wrap; }
+  .clue-form input {
+    flex: 2; min-width: 100px; padding: .62rem .7rem; border-radius: 10px;
+    border: 1px solid var(--border); background: var(--surface-2); color: var(--text);
+    font: inherit; font-size: .95rem; text-transform: uppercase;
+  }
+  .clue-form input:focus { outline: none; border-color: var(--gold); }
+  .clue-form select {
+    padding: .62rem .5rem; border-radius: 10px; border: 1px solid var(--border);
+    background: var(--surface-2); color: var(--text); font: inherit; font-size: .95rem;
+  }
+  .clue-form button { flex: none; }
+  .clue-display { display: flex; align-items: baseline; gap: .6rem; justify-content: center; }
+  .clue-word { font-size: 1.5rem; font-weight: 700; letter-spacing: .04em; color: var(--gold-bright); }
+  .clue-count {
+    font-size: 1rem; font-weight: 700; color: var(--text); background: var(--surface-2);
+    border: 1px solid var(--border); border-radius: 999px; padding: .1rem .6rem;
+  }
+
+  /* ── Board ──────────────────────────────── */
+  .board {
+    display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px;
+    margin-bottom: .8rem;
+  }
+  .tile {
+    aspect-ratio: 1 / 1; border-radius: 8px; padding: 4px;
+    display: flex; align-items: center; justify-content: center; text-align: center;
+    background: var(--surface-2); border: 1px solid var(--border-soft); color: var(--text);
+    font-weight: 600; letter-spacing: .01em; line-height: 1.1;
+    font-size: clamp(.5rem, 2.7vw, .82rem);
+    transition: transform .1s ease, background .15s ease, border-color .15s ease;
+    word-break: break-word; hyphens: auto;
+  }
+  .tile:disabled { cursor: default; opacity: 1; }
+  .tile.tappable { cursor: pointer; }
+  .tile.tappable:hover { border-color: var(--gold); transform: translateY(-1px); }
+  .tile.pending { opacity: .55; animation: pulseTile .8s ease-in-out infinite; }
+  @keyframes pulseTile { 50% { opacity: .85; } }
+
+  /* spymaster-only soft tint on unrevealed tiles — never shown to guessers */
+  .tile.key-red { background: linear-gradient(160deg, rgba(239,68,68,.24), rgba(239,68,68,.1)); border-color: rgba(239,68,68,.45); }
+  .tile.key-blue { background: linear-gradient(160deg, rgba(59,130,246,.24), rgba(59,130,246,.1)); border-color: rgba(59,130,246,.45); }
+  .tile.key-neutral { background: linear-gradient(160deg, rgba(168,162,158,.22), rgba(168,162,158,.08)); border-color: rgba(168,162,158,.4); }
+  .tile.key-assassin { background: linear-gradient(160deg, #1a1a1a, #050505); border-color: #3f3f46; color: #d4d4d8; }
+  .tile.key-assassin::after { content: "☠"; position: absolute; opacity: .5; font-size: .8em; margin-top: 2.2em; }
+
+  /* publicly revealed tiles — everyone sees these the same way */
+  .tile.revealed { color: #fff; }
+  .tile.red.revealed, .tile.revealed.red { background: linear-gradient(160deg, #f87171, var(--red)); border-color: #b91c1c; }
+  .tile.blue.revealed, .tile.revealed.blue { background: linear-gradient(160deg, #60a5fa, var(--blue)); border-color: #1e40af; }
+  .tile.neutral.revealed, .tile.revealed.neutral { background: linear-gradient(160deg, #d6d3d1, var(--neutral)); color: #1c1917; border-color: #78716c; }
+  .tile.assassin.revealed, .tile.revealed.assassin {
+    background: linear-gradient(160deg, #262626, var(--assassin)); border-color: var(--red); color: #fca5a5;
+    animation: assassinPulse 1.2s ease-in-out infinite;
+  }
+  @keyframes assassinPulse {
+    0%, 100% { box-shadow: 0 0 0 2px rgba(239,68,68,.4); }
+    50% { box-shadow: 0 0 0 5px rgba(239,68,68,.75), 0 0 24px rgba(239,68,68,.5); }
+  }
+
+  .guess-actions { display: flex; justify-content: center; margin-bottom: .9rem; }
+
+  .log-card { max-height: 190px; display: flex; flex-direction: column; }
+  .log { overflow-y: auto; display: flex; flex-direction: column-reverse; gap: .3rem; font-size: .82rem; }
+  .log-line { color: var(--muted); padding: .15rem 0; border-bottom: 1px dashed var(--border-soft); }
+  .log-line:first-child { border-bottom: none; }
+
+  .spectate-tag {
+    display: block; text-align: center; font-size: .7rem; text-transform: uppercase; letter-spacing: .12em;
+    color: var(--muted-2); border: 1px solid var(--border); border-radius: 999px; padding: .3rem; margin-top: .8rem;
+  }
+
+  /* ── Game-over overlay ──────────────────── */
+  .overlay {
+    position: fixed; inset: 0; background: rgba(5,5,7,.82); backdrop-filter: blur(3px);
+    display: flex; align-items: center; justify-content: center; z-index: 40; padding: 1rem;
+  }
+  .overlay-card {
+    width: min(380px, 100%); background: var(--surface); border: 1px solid var(--border);
+    border-radius: 16px; padding: 1.8rem 1.4rem; text-align: center;
+    box-shadow: 0 20px 60px rgba(0,0,0,.6);
+  }
+  .overlay-flourish { font-size: 2.6rem; margin-bottom: .3rem; }
+  .overlay-winner { font-size: 1.8rem; font-weight: 800; letter-spacing: .04em; margin-bottom: .3rem; }
+  .overlay-winner.red { color: var(--red); }
+  .overlay-winner.blue { color: var(--blue); }
+  .overlay-reason { color: var(--muted); font-size: .9rem; margin-bottom: 1.3rem; }
+  .overlay-actions { display: flex; gap: .6rem; flex-wrap: wrap; }
+  .overlay-actions > button { flex: 1; min-width: 120px; }
+
+  /* toast (worlds.toast injects its own element/styles at runtime) */
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="badge">🕵️</div>
+    <div class="titles">
+      <h1>CODE<span class="accent">NAMES</span></h1>
+      <p>Give a clue. Guess the board. Don't hit the assassin.</p>
+    </div>
+    <div class="me-chip" id="meChip"><span class="dot"></span><span id="meName">connecting…</span></div>
+  </header>
+
+  <div id="boot">Connecting to Worlds…</div>
+
+  <!-- ░░░ TABLES (lobby browser) ░░░ -->
+  <main id="screenTables" class="hidden">
+    <div class="card">
+      <p class="section-label">Open tables</p>
+      <p class="muted" style="margin:0 0 1rem;font-size:.88rem">Each table is its own game — 8 to 12 players is the sweet spot, but spectators are unlimited. Start a fresh table, join one below, or punch in a private code.</p>
+      <ul class="tablelist" id="tableList"></ul>
+      <div class="btn-row">
+        <button id="btnNewTable" class="btn-primary">New table</button>
+        <button id="btnNewPrivate" class="btn-ghost">New private table</button>
+      </div>
+      <div class="tablebar" style="margin-top:1rem">
+        <input id="codeInput" maxlength="4" placeholder="CODE" autocomplete="off" />
+        <button id="btnJoinCode" class="btn-ghost">Join by code</button>
+      </div>
+    </div>
+  </main>
+
+  <!-- ░░░ LOBBY (team assignment) ░░░ -->
+  <main id="screenLobby" class="hidden">
+    <div class="tablehead">
+      <button id="btnLeaveLobby" class="btn-ghost" style="flex:none">← Tables</button>
+      <span class="code" id="tableCodeLobby"></span>
+    </div>
+
+    <div class="teams-grid">
+      <div class="team-col red">
+        <div class="team-head"><span class="team-dot"></span>RED</div>
+        <div class="spymaster-slot" id="redSpySlot"></div>
+        <ul class="member-list" id="redMembers"></ul>
+        <div class="team-actions">
+          <button class="btn-team" id="btnJoinRedGuess">Join as guesser</button>
+          <button class="btn-team-outline" id="btnJoinRedSpy">Become spymaster</button>
+        </div>
+      </div>
+      <div class="team-col blue">
+        <div class="team-head"><span class="team-dot"></span>BLUE</div>
+        <div class="spymaster-slot" id="blueSpySlot"></div>
+        <ul class="member-list" id="blueMembers"></ul>
+        <div class="team-actions">
+          <button class="btn-team" id="btnJoinBlueGuess">Join as guesser</button>
+          <button class="btn-team-outline" id="btnJoinBlueSpy">Become spymaster</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <p class="section-label">Spectators <span class="count-pill" id="specCount"></span></p>
+      <ul class="roster" id="specRoster"></ul>
+      <button class="btn-ghost btn-block" id="btnSpectate" style="margin-top:.7rem">Just watch</button>
+    </div>
+
+    <div class="card">
+      <button id="btnStart" class="btn-primary btn-block">Start game</button>
+      <p class="tiny center" id="startHint" style="margin:.6rem 0 0"></p>
+      <div class="tablebar" style="margin-top:.9rem">
+        <input id="inviteLink" readonly />
+        <button id="btnCopy" class="btn-ghost">Copy invite</button>
+      </div>
+    </div>
+  </main>
+
+  <!-- ░░░ GAME (board) ░░░ -->
+  <main id="screenGame" class="hidden">
+    <div class="tablehead">
+      <button id="btnLeaveGame" class="btn-ghost" style="flex:none">← Tables</button>
+      <span class="code" id="tableCodeGame"></span>
+    </div>
+
+    <div class="scoreband">
+      <div class="teampill red"><b id="redLeft">9</b>&nbsp;RED</div>
+      <div class="turn-indicator" id="turnIndicator">…</div>
+      <div class="teampill blue">BLUE&nbsp;<b id="blueLeft">8</b></div>
+    </div>
+
+    <p class="warn-banner hidden" id="disconnectWarn"></p>
+
+    <div class="card clue-bar" id="clueBar"></div>
+
+    <div class="board" id="board"></div>
+
+    <div class="guess-actions hidden" id="guessActions">
+      <button class="btn-ghost" id="btnEndTurn">End guessing — pass the turn</button>
+    </div>
+
+    <div class="card log-card">
+      <p class="section-label">Log</p>
+      <div class="log" id="logList"></div>
+    </div>
+
+    <span class="spectate-tag hidden" id="specTag">spectating</span>
+  </main>
+
+  <!-- ░░░ GAME OVER OVERLAY ░░░ -->
+  <div class="overlay hidden" id="overlayResult">
+    <div class="overlay-card">
+      <div class="overlay-flourish" id="overFlourish">🏆</div>
+      <div class="overlay-winner" id="overWinner">—</div>
+      <div class="overlay-reason" id="overReason"></div>
+      <div class="overlay-actions">
+        <button class="btn-primary" id="btnNewGame">New game</button>
+        <button class="btn-ghost" id="btnBackLobby">Back to lobby</button>
+      </div>
+    </div>
+  </div>
+
+  <footer class="foot">CODENAMES · a Worlds party game · the key card never touches the shared board — spymasters get it peer-to-peer</footer>
+</div>
+
+<script src="/worlds.js"></script>
+<script>
+(() => {
+  "use strict";
+
+  // ── Word bank (300+ common nouns) ────────────────────────
+  const WORDS = [
+"LION","TIGER","BEAR","WOLF","FOX","DEER","RABBIT","SQUIRREL","OTTER","BEAVER",
+"MOOSE","ELK","BISON","CAMEL","ZEBRA","GIRAFFE","ELEPHANT","RHINO","HIPPO","GORILLA",
+"MONKEY","PANDA","KOALA","KANGAROO","PENGUIN","EAGLE","HAWK","OWL","RAVEN","PARROT",
+"FALCON","SWAN","DUCK","GOOSE","PEACOCK","FLAMINGO","DOLPHIN","WHALE","SHARK","OCTOPUS",
+"JELLYFISH","CRAB","LOBSTER","SEAHORSE","TURTLE","LIZARD","SNAKE","FROG","TOAD","SPIDER",
+"SCORPION","BUTTERFLY","DRAGONFLY","BEETLE","ANT","BEE","WASP","MOTH","CATERPILLAR","HEDGEHOG",
+"BADGER","MOLE","BAT","RACCOON","SKUNK","COYOTE","JACKAL","HYENA","LEOPARD","CHEETAH",
+"JAGUAR","PANTHER","COBRA","VIPER","PYTHON","CHAMELEON","IGUANA","CROCODILE","ALLIGATOR","STINGRAY",
+"HAMMER","WRENCH","SCREWDRIVER","DRILL","SAW","LADDER","ANCHOR","ROPE","CHAIN","LOCK",
+"KEY","HINGE","NAIL","SCREW","BOLT","MAGNET","COMPASS","TELESCOPE","MICROSCOPE","CAMERA",
+"LANTERN","CANDLE","MIRROR","CLOCK","WATCH","BELL","WHISTLE","DRUM","GUITAR","VIOLIN",
+"TRUMPET","PIANO","FLUTE","HARP","MASK","CROWN","THRONE","SHIELD","SWORD","ARROW",
+"BOW","SPEAR","HELMET","ARMOR","CANNON","ROCKET","SATELLITE","ANTENNA","BATTERY","ENGINE",
+"PROPELLER","WHEEL","GEAR","PULLEY","LEVER","PISTON","VALVE","PIPE","FAUCET","SPONGE",
+"BUCKET","BROOM","SHOVEL","RAKE","AXE","PICKAXE","NET","TRAP","CAGE","BASKET",
+"CRATE","BARREL","JAR","BOTTLE","CORK","STRAW","FORK","SPOON","KNIFE","PLATE",
+"BOWL","CUP","KETTLE","PAN","POT","OVEN","STOVE","FRIDGE","BLENDER","TOASTER",
+"CASTLE","PALACE","TOWER","BRIDGE","TUNNEL","HARBOR","LIGHTHOUSE","ISLAND","VOLCANO","GLACIER",
+"DESERT","JUNGLE","FOREST","SWAMP","CANYON","VALLEY","CLIFF","CAVE","RIVER","LAKE",
+"OCEAN","BEACH","MOUNTAIN","MEADOW","PRAIRIE","OASIS","GARDEN","ORCHARD","VINEYARD","FARM",
+"BARN","WINDMILL","MILL","FACTORY","WAREHOUSE","STADIUM","ARENA","THEATER","MUSEUM","LIBRARY",
+"CHURCH","TEMPLE","SHRINE","MONASTERY","SCHOOL","HOSPITAL","PRISON","BANK","MARKET","STATION",
+"AIRPORT","PORT","HIGHWAY","ROAD","STREET","ALLEY","PLAZA","SQUARE","PARK","ZOO",
+"CIRCUS","CAR","TRUCK","BUS","TRAIN","SUBWAY","TRAM","BICYCLE","MOTORCYCLE","SCOOTER",
+"BOAT","SHIP","SUBMARINE","CANOE","KAYAK","RAFT","YACHT","FERRY","AIRPLANE","HELICOPTER",
+"BALLOON","BLIMP","GLIDER","SLED","SKATEBOARD","WAGON","CARRIAGE","CHARIOT","TANK","JEEP",
+"TRACTOR","STORM","THUNDER","LIGHTNING","RAINBOW","CLOUD","FOG","MIST","FROST","SNOW",
+"HAIL","WIND","BREEZE","TORNADO","HURRICANE","EARTHQUAKE","AVALANCHE","TIDE","WAVE","CURRENT",
+"ECLIPSE","COMET","METEOR","STAR","PLANET","MOON","SUN","GALAXY","NEBULA","ASTEROID",
+"HEART","BRAIN","SKULL","SKELETON","SHADOW","GHOST","SPIRIT","DREAM","NIGHTMARE","MEMORY",
+"ECHO","REFLECTION","SILENCE","WHISPER","VOICE","SMILE","TEAR","KISS","KNOT","WEB",
+"BREAD","CHEESE","BUTTER","HONEY","SUGAR","SALT","PEPPER","APPLE","BANANA","GRAPE",
+"LEMON","ORANGE","PEACH","CHERRY","MELON","PUMPKIN","POTATO","CARROT","ONION","GARLIC",
+"MUSHROOM","CORN","WHEAT","RICE","NOODLE","PIZZA","CAKE","COOKIE","CHOCOLATE","PANCAKE",
+"BOOK","PAGE","LETTER","ENVELOPE","STAMP","PENCIL","PEN","INK","PAINT","BRUSH",
+"CANVAS","EASEL","STATUE","SCULPTURE","PUZZLE","DICE","CARD","COIN","TOKEN","MEDAL",
+"TROPHY","RIBBON","FLAG","BANNER","TENT","CAMP","FIRE","ASH","SMOKE","ROBOT",
+"ALIEN","DRAGON","PHOENIX","UNICORN","MERMAID","WIZARD","KNIGHT","PIRATE","NINJA","VAMPIRE",
+"WEREWOLF","ZOMBIE","GIANT","TROLL","GOBLIN","FAIRY","ANGEL","DEMON","GUITARIST","ASTRONAUT"
+  ];
+
+  // ── DOM refs ─────────────────────────────────────────────
+  const $ = (id) => document.getElementById(id);
+  const boot = $("boot");
+  const screens = { tables: $("screenTables"), lobby: $("screenLobby"), game: $("screenGame") };
+  const { toast, esc, uniqByHandle } = worlds;
+
+  function showScreen(name) {
+    boot.classList.add("hidden");
+    for (const k in screens) screens[k].classList.toggle("hidden", k !== name);
+  }
+
+  // ── Worlds handles ───────────────────────────────────────
+  // Many concurrent tables: worlds.rooms is the directory (lobby browser + join
+  // codes); each table is one worlds.room carrying the PUBLIC game doc (words,
+  // revealed colors, teams, clue, log — load-or-create + live sync) AND the live
+  // roster. The key card (which tile is which color) never lives here — see net.
+  const hall = worlds.rooms("codenames", { initial: blankGame });
+
+  // Per-table targeted channel used ONLY to hand the key card to spymasters —
+  // never through the room doc. Everyone in the room shares one zone (no
+  // zoneKey needed — the channel name itself is scoped per room.id), so
+  // `net.send(payload, {to: peerId})` reaches exactly one member.
+  let net = null;
+
+  // ── Runtime state ────────────────────────────────────────
+  let me = null;                  // {handle,name}
+  let ROOM = null;                // the joined table (worlds.room) or null
+  let unsubRoom = null;           // teardown for the joined table's onChange
+  let game = null;                // ROOM state (normalized, PUBLIC only)
+  let presence = [];               // [{handle,name}] live roster
+  let presenceLoaded = false;
+  let iAmHost = false;
+  let busy = false;               // re-entrancy guard for user-initiated writes
+  let resolving = false;          // re-entrancy guard for background pending-guess resolution
+  let watchdogHandle = null;
+
+  // The secret. Lives ONLY in the memory of whichever tab is currently a
+  // spymaster (or the host, for the instant between generating it and handing
+  // it off — see dealNewGame). Never assigned from worlds.room / worlds.db.
+  let myKey = null;               // 25 of "red"|"blue"|"neutral"|"assassin", index-aligned to game.words
+  let myKeyDealId = null;         // which deal myKey belongs to
+  let lastNeedKeyAt = 0;
+
+  let prevPhase = null, prevRevealedCount = 0;
+
+  // ── Sound — tiny WebAudio synth (no asset files; resumes on first input) ──
+  let actx = null;
+  function audioResume() { if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (_) {} } if (actx && actx.state === "suspended") actx.resume(); }
+  addEventListener("pointerdown", audioResume); addEventListener("keydown", audioResume);
+  function tone({ type = "sine", f0, f1, dur = 0.15, gain = 0.18, delay = 0 }) {
+    if (!actx) return;
+    const t = actx.currentTime + delay;
+    const o = actx.createOscillator(); o.type = type; o.frequency.setValueAtTime(f0, t);
+    if (f1 && f1 !== f0) o.frequency.exponentialRampToValueAtTime(Math.max(1, f1), t + dur);
+    const g = actx.createGain();
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(gain, t + 0.008); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(actx.destination); o.start(t); o.stop(t + dur + 0.02);
+  }
+  const SFX = {
+    flip: () => tone({ type: "triangle", f0: 480, f1: 260, dur: 0.14, gain: 0.15 }),
+    win:  () => [523, 659, 784, 1047].forEach((f, i) => tone({ type: "triangle", f0: f, dur: 0.22, gain: 0.2, delay: i * 0.11 })),
+    doom: () => [220, 175, 131, 98].forEach((f, i) => tone({ type: "sawtooth", f0: f, dur: 0.5, gain: 0.18, delay: i * 0.16 })),
+  };
+
+  // ── Seeded word draw (PUBLIC — which words are on the board is not a secret,
+  // only their colors are) ──────────────────────────────────
+  function mulberry32(seed) {
+    let a = seed >>> 0;
+    return function () {
+      a |= 0; a = (a + 0x6D2B79F5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  function seededDraw(list, seed, n) {
+    const rng = mulberry32(seed);
+    const a = list.slice();
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(rng() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a.slice(0, n);
+  }
+
+  // ── Key card generation — CRYPTO random, host-local, never seeded from
+  // anything stored in the room doc (a stored seed would let any client
+  // re-derive the "secret" locally). Standard Codenames split: starting team
+  // gets 9, the other 8, neutral 7, assassin 1. ────────────
+  function cryptoInt(n) {
+    if (window.crypto && crypto.getRandomValues) {
+      const buf = new Uint32Array(1);
+      crypto.getRandomValues(buf);
+      return buf[0] % n;
+    }
+    return Math.floor(Math.random() * n);
+  }
+  function genKey(startingTeam) {
+    const other = startingTeam === "red" ? "blue" : "red";
+    const arr = [
+      ...Array(9).fill(startingTeam),
+      ...Array(8).fill(other),
+      ...Array(7).fill("neutral"),
+      "assassin",
+    ];
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = cryptoInt(i + 1);
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
+  function randomToken() {
+    if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+    return "d" + Date.now().toString(36) + Math.random().toString(36).slice(2);
+  }
+
+  // ── Shared room doc shape (PUBLIC state only) ────────────
+  function blankGame() {
+    return {
+      phase: "lobby",           // lobby | playing | over
+      words: [],                // 25 words once dealt (public)
+      revealed: [],              // 25 of null|"red"|"blue"|"neutral"|"assassin" — public once flipped
+      turn: null,                // "red" | "blue" — whose turn to guess
+      startingTeam: null,        // fixed for the round; starting team holds 9 tiles, the other 8
+      clue: null,                // {word, count, by:{handle,name}} | null
+      guessesLeft: 0,
+      pendingGuess: null,        // {i, by:{handle,name}, at} — a guess awaiting color resolution by a spymaster
+      teams: {
+        red:  { spymaster: null, members: [] },  // spymaster: {handle,name}|null; members: [{handle,name}] (guessers)
+        blue: { spymaster: null, members: [] },
+      },
+      log: [],                   // plain strings, most recent last
+      winner: null,               // null | "red" | "blue"
+      winReason: null,            // null | "assassin" | "cleared"
+      seed: 0,                    // seeds the word draw only — public, does not leak colors
+      dealId: null,               // opaque token identifying the current key generation
+      startedBy: null,
+    };
+  }
+
+  function normalize(data) {
+    const g = Object.assign(blankGame(), data || {});
+    if (!Array.isArray(g.words)) g.words = [];
+    if (!Array.isArray(g.revealed) || g.revealed.length !== g.words.length) g.revealed = new Array(g.words.length).fill(null);
+    if (!g.teams || typeof g.teams !== "object") g.teams = blankGame().teams;
+    for (const team of ["red", "blue"]) {
+      if (!g.teams[team]) g.teams[team] = { spymaster: null, members: [] };
+      if (!Array.isArray(g.teams[team].members)) g.teams[team].members = [];
+    }
+    if (!Array.isArray(g.log)) g.log = [];
+    return g;
+  }
+
+  async function writeDoc(next) { return ROOM.set(next); }
+  async function refetch() { await ROOM.refetch(); }
+
+  // ── Helpers ──────────────────────────────────────────────
+  function lobbyMembers() { return uniqByHandle([...(me ? [{ handle: me.handle, name: me.name }] : []), ...presence]); }
+  function liveHandles() {
+    const set = new Set(presence.map((p) => p.handle));
+    if (me && me.handle) set.add(me.handle);
+    return set;
+  }
+  function myTeamRole() {
+    if (!me || !game) return null;
+    for (const team of ["red", "blue"]) {
+      const t = game.teams[team];
+      if (t.spymaster && t.spymaster.handle === me.handle) return { team, role: "spymaster" };
+      if (t.members.some((p) => p.handle === me.handle)) return { team, role: "guesser" };
+    }
+    return null;
+  }
+  function remainingFor(team) {
+    if (!game.startingTeam) return team === "red" ? 9 : 8;
+    const total = team === game.startingTeam ? 9 : 8;
+    const revealedCount = game.revealed.filter((v) => v === team).length;
+    return Math.max(0, total - revealedCount);
+  }
+  function logLineFor(team, word, color) {
+    if (color === "assassin") return `${team.toUpperCase()} revealed ${word} — ☠ ASSASSIN`;
+    return `${team.toUpperCase()} revealed ${word} — ${color}`;
+  }
+  function pushLog(next, line) {
+    next.log = [...(next.log || []), line].slice(-60);
+  }
+
+  // ── Team assignment (lobby) ──────────────────────────────
+  function removeFromAllTeams(g, handle) {
+    for (const team of ["red", "blue"]) {
+      if (g.teams[team].spymaster && g.teams[team].spymaster.handle === handle) g.teams[team].spymaster = null;
+      g.teams[team].members = g.teams[team].members.filter((p) => p.handle !== handle);
+    }
+  }
+  async function joinTeam(team, asSpymaster) {
+    if (busy || !game) return;
+    busy = true;
+    try {
+      const next = JSON.parse(JSON.stringify(game));
+      removeFromAllTeams(next, me.handle);
+      if (asSpymaster) {
+        if (next.teams[team].spymaster && next.teams[team].spymaster.handle !== me.handle) {
+          toast(`${team} already has a spymaster.`); return;
+        }
+        next.teams[team].spymaster = { handle: me.handle, name: me.name || me.handle };
+      } else {
+        next.teams[team].members.push({ handle: me.handle, name: me.name || me.handle });
+      }
+      const ok = await writeDoc(next);
+      if (!ok) await refetch();
+    } finally { busy = false; }
+  }
+  async function spectate() {
+    if (busy || !game) return;
+    busy = true;
+    try {
+      const next = JSON.parse(JSON.stringify(game));
+      removeFromAllTeams(next, me.handle);
+      const ok = await writeDoc(next);
+      if (!ok) await refetch();
+    } finally { busy = false; }
+  }
+
+  // Lobby too can be abandoned mid-assignment. Free seats of players who left,
+  // single-writer elected as smallest online handle (same pattern connect4 uses),
+  // so we don't race every online client into writing the same cleanup.
+  async function maybeCleanupAbandoned() {
+    if (busy || !game || !presenceLoaded || game.phase !== "lobby") return;
+    const live = liveHandles();
+    const onlineSorted = [...live].sort();
+    const iAmJanitor = onlineSorted.length > 0 && onlineSorted[0] === (me && me.handle);
+    if (!iAmJanitor) return;
+    let changed = false;
+    const next = JSON.parse(JSON.stringify(game));
+    for (const team of ["red", "blue"]) {
+      const t = next.teams[team];
+      if (t.spymaster && !live.has(t.spymaster.handle)) { t.spymaster = null; changed = true; }
+      const before = t.members.length;
+      t.members = t.members.filter((p) => live.has(p.handle));
+      if (t.members.length !== before) changed = true;
+    }
+    if (!changed) return;
+    busy = true;
+    try { await writeDoc(next); } finally { busy = false; }
+  }
+
+  // ── Deal a new game (host-only — a single writer means the two spymasters
+  // are never handed two different keys for the same dealId) ──
+  async function dealNewGame() {
+    if (busy || !game || !iAmHost) return;
+    if (!game.teams.red.spymaster || !game.teams.blue.spymaster) { toast("Both teams need a spymaster."); return; }
+    if (!game.teams.red.members.length || !game.teams.blue.members.length) { toast("Each team needs at least one guesser."); return; }
+    busy = true;
+    try {
+      const seed = cryptoInt(2 ** 31);
+      const words = seededDraw(WORDS, seed, 25);
+      const startingTeam = cryptoInt(2) === 0 ? "red" : "blue";
+      const dealId = randomToken();
+      const key = genKey(startingTeam); // local only — see deliverKey below
+
+      const next = blankGame();
+      next.phase = "playing";
+      next.words = words;
+      next.revealed = new Array(25).fill(null);
+      next.turn = startingTeam;
+      next.startingTeam = startingTeam;
+      next.teams = JSON.parse(JSON.stringify(game.teams));
+      next.seed = seed;
+      next.dealId = dealId;
+      next.startedBy = { handle: me.handle, name: me.name || me.handle };
+      pushLog(next, `Game dealt — ${startingTeam.toUpperCase()} goes first.`);
+
+      const ok = await writeDoc(next);
+      if (!ok) { await refetch(); return; }
+      deliverKey(key, dealId, next.teams);
+    } finally { busy = false; }
+  }
+
+  // Hand the freshly generated key to exactly the two current spymasters —
+  // targeted actor events, never the room doc. If a spymaster isn't connected
+  // right now they'll pick it up via a "need-key" request once they load.
+  function deliverKey(key, dealId, teams) {
+    const peers = net ? net.others() : [];
+    for (const side of ["red", "blue"]) {
+      const sm = teams[side].spymaster;
+      if (!sm) continue;
+      if (me && sm.handle === me.handle) { myKey = key.slice(); myKeyDealId = dealId; continue; }
+      const peer = peers.find((p) => p.handle === sm.handle);
+      if (peer && net) net.send({ t: "key", dealId, key }, { to: peer.id });
+    }
+  }
+
+  async function backToLobby() {
+    if (busy || !game) return;
+    busy = true;
+    try {
+      const next = blankGame();
+      next.teams = JSON.parse(JSON.stringify(game.teams)); // keep team picks for the next deal
+      const ok = await writeDoc(next);
+      if (!ok) await refetch();
+    } finally { busy = false; }
+  }
+
+  // ── Clue (direct write — no secret involved in the act of clueing itself,
+  // only in choosing the word; single writer = the current team's spymaster) ──
+  async function submitClue(rawWord, rawCount) {
+    if (busy || !game || game.phase !== "playing") return;
+    const seat = myTeamRole();
+    if (!seat || seat.role !== "spymaster" || seat.team !== game.turn) { toast("Not your turn to clue."); return; }
+    if (game.clue) return;
+    const word = (rawWord || "").trim().toUpperCase();
+    if (!word || /\s/.test(word)) { toast("One word, no spaces."); return; }
+    const count = Math.max(0, Math.min(9, rawCount | 0));
+    busy = true;
+    try {
+      const next = JSON.parse(JSON.stringify(game));
+      next.clue = { word, count, by: { handle: me.handle, name: me.name || me.handle } };
+      next.guessesLeft = count === 0 ? 99 : count + 1; // standard rule: one extra guess beyond the number given
+      pushLog(next, `${game.turn.toUpperCase()} spymaster: ${word} ${count === 0 ? "∞" : count}`);
+      const ok = await writeDoc(next);
+      if (!ok) await refetch();
+    } finally { busy = false; }
+  }
+
+  // ── Guessing. A guesser cannot know a tile's true color, so they can't be
+  // the sole writer of the outcome (unlike connect4's drops). What they DO own
+  // is the single "I'm guessing this tile" write (pendingGuess); a spymaster
+  // holding the key resolves it into the real outcome. Both spymasters hold an
+  // identical full key, so whichever one is online resolves — a race between
+  // them is harmless since they compute the same deterministic result from the
+  // same base state. ──────────────────────────
+  async function requestGuess(i) {
+    if (busy || !game || game.phase !== "playing") return;
+    if (game.revealed[i] || game.pendingGuess) return;
+    const seat = myTeamRole();
+    if (!seat || seat.role !== "guesser" || seat.team !== game.turn) { toast("Not your turn to guess."); return; }
+    if (!game.clue) { toast("Wait for a clue."); return; }
+    busy = true;
+    try {
+      const next = JSON.parse(JSON.stringify(game));
+      next.pendingGuess = { i, by: { handle: me.handle, name: me.name || me.handle }, at: Date.now() };
+      const ok = await writeDoc(next);
+      if (!ok) await refetch();
+    } finally { busy = false; }
+  }
+
+  async function endTurnVoluntary() {
+    if (busy || !game || game.phase !== "playing") return;
+    const seat = myTeamRole();
+    if (!seat || seat.role !== "guesser" || seat.team !== game.turn) return;
+    busy = true;
+    try {
+      const next = JSON.parse(JSON.stringify(game));
+      pushLog(next, `${game.turn.toUpperCase()} ended their turn.`);
+      next.turn = game.turn === "red" ? "blue" : "red";
+      next.clue = null; next.guessesLeft = 0;
+      const ok = await writeDoc(next);
+      if (!ok) await refetch();
+    } finally { busy = false; }
+  }
+
+  function finishGame(next, winner, reason, key) {
+    next.phase = "over";
+    next.winner = winner;
+    next.winReason = reason;
+    next.turn = null; next.clue = null; next.guessesLeft = 0;
+    next.revealed = key.slice(); // the game's over — secrecy no longer matters, flip the whole board
+    pushLog(next, `${winner.toUpperCase()} WINS${reason === "assassin" ? " — the assassin was found!" : "!"}`);
+  }
+
+  async function tryResolvePending() {
+    if (resolving || busy) return;
+    if (!game || game.phase !== "playing" || !game.pendingGuess) return;
+    const seat = myTeamRole();
+    if (!seat || seat.role !== "spymaster") return;
+    if (!myKey || myKeyDealId !== game.dealId) return; // I don't hold the key for THIS deal
+    resolving = true;
+    try {
+      const gg = game;
+      const i = gg.pendingGuess.i;
+      const trueColor = myKey[i];
+      const guessTeam = gg.turn;
+      const word = gg.words[i];
+      const next = JSON.parse(JSON.stringify(gg));
+      next.pendingGuess = null;
+      next.revealed[i] = trueColor;
+      pushLog(next, logLineFor(guessTeam, word, trueColor));
+
+      if (trueColor === "assassin") {
+        finishGame(next, guessTeam === "red" ? "blue" : "red", "assassin", myKey);
+      } else {
+        let over = false;
+        if (trueColor === "red" || trueColor === "blue") {
+          const total = trueColor === next.startingTeam ? 9 : 8;
+          const revealedCount = next.revealed.filter((v) => v === trueColor).length;
+          if (revealedCount >= total) { finishGame(next, trueColor, "cleared", myKey); over = true; }
+        }
+        if (!over) {
+          if (trueColor === guessTeam) {
+            next.guessesLeft = Math.max(0, (gg.guessesLeft || 0) - 1);
+            if (next.guessesLeft <= 0) { next.turn = guessTeam === "red" ? "blue" : "red"; next.clue = null; }
+          } else {
+            next.turn = guessTeam === "red" ? "blue" : "red";
+            next.clue = null; next.guessesLeft = 0;
+          }
+        }
+      }
+      const ok = await writeDoc(next);
+      if (!ok) await refetch();
+    } finally { resolving = false; }
+  }
+
+  // A pending guess with nobody able to resolve it (no spymaster online holding
+  // the right key) would otherwise stall the board forever — release it after
+  // 8s so the guesser can retry once a spymaster returns.
+  async function maybeClearStalePending() {
+    if (busy || resolving || !game || !game.pendingGuess) return;
+    if (Date.now() - game.pendingGuess.at < 8000) return;
+    busy = true;
+    try {
+      const next = JSON.parse(JSON.stringify(game));
+      next.pendingGuess = null;
+      const ok = await writeDoc(next);
+      if (!ok) await refetch();
+    } finally { busy = false; }
+  }
+
+  // ── Key delivery over worlds.actors — the ONLY path the secret travels ──
+  function handleActorEvent(id, payload, from) {
+    if (!payload) return;
+    if (payload.t === "key") {
+      if (!game || payload.dealId !== game.dealId) return; // stale or foreign deal
+      const seat = myTeamRole();
+      if (!seat || seat.role !== "spymaster") return; // defensive: only a real spymaster keeps it
+      myKey = payload.key; myKeyDealId = payload.dealId;
+      render();
+      tryResolvePending();
+    } else if (payload.t === "need-key") {
+      if (!game || !myKey || myKeyDealId !== game.dealId) return; // I don't hold the current key
+      const isLegitSpymaster = (game.teams.red.spymaster && game.teams.red.spymaster.handle === from.handle)
+        || (game.teams.blue.spymaster && game.teams.blue.spymaster.handle === from.handle);
+      if (!isLegitSpymaster) return;
+      net.send({ t: "key", dealId: myKeyDealId, key: myKey }, { to: id });
+    }
+  }
+
+  // Covers late join, reload (myKey resets to null), and a fresh spymaster
+  // assignment — all funnel through the same request/serve handshake above.
+  function maybeRequestKey() {
+    if (!net || !game || game.phase !== "playing") return;
+    const seat = myTeamRole();
+    if (!seat || seat.role !== "spymaster") return;
+    if (myKey && myKeyDealId === game.dealId) return;
+    const now = Date.now();
+    if (now - lastNeedKeyAt < 3000) return;
+    lastNeedKeyAt = now;
+    net.send({ t: "need-key" });
+  }
+
+  function startWatchdog() {
+    stopWatchdog();
+    watchdogHandle = setInterval(() => {
+      tryResolvePending();
+      maybeRequestKey();
+      maybeClearStalePending();
+    }, 2000);
+  }
+  function stopWatchdog() { if (watchdogHandle) { clearInterval(watchdogHandle); watchdogHandle = null; } }
+
+  // ── Rendering ────────────────────────────────────────────
+  function render() {
+    if (!game) return;
+    if (game.phase === "lobby") renderLobby();
+    else renderGame();
+  }
+
+  function renderLobby() {
+    showScreen("lobby");
+    const seat = myTeamRole();
+    for (const teamKey of ["red", "blue"]) {
+      const t = game.teams[teamKey];
+      const Team = teamKey === "red" ? "Red" : "Blue";
+      const slot = $(teamKey + "SpySlot");
+      if (t.spymaster) {
+        const isMe = me && t.spymaster.handle === me.handle;
+        slot.innerHTML = `<span class="role-tag">SPYMASTER</span>${esc(t.spymaster.name)}${isMe ? '<span class="you">you</span>' : ""}`;
+      } else {
+        slot.innerHTML = `<span class="role-tag empty">SPYMASTER</span><span class="muted">open seat</span>`;
+      }
+      const ul = $(teamKey + "Members"); ul.innerHTML = "";
+      if (!t.members.length) {
+        ul.innerHTML = '<li class="muted" style="border:none;background:transparent;padding:.2rem .6rem">no guessers yet</li>';
+      } else {
+        for (const p of t.members) {
+          const isMe = me && p.handle === me.handle;
+          const li = document.createElement("li");
+          li.innerHTML = `<span class="pdot"></span><span>${esc(p.name)}</span>${isMe ? '<span class="you">you</span>' : ""}`;
+          ul.appendChild(li);
+        }
+      }
+      const onThisAsGuess = seat && seat.team === teamKey && seat.role === "guesser";
+      const onThisAsSpy = seat && seat.team === teamKey && seat.role === "spymaster";
+      const guessBtn = $("btnJoin" + Team + "Guess");
+      guessBtn.textContent = onThisAsGuess ? "Leave team" : "Join as guesser";
+      guessBtn.onclick = () => (onThisAsGuess ? spectate() : joinTeam(teamKey, false));
+      const spyBtn = $("btnJoin" + Team + "Spy");
+      spyBtn.textContent = onThisAsSpy ? "Give up spymaster" : "Become spymaster";
+      spyBtn.disabled = !onThisAsSpy && !!t.spymaster;
+      spyBtn.onclick = () => (onThisAsSpy ? spectate() : joinTeam(teamKey, true));
+    }
+
+    const onTeamHandles = new Set();
+    for (const teamKey of ["red", "blue"]) {
+      const t = game.teams[teamKey];
+      if (t.spymaster) onTeamHandles.add(t.spymaster.handle);
+      for (const p of t.members) onTeamHandles.add(p.handle);
+    }
+    const specs = lobbyMembers().filter((p) => !onTeamHandles.has(p.handle));
+    $("specCount").textContent = `${specs.length}`;
+    const specUl = $("specRoster"); specUl.innerHTML = "";
+    if (!specs.length) {
+      specUl.innerHTML = '<li class="muted" style="border:none;background:transparent;padding:.2rem .6rem">no spectators</li>';
+    } else {
+      for (const p of specs) {
+        const isMe = me && p.handle === me.handle;
+        const li = document.createElement("li");
+        li.innerHTML = `<span class="pdot"></span><span>${esc(p.name)}</span>${isMe ? '<span class="you">you</span>' : ""}`;
+        specUl.appendChild(li);
+      }
+    }
+
+    const canStart = game.teams.red.spymaster && game.teams.blue.spymaster && game.teams.red.members.length && game.teams.blue.members.length;
+    $("btnStart").disabled = !canStart || !iAmHost;
+    $("startHint").textContent = !iAmHost
+      ? "Only the table's host can start."
+      : (canStart ? "Ready to deal!" : "Need a spymaster and at least one guesser on each team.");
+  }
+
+  function renderGame() {
+    showScreen("game");
+    const seat = myTeamRole();
+    $("specTag").classList.toggle("hidden", !!seat);
+    renderPills();
+    renderDisconnectWarn();
+    renderClueBar();
+    renderBoard();
+    renderGuessActions();
+    renderLog();
+    renderOverlay();
+    reactToTransition();
+  }
+
+  function renderPills() {
+    $("redLeft").textContent = String(remainingFor("red"));
+    $("blueLeft").textContent = String(remainingFor("blue"));
+    const ind = $("turnIndicator");
+    if (game.phase === "over") { ind.textContent = "GAME OVER"; ind.className = "turn-indicator over"; }
+    else {
+      const seat = myTeamRole();
+      const mine = seat && seat.team === game.turn;
+      ind.textContent = (game.turn || "").toUpperCase() + "'S TURN" + (mine ? " (you)" : "");
+      ind.className = "turn-indicator " + (game.turn || "");
+    }
+  }
+
+  function renderDisconnectWarn() {
+    const el = $("disconnectWarn");
+    if (!presenceLoaded || game.phase !== "playing") { el.classList.add("hidden"); return; }
+    const live = liveHandles();
+    const missing = [];
+    for (const team of ["red", "blue"]) {
+      const t = game.teams[team];
+      if (t.spymaster && !live.has(t.spymaster.handle)) missing.push(`${t.spymaster.name} (${team.toUpperCase()} spymaster)`);
+    }
+    if (missing.length) { el.textContent = `${missing.join(" & ")} disconnected — the game may stall until they return.`; el.classList.remove("hidden"); }
+    else el.classList.add("hidden");
+  }
+
+  function renderClueBar() {
+    const bar = $("clueBar");
+    if (game.phase !== "playing") { bar.innerHTML = ""; return; }
+    const seat = myTeamRole();
+    const isMyClueTurn = seat && seat.role === "spymaster" && seat.team === game.turn && !game.clue;
+    if (isMyClueTurn) {
+      bar.innerHTML = `
+        <p class="section-label">Give a clue — ${esc(game.turn.toUpperCase())}'S TURN</p>
+        <div class="clue-form">
+          <input id="clueWord" maxlength="24" placeholder="one word…" autocomplete="off" />
+          <select id="clueCount">${[0,1,2,3,4,5,6,7,8,9].map((n) => `<option value="${n}"${n===1?" selected":""}>${n === 0 ? "∞" : n}</option>`).join("")}</select>
+          <button class="btn-primary" id="btnSubmitClue">Give clue</button>
+        </div>`;
+      $("btnSubmitClue").addEventListener("click", () => submitClue($("clueWord").value, parseInt($("clueCount").value, 10)));
+      $("clueWord").addEventListener("keydown", (e) => { if (e.key === "Enter") $("btnSubmitClue").click(); });
+    } else if (game.clue) {
+      bar.innerHTML = `
+        <p class="section-label">Current clue</p>
+        <div class="clue-display"><span class="clue-word">${esc(game.clue.word)}</span><span class="clue-count">${game.clue.count === 0 ? "∞" : game.clue.count}</span></div>
+        <p class="tiny center" style="margin:.5rem 0 0">from ${esc(game.clue.by.name)} · ${game.guessesLeft} guess${game.guessesLeft === 1 ? "" : "es"} left</p>`;
+    } else {
+      bar.innerHTML = `<p class="muted center" style="margin:0">Waiting for the ${esc((game.turn || "").toUpperCase())} spymaster to give a clue…</p>`;
+    }
+  }
+
+  function renderBoard() {
+    const el = $("board");
+    const seat = myTeamRole();
+    const isSpy = seat && seat.role === "spymaster";
+    const haveKey = isSpy && myKey && myKeyDealId === game.dealId;
+    if (el.children.length !== game.words.length) {
+      el.innerHTML = "";
+      for (let i = 0; i < game.words.length; i++) {
+        const b = document.createElement("button");
+        b.className = "tile";
+        b.dataset.i = String(i);
+        b.innerHTML = '<span class="tile-word"></span>';
+        b.addEventListener("click", () => requestGuess(i));
+        el.appendChild(b);
+      }
+    }
+    for (let i = 0; i < game.words.length; i++) {
+      const tile = el.children[i];
+      tile.querySelector(".tile-word").textContent = game.words[i] || "";
+      const revealedColor = game.revealed[i];
+      tile.className = "tile";
+      if (revealedColor) tile.classList.add("revealed", revealedColor);
+      else if (haveKey) tile.classList.add("key-" + myKey[i]);
+      else if (isSpy) tile.classList.add("key-neutral"); // waiting on the key — neutral skeleton, not a guess at colors
+      if (game.pendingGuess && game.pendingGuess.i === i) tile.classList.add("pending");
+      const canTap = !isSpy && game.phase === "playing" && !revealedColor && !game.pendingGuess
+        && seat && seat.role === "guesser" && seat.team === game.turn && !!game.clue;
+      tile.disabled = !canTap;
+      tile.classList.toggle("tappable", canTap);
+    }
+  }
+
+  function renderGuessActions() {
+    const seat = myTeamRole();
+    const show = game.phase === "playing" && seat && seat.role === "guesser" && seat.team === game.turn && !!game.clue;
+    $("guessActions").classList.toggle("hidden", !show);
+  }
+
+  function renderLog() {
+    const el = $("logList");
+    const lines = game.log || [];
+    el.innerHTML = lines.length
+      ? lines.slice().reverse().map((l) => `<div class="log-line">${esc(l)}</div>`).join("")
+      : '<div class="log-line muted">No moves yet.</div>';
+  }
+
+  function renderOverlay() {
+    const show = game.phase === "over";
+    $("overlayResult").classList.toggle("hidden", !show);
+    if (!show) return;
+    $("overFlourish").textContent = game.winReason === "assassin" ? "☠" : "🏆";
+    const w = $("overWinner");
+    w.textContent = `${(game.winner || "").toUpperCase()} WINS`;
+    w.className = "overlay-winner " + (game.winner || "");
+    $("overReason").textContent = game.winReason === "assassin"
+      ? "the assassin was uncovered."
+      : "cleared every one of their words.";
+    $("btnNewGame").disabled = !iAmHost;
+  }
+
+  function reactToTransition() {
+    const revealedCount = (game.revealed || []).filter(Boolean).length;
+    if (prevPhase !== null) {
+      if (revealedCount - prevRevealedCount === 1) SFX.flip();
+      if (game.phase === "over" && prevPhase !== "over") {
+        if (game.winReason === "assassin") SFX.doom(); else SFX.win();
+      }
+    }
+    prevPhase = game.phase; prevRevealedCount = revealedCount;
+  }
+
+  // ── Tables browser (worlds.rooms directory) ──────────────
+  function renderTables(list) {
+    const ul = $("tableList");
+    ul.innerHTML = "";
+    if (!list.length) { ul.innerHTML = '<li class="empty-note">No open tables yet — start one!</li>'; return; }
+    for (const t of list) {
+      const li = document.createElement("li");
+      li.className = "tablerow";
+      const who = t.count === 1 ? "1 here" : `${t.count} here`;
+      const status = t.status === "playing" ? ' · <span class="playing">in game</span>' : "";
+      li.innerHTML = `<div class="meta"><div class="nm">${esc(t.name)}</div><div class="sub">${who}${status} · <span class="code">${esc(t.code)}</span></div></div>`;
+      const btn = document.createElement("button");
+      btn.className = "btn-primary";
+      btn.textContent = t.status === "playing" ? "Watch" : "Join";
+      btn.addEventListener("click", () => joinTable(() => hall.join(t.id)));
+      li.appendChild(btn);
+      ul.appendChild(li);
+    }
+  }
+
+  function mountRoom(room) {
+    if (unsubRoom) { try { unsubRoom(); } catch (_) {} unsubRoom = null; }
+    if (net) { try { net.destroy(); } catch (_) {} net = null; }
+    stopWatchdog();
+    ROOM = room; game = null; presence = []; presenceLoaded = false; iAmHost = false;
+    myKey = null; myKeyDealId = null; prevPhase = null; prevRevealedCount = 0;
+
+    net = worlds.actors("codenames-deal:" + room.id, { rate: 5 });
+    net.onEvent(handleActorEvent);
+
+    location.hash = room.code;
+    $("tableCodeLobby").textContent = "code " + room.code;
+    $("tableCodeGame").textContent = "code " + room.code;
+    $("inviteLink").value = location.origin + location.pathname + "#" + room.code;
+    showScreen("lobby");
+
+    unsubRoom = room.onChange((s) => {
+      game = normalize(s.state);
+      presence = uniqByHandle(s.members || []);
+      presenceLoaded = s.loaded;
+      iAmHost = s.isHost;
+      render();
+      maybeCleanupAbandoned();
+      tryResolvePending();
+      maybeRequestKey();
+    });
+    startWatchdog();
+  }
+
+  async function joinTable(fn) {
+    try { mountRoom(await fn()); }
+    catch (e) {
+      toast(e && e.code === "conflict" ? "That table is full." : "Couldn't join that table.");
+      console.error("[codenames] join failed", e);
+    }
+  }
+
+  function leaveTable() {
+    if (unsubRoom) { try { unsubRoom(); } catch (_) {} unsubRoom = null; }
+    if (net) { try { net.destroy(); } catch (_) {} net = null; }
+    stopWatchdog();
+    hall.leave().catch(() => {});
+    ROOM = null; game = null; presence = []; presenceLoaded = false; myKey = null; myKeyDealId = null;
+    history.replaceState(null, "", location.pathname);
+    showScreen("tables");
+  }
+
+  // ── Wiring ───────────────────────────────────────────────
+  $("btnLeaveLobby").addEventListener("click", leaveTable);
+  $("btnLeaveGame").addEventListener("click", leaveTable);
+  $("btnSpectate").addEventListener("click", spectate);
+  $("btnStart").addEventListener("click", dealNewGame);
+  $("btnNewGame").addEventListener("click", dealNewGame);
+  $("btnBackLobby").addEventListener("click", backToLobby);
+  $("btnEndTurn").addEventListener("click", endTurnVoluntary);
+  $("btnNewTable").addEventListener("click", () => joinTable(() => hall.create({ name: `${me.name || me.handle}'s table` })));
+  $("btnNewPrivate").addEventListener("click", () => joinTable(() => hall.create({ name: `${me.name || me.handle}'s table`, private: true })));
+  $("btnJoinCode").addEventListener("click", () => {
+    const code = $("codeInput").value.trim().toUpperCase();
+    if (code.length < 4) { toast("Enter the 4-letter code."); return; }
+    joinTable(() => hall.joinByCode(code));
+  });
+  $("codeInput").addEventListener("keydown", (e) => { if (e.key === "Enter") $("btnJoinCode").click(); });
+  $("btnCopy").addEventListener("click", async () => {
+    const link = $("inviteLink").value;
+    try { await navigator.clipboard.writeText(link); toast("Invite link copied!"); }
+    catch (e) { const el = $("inviteLink"); el.focus(); el.select(); toast("Press ⌘/Ctrl-C to copy."); }
+  });
+
+  // ── Boot ─────────────────────────────────────────────────
+  (async () => {
+    try {
+      await worlds.ready;
+      me = await worlds.me();
+      $("meName").textContent = me.name || me.handle;
+
+      hall.onList(renderTables);
+
+      const code = (location.hash || "").replace(/^#/, "").trim().toUpperCase();
+      if (code.length >= 4) {
+        await joinTable(() => hall.joinByCode(code));
+        if (!ROOM) showScreen("tables");
+      } else {
+        showScreen("tables");
+      }
+    } catch (e) {
+      boot.classList.remove("hidden");
+      boot.textContent = "Couldn't connect to Worlds. Refresh to retry.";
+      console.error("[codenames] boot failed", e);
+    }
+  })();
+})();
+</script>
+</body>
+</html>
