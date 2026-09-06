@@ -23,10 +23,15 @@ export const allowDeploy = (site: string) =>
   take(`deploy:${site}`, LIMITS.deploysPerSitePerHour, HOUR, (oldest) =>
     new WorldsError("rate_limited", "rate limit exceeded", Math.ceil((HOUR - (Date.now() - oldest)) / 1000)));
 
-export function takeQuota(kind: "ai" | "ai_image" | "slack", user: string): void {
+export const allowConnect = (site: string) =>
+  take(`connect:${site}`, LIMITS.connectCallsPerSitePerHour, HOUR, (oldest) =>
+    new WorldsError("rate_limited", "connector rate limit exceeded", Math.ceil((HOUR - (Date.now() - oldest)) / 1000)));
+
+export function takeQuota(kind: "ai" | "ai_image" | "slack" | "connect", user: string): void {
   const max =
     kind === "ai" ? LIMITS.aiCompletionsPerUserPerDay
     : kind === "ai_image" ? LIMITS.aiImagesPerUserPerDay
+    : kind === "connect" ? LIMITS.connectCallsPerUserPerDay
     : LIMITS.slackPerUserPerDay;
   // Daily quotas reset at midnight UTC, not one window after the first call.
   take(`${kind}:${user}`, max, DAY, () =>
@@ -38,7 +43,7 @@ export function takeQuota(kind: "ai" | "ai_image" | "slack", user: string): void
 setInterval(() => {
   const now = Date.now();
   for (const [key, hits] of windows) {
-    const windowMs = key.startsWith("deploy:") ? HOUR : DAY;
+    const windowMs = key.startsWith("deploy:") || key.startsWith("connect:") ? HOUR : DAY;
     if (hits.every((t) => now - t >= windowMs)) windows.delete(key);
   }
 }, 10 * 60 * 1000).unref?.();

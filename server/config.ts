@@ -1,3 +1,5 @@
+import { loadConnectors } from "./connectors";
+
 const DEV_SESSION_SECRET = "insecure-dev-secret-change-me";
 
 export const config = {
@@ -22,6 +24,9 @@ export const config = {
   dbSnapshotSeconds: Math.max(10, Number(process.env.WORLDS_DB_SNAPSHOT_SECONDS ?? 60)),
   geminiKey: process.env.GEMINI_API_KEY,
   slackToken: process.env.SLACK_BOT_TOKEN,
+  // External services sites may call through the platform's own credential. See
+  // server/connectors.ts for the shape; a malformed registry refuses to boot.
+  connectors: loadConnectors(process.env.WORLDS_DEV === "1"),
   // When set, unrecognized hosts (e.g. a Cloudflare/ngrok tunnel) serve this site
   // at their root — lets you forward a single site over a non-wildcard tunnel.
   forwardSite: process.env.WORLDS_FORWARD_SITE || null,
@@ -74,4 +79,8 @@ export const LIMITS = {
   aiInputChars: 200_000,
   wsPayloadBytes: 16 * 1024,
   slackPerUserPerDay: 50,
+  connectArgsBytes: 64 * 1024,
+  connectCallsPerUserPerDay: 100,
+  // The daily per-user cap does nothing about thirty people on one board at once.
+  connectCallsPerSitePerHour: 200,
 };
