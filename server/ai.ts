@@ -9,8 +9,9 @@ import { store } from "./blobstore";
 // `noThink` disables thinking for snappy short replies; pro models require
 // thinking, so they keep it on and get a generous output floor instead.
 const CHAT_MODELS: Record<string, { id: string; noThink: boolean; minOut?: number }> = {
-  fast: { id: "gemini-3.6-flash", noThink: true },
-  smart: { id: "gemini-3.1-pro-preview", noThink: false, minOut: 2048 },
+  // The alias, not the model: an operator whose key predates a model id overrides it here.
+  fast: { id: process.env.WORLDS_MODEL_FAST || "gemini-3.6-flash", noThink: true },
+  smart: { id: process.env.WORLDS_MODEL_SMART || "gemini-3.1-pro-preview", noThink: false, minOut: 2048 },
 };
 const EMBED_MODEL = "gemini-embedding-001";
 
