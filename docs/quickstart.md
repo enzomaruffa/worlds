@@ -70,5 +70,52 @@ rule is rejected and the sender resyncs, nobody else notices.
   `maxText` caps the characters directly inside one node.
 - `limits`: `depth`, `bytes` (Yjs state), `nodes`, `textChars`, `perType`.
 
+## Connectors (operator setup)
+
+A site can call an external service through the platform's own credential — `worlds.connect`.
+The browser never sees a key.
+
+Grants live in the environment, next to the token, and nowhere else. That is deliberate: a
+`.world.json` key or a column on the site would be written by whoever deployed the site, so
+a site could grant itself access to a credential it should never hold. The environment is the
+one place an unprivileged user provably cannot reach. Administering a grant is "edit the
+secret, restart the pod" — that is the property, not a limitation.
+
+```
+WORLDS_CONNECTORS='[{
+  "name": "linear",
+  "url": "https://mcp.linear.app/mcp",
+  "token_env": "LINEAR_MCP_TOKEN",
+  "sites": {
+    "retro": {
+      "tools": ["create_issue", "list_teams"],
+      "args":  {"create_issue": {"teamId": "9f2c…"}},
+      "stamp": {"create_issue": ["description"]}
+    }
+  }
+}]'
+LINEAR_MCP_TOKEN=lin_api_…
+```
+
+- **`token_env` names the variable; the token never goes in the registry** — this blob ends up
+  in a `kubectl describe` and in log lines, and the secret should not.
+- **`args` are forced server-side**, overriding whatever the caller sent. The `retro` site may
+  file an issue and may not choose the team, even if someone edits the page in devtools. A
+  tool-name allowlist alone cannot do that.
+- **`stamp` appends provenance** to the named text fields: `via <site> · requested by <person>`.
+- A site with no grant sees an empty `list()` rather than an error, so a page can
+  feature-detect. `not_found` covers both "no such connector" and "not granted", so existence
+  cannot be probed; `forbidden` means the connector is granted but that tool is not.
+- A malformed registry **refuses to boot**. A typo must not silently disable Linear.
+- Prefer a read-only endpoint where the service offers one (Linear publishes
+  `https://mcp.linear.app/mcp/readonly`).
+
+Every call is written to `connector_calls` — connector, tool, site, the arguments actually
+sent, outcome, duration — keyed on the session identity, which is not forgeable. Kept 90 days.
+In path routing the calling *site* is a header the client supplies, so the allowlist stops
+accidents rather than determined people; the audit row is the control that holds.
+
+Limits: 100 calls / user / day, 200 / site / hour, 64KB of arguments.
+
 What Worlds is not for: anything external-facing, secrets (there are no permissions),
 heavy compute, cron jobs. Scheduled reports become "refresh when opened, ping Slack when off".
