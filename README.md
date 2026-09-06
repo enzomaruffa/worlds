@@ -76,6 +76,7 @@ and a long random `WORLDS_SESSION_SECRET`. See [deploy/README.md](deploy/README.
 bun install
 bun run db:up                 # Postgres in docker (compose.yaml)
 bun run build:sdk             # build sdk/src → sdk/worlds.js
+bun run build:docs            # regenerate docs/reference.md from sdk/src (tests fail if it's stale)
 bun run dev                   # server on :8420 (WORLDS_DEV=1 stubs identity as dev@localhost)
 
 bun cli/worlds.ts init && bun cli/worlds.ts deploy   # deploy a folder with an index.html
@@ -91,8 +92,11 @@ sdk/src/       worlds.js SDK source (modular TS) — `bun run build:sdk` → sdk
 cli/           the `worlds` CLI (login / init / deploy / open / list)
 homepage/      the /list + 3D universe homepage (itself a Worlds site)
 tutorial/      the hello.world tutorial (served at the `hello` host)
+docsite/       the interactive docs — every primitive explained + running live (the `docs` host; /docs redirects there)
 universe/  the flagship 3D "universe" — seeded as the first world
-docs/          user docs (served at /docs, /llms.txt)
+docs/          user docs (served at /docs/<page>.md, /llms.txt, /llms-full.txt)
+               reference.md is GENERATED from sdk/src + server/ by `bun run build:docs`
+scripts/       build-docs.ts — the reference generator (TypeScript compiler API)
 spec/          world-v1.yaml — the frozen API contract
 skills/        an agent skill so Claude can build + deploy Worlds sites
 ```
@@ -109,6 +113,12 @@ fixed registry; AI models are stable aliases (`fast`, `smart`). Full surface in
 There's an MCP server at `/mcp` and a [`world-site` skill](skills/world-site/SKILL.md) so
 Claude (Code/Desktop) can build and deploy sites unaided — point it at the docs and say
 "deploy this."
+
+The docs an agent reads are served by the instance itself: `/llms.txt` (index), `/llms-full.txt`
+(everything in one file) and `/docs/reference.md` — the complete SDK surface, generated from
+`sdk/src` and the server's contract files on every build (`bun run build:docs`, also run in the
+Dockerfile), so it can't drift from the `/worlds.js` being served. Humans get the same material
+with live demos at `docs.<your-domain>`.
 
 ## License
 

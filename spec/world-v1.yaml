@@ -14,7 +14,7 @@ paths:
   /api/v1/db: { get: { summary: list collections } }
   /api/v1/db/{collection}:
     post: { summary: create document }
-    get: { summary: list documents (filter, sort, cursor) }
+    get: { summary: "list documents (filter, sort, cursor)" }
   /api/v1/db/{collection}/{id}:
     get: { summary: read }
     patch: { summary: shallow merge (If-Unmodified-Since-Version) }
@@ -36,10 +36,10 @@ paths:
     post: { summary: store file }
     get: { summary: list uploads }
   /api/v1/uploads/{name}: { delete: { summary: delete upload } }
-  /api/v1/notify/slack: { post: { summary: capped, sender-stamped Slack message } }
+  /api/v1/notify/slack: { post: { summary: "capped, sender-stamped Slack message" } }
   /api/v1/universe: { get: { summary: homepage payload } }
   /api/v1/creators/{handle}: { get: { summary: creator page data } }
-  /api/v1/beacon/visit: { post: { summary: sendBeacon page view, always 204 } }
+  /api/v1/beacon/visit: { post: { summary: "sendBeacon page view, always 204" } }
   /api/v1/meta: { get: { summary: api_version + build (build is NOT stable) } }
 components:
   schemas:

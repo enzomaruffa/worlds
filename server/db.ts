@@ -25,7 +25,7 @@ if (isSqlite) await restoreSqlite(SQLITE_FILE);
 
 export const sql: any = isSqlite
   ? openSqlite(SQLITE_FILE)
-  : new SQL(config.databaseUrl, { max: 10, idleTimeout: 30 });
+  : new SQL(config.databaseUrl, { max: 10 });
 
 let ready = false;
 
@@ -278,7 +278,9 @@ function startMonitor(): void {
     if (dbChecking) return;
     dbChecking = true;
     try {
-      await sql`SELECT 1`;
+      // One retry: a probe that lands on a connection the pool is closing fails once and
+      // recovers on the next, and that is not a postgres outage.
+      await sql`SELECT 1`.catch(() => sql`SELECT 1`);
       if (!ready) await initDb();   // connection is back — re-migrate (idempotent) + flip ready
     } catch (e) {
       if (ready) {

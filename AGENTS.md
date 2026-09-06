@@ -37,7 +37,10 @@ The 30-second version:
 - building blocks: `worlds.id() colorFor() uniqByHandle() esc() countdown() toast()` + an auto "leave" pill
 
 **Read the docs, don't guess method names** — the surface is small and stable:
-- `/docs` (human) · `docs/sdk.md`, `docs/quickstart.md`, `docs/limits.md` in this repo
+- `/docs` (human — the interactive site, every primitive running live) · `docs/sdk.md`,
+  `docs/quickstart.md`, `docs/limits.md` in this repo
+- `/docs/reference.md` — the COMPLETE surface (every exported type/option/signature + comments,
+  error codes, limits, HTTP table, MCP tools), generated from the SDK source; prefer it over guessing
 - `/llms.txt` + `/llms-full.txt` (machine-readable, generated from `docs/`)
 - `spec/world-v1.yaml` — the frozen OpenAPI contract
 
@@ -68,6 +71,12 @@ any site), heavy/long compute, scheduled jobs, public webhooks. Point those at a
 - `examples/games/` — reference Worlds sites (the best way to learn the SDK; see below).
 - `universe/` — the flagship 3D homepage (a Worlds site built on the public SDK; deployed as
   the `universe` site, NOT bundled in the server image).
+- `docsite/` — the interactive docs, a bundled Worlds site at the reserved `docs` host (`/docs` on the
+  homepage redirects there; `/app/docs/` in path mode). Every SDK primitive has a live demo. It's
+  static HTML/JS on the public SDK — when a primitive changes, update its demo + snippet here too.
+- `scripts/build-docs.ts` — generates `docs/reference.md` (the complete SDK surface, errors, limits,
+  HTTP table, MCP tools) from `sdk/src` + `server/` + `spec/` with the TypeScript compiler API.
+  `docs/reference.md` is GENERATED — never hand-edit it; `bun run build:docs` (the Dockerfile runs it too).
 - `homepage/` `cli/` `docs/` `spec/` (frozen OpenAPI) `tests/e2e.test.ts`.
 - `deploy/` — Plex chart + CD. Present only in the `plexinc/worlds` fork (see deploy model).
 
@@ -87,6 +96,7 @@ any site), heavy/long compute, scheduled jobs, public webhooks. Point those at a
 
 ```sh
 bun run build:sdk          # after ANY sdk/src/ change → regenerates sdk/worlds.js
+bun run build:docs         # …and docs/reference.md (generated; a stale one fails the tests)
 bunx tsc --noEmit          # typecheck
 bun run db:up && bun test  # e2e (Postgres on :5499); all tests must pass
 ```
@@ -110,7 +120,12 @@ WORLDS_DEV=1 WORLDS_SEED=0 bun server/index.ts   # :8420; identity stubbed as de
 2. `bun run build:sdk` (regenerates `sdk/worlds.js`).
 3. **Document it in `docs/sdk.md`** — this flows to `/llms.txt`, `/docs`, and MCP automatically.
    The docs ARE the contract; every public method needs a docs anchor. Keep them in sync ALWAYS.
-4. If it's reusable, demonstrate it in an `examples/games/` app.
+   Write the `//` block above the export and the inline field comments as if they were the docs —
+   they are: `bun run build:docs` prints them into `docs/reference.md` (commit the regenerated file;
+   the e2e suite fails when it's stale).
+4. **Add a live demo + snippet to `docsite/index.html` / `docsite/app.js`** — the test suite checks
+   every key on the `worlds` global is shown there. Then, if it's reusable, demonstrate it in an
+   `examples/games/` app.
 5. Additive-only: never remove/rename/retype existing `worlds.js` surface or `/api/v1` shapes.
 
 ### Two-repo + deploy model

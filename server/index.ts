@@ -30,6 +30,7 @@ const HOMEPAGE_DIR = new URL("../homepage", import.meta.url).pathname;
 const SDK_DIR = new URL("../sdk", import.meta.url).pathname;
 const DOCS_DIR = new URL("../docs", import.meta.url).pathname;
 const TUTORIAL_DIR = new URL("../tutorial", import.meta.url).pathname;
+const DOCSITE_DIR = new URL("../docsite", import.meta.url).pathname;
 
 // Default site favicon (a little ringed planet) — served for every site at
 // /favicon.ico so pages don't 404 on the browser's implicit request.
@@ -82,19 +83,53 @@ function loader(file: string, immutable: boolean): Promise<Response | null> {
   );
 }
 
-async function llmsTxt(full: boolean): Promise<Response> {
-  const glob = new Bun.Glob("*.md");
+// Reading order for the LLM-facing index and the concatenated llms-full.txt; any page
+// not listed is appended alphabetically, so a new doc is never silently left out.
+const DOC_ORDER = ["quickstart.md", "sdk.md", "reference.md", "limits.md"];
+
+async function docPages(): Promise<string[]> {
   const pages: string[] = [];
-  for await (const f of glob.scan(DOCS_DIR)) pages.push(f);
-  pages.sort();
+  for await (const f of new Bun.Glob("*.md").scan(DOCS_DIR)) pages.push(f);
+  const rank = (p: string) => (DOC_ORDER.includes(p) ? DOC_ORDER.indexOf(p) : DOC_ORDER.length);
+  return pages.sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+}
+
+// A page's first paragraph, trimmed to one line — the blurb llms.txt shows next to its link.
+function blurb(md: string): string {
+  const lines = md.split("\n");
+  let i = lines.findIndex((l) => l.trim() && !/^(#|<!--|```|\|)/.test(l));
+  const para: string[] = [];
+  while (i >= 0 && i < lines.length && lines[i]!.trim()) para.push(lines[i++]!.trim());
+  const text = para.join(" ");
+  return text.length > 160 ? `${text.slice(0, 157).replace(/\s+\S*$/, "")}…` : text;
+}
+
+async function llmsTxt(full: boolean): Promise<Response> {
+  const pages = await docPages();
+  const headers = { "content-type": "text/plain; charset=utf-8" };
   if (!full) {
-    const lines = ["# Worlds", "", "> Deploy a folder, get a website. Internal hosting for Plex.", "", "## Docs", ""];
-    for (const p of pages) lines.push(`- [${p.replace(".md", "")}](/docs/${p})`);
-    return new Response(lines.join("\n"), { headers: { "content-type": "text/plain; charset=utf-8" } });
+    const lines = [
+      "# Worlds",
+      "",
+      "> Deploy a folder of static files, get `<name>.<your-domain>` with a batteries-included client SDK — database, AI, uploads, realtime, identity — behind one `<script src=\"/worlds.js\">` tag. No keys, no config.",
+      "",
+      "## Docs",
+      "",
+    ];
+    for (const p of pages) lines.push(`- [${p.replace(".md", "")}](/docs/${p}): ${blurb(await Bun.file(join(DOCS_DIR, p)).text())}`);
+    lines.push(
+      "",
+      "## Optional",
+      "",
+      "- [llms-full.txt](/llms-full.txt): every page above in one file",
+      "- [interactive docs](/docs): the human-facing site — every primitive explained and running live",
+      "- [MCP](/mcp): deploy_site, list_sites, get_site, my_sites, db_query, read_docs, search_docs",
+    );
+    return new Response(lines.join("\n"), { headers });
   }
   let out = "";
   for (const p of pages) out += `\n\n<!-- ${p} -->\n\n` + (await Bun.file(join(DOCS_DIR, p)).text());
-  return new Response(out.trim(), { headers: { "content-type": "text/plain; charset=utf-8" } });
+  return new Response(out.trim(), { headers });
 }
 
 async function api(req: Request, url: URL, site: string): Promise<Response> {
@@ -339,14 +374,22 @@ const server = Bun.serve<SocketData, never>({
           if (rest.length === 0) return new Response(null, { status: 308, headers: { location: `/app/${appSite}/` } });
           const path = `/${rest.join("/")}`;
           if (appSite === "hello") return (await serveBundled(TUTORIAL_DIR, path)) ?? siteNotFound("hello");
+          if (appSite === "docs") return (await serveBundled(DOCSITE_DIR, path)) ?? siteNotFound("docs");
           return (await serveSite(req, appSite, path)) ?? siteNotFound(appSite);
         }
       }
 
       // the `hello` host — the bundled tutorial (a reserved name, not a deployable site).
       if (site === "hello") return (await serveBundled(TUTORIAL_DIR, url.pathname)) ?? siteNotFound("hello");
+      // the `docs` host — the bundled interactive docs (reserved, like `hello`).
+      if (site === "docs") return (await serveBundled(DOCSITE_DIR, url.pathname)) ?? siteNotFound("docs");
 
       if (site === "home") {
+        if (url.pathname === "/docs" || url.pathname === "/docs/") {
+          // The interactive docs are their own site; the raw markdown stays at /docs/<page>.md.
+          const target = config.routing === "path" ? "/app/docs/" : siteUrl("docs");
+          return new Response(null, { status: 302, headers: { location: target } });
+        }
         if (url.pathname.startsWith("/docs/") && url.pathname.endsWith(".md")) {
           const rel = url.pathname.slice("/docs/".length);
           const full = join(DOCS_DIR, rel);

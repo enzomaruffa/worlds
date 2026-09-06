@@ -383,6 +383,44 @@ describe("platform surfaces", () => {
   test("llms.txt lists the docs", async () => {
     const txt = await (await req("GET", "/llms.txt", { site: "home" })).text();
     expect(txt).toContain("/docs/quickstart.md");
+    expect(txt).toContain("/docs/reference.md");
+    // the full dump keeps the reading order: guide before the generated reference
+    const full = await (await req("GET", "/llms-full.txt", { site: "home" })).text();
+    expect(full.indexOf("<!-- sdk.md -->")).toBeLessThan(full.indexOf("<!-- reference.md -->"));
+  });
+
+  test("the generated reference matches the SDK source", async () => {
+    const { generate } = await import("../scripts/build-docs");
+    const current = await Bun.file(new URL("../docs/reference.md", import.meta.url)).text();
+    expect(current).toBe(await generate()); // stale → run `bun run build:docs`
+  });
+
+  test("the interactive docs site is served at the reserved docs host", async () => {
+    const res = await req("GET", "/", { site: "docs" });
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain('<script src="/worlds.js">');
+    expect(html).toContain('href="./style.css"');
+    expect((await req("GET", "/app.js", { site: "docs" })).status).toBe(200);
+    expect((await req("GET", "/style.css", { site: "docs" })).status).toBe(200);
+    expect((await req("GET", "/nope.html", { site: "docs" })).status).toBe(404);
+  });
+
+  test("/docs on the homepage redirects to the docs site; the raw markdown stays put", async () => {
+    const res = await fetch(`${BASE}/docs`, { headers: { host: "worlds.localhost" }, redirect: "manual" });
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toContain("docs.worlds.localhost");
+    const md = await req("GET", "/docs/sdk.md", { site: "home" });
+    expect(md.headers.get("content-type")).toContain("text/markdown");
+  });
+
+  test("the docs site demonstrates every key on the worlds global", async () => {
+    const sdk = await Bun.file(new URL("../sdk/src/index.ts", import.meta.url)).text();
+    const literal = sdk.slice(sdk.indexOf("const worlds: any = {"), sdk.indexOf("\n};"));
+    const keys = [...literal.matchAll(/^  (\w+)[,:]/gm)].map((m) => m[1]!).filter((k) => k !== "WorldsError" && k !== "site");
+    expect(keys).toContain("actors"); // sanity: the parse found the surface
+    const html = await Bun.file(new URL("../docsite/index.html", import.meta.url)).text();
+    for (const k of keys) expect(html).toContain(`worlds.${k}`);
   });
 
   test("loaders are served with the contract cache headers", async () => {
@@ -840,6 +878,16 @@ describe("path routing (WORLDS_ROUTING=path)", () => {
     await fetch(`${PB}/api/v1/deploy`, { method: "POST", headers: { "x-worlds-csrf": "1" }, body: form });
   });
   afterAll(async () => { pproc?.kill(); await rm(pdir, { recursive: true, force: true }); });
+
+  test("the bundled docs site is served at /app/docs/ and /docs redirects there", async () => {
+    const res = await fetch(`${PB}/app/docs/`);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain('<script src="/worlds.js">');
+    expect((await fetch(`${PB}/app/docs/app.js`)).status).toBe(200);
+    const redirect = await fetch(`${PB}/docs`, { redirect: "manual" });
+    expect(redirect.status).toBe(302);
+    expect(redirect.headers.get("location")).toBe("/app/docs/");
+  });
 
   test("site is served at /app/<name>/", async () => {
     const res = await fetch(`${PB}/app/${SITE}/`);

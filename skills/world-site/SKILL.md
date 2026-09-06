@@ -70,7 +70,9 @@ join codes — before `worlds.ws` — see the connect4 / trivia / spyfall refere
   plus a curated list of CDN libraries and CC0 asset sources (three.js, Kenney, ECharts, …) —
   sites are static behind the gate, so any CDN works.
 - **Live contract**: `/llms.txt` and `/docs` are always current — read them rather
-  than guessing method names.
+  than guessing method names. `/docs/reference.md` is the complete surface (every type, option
+  and signature with its comment), generated from the SDK source on each build; `/llms-full.txt`
+  bundles every page. The MCP `read_docs` tool returns the same pages.
 
 ## When NOT to use Worlds
 
