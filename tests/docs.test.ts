@@ -1,0 +1,204 @@
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import * as Y from "yjs";
+
+// The document room against whichever database the process already has open (SQLite alone,
+// the dev Postgres inside the full suite): commit/ack ordering, durability
+// across a simulated crash, snapshots and rotation. The socket and HTTP surfaces are
+// covered in e2e.test.ts; this is the room itself.
+
+let dataDir: string;
+let docs: typeof import("../server/docs");
+let db: typeof import("../server/db");
+
+const who = { email: "t@localhost", handle: "t", name: "T", avatar: "" };
+const SITE = "unit";
+// Names are unique per run: the database behind these tests may outlive the process.
+const RUN = Date.now().toString(36);
+const N = (s: string) => `${s}-${RUN}`;
+const local = async (name: string) => (await docs.getRoom(SITE, N(name))) as InstanceType<typeof docs.DocRoom>;
+
+function textUpdate(base: Uint8Array | null, text: string): { update: Uint8Array; doc: Y.Doc } {
+  const doc = new Y.Doc();
+  if (base) Y.applyUpdate(doc, base);
+  const before = Y.encodeStateVector(doc);
+  doc.get("root", Y.XmlText).insert(0, text);
+  return { update: Y.encodeStateAsUpdate(doc, before), doc };
+}
+
+function textOf(state: Uint8Array): string {
+  const d = new Y.Doc();
+  Y.applyUpdate(d, state);
+  return d.get("root", Y.XmlText).toString();
+}
+
+beforeAll(async () => {
+  dataDir = await mkdtemp(join(tmpdir(), "world-docs-"));
+  process.env.WORLDS_DB = "sqlite";
+  process.env.DATABASE_URL = "docs-test.sqlite";
+  process.env.WORLDS_DATA_DIR = dataDir;
+  process.env.WORLDS_DEV = "1";
+  process.env.WORLDS_DOC_IDLE_MS = "200";
+  db = await import("../server/db");
+  await db.initDb();
+  docs = await import("../server/docs");
+});
+
+afterAll(async () => {
+  await docs.closeAllRooms();
+  await rm(dataDir, { recursive: true, force: true });
+});
+
+describe("doc room", () => {
+  test("a new document starts at epoch 1, seq 0, empty", async () => {
+    const room = await local("fresh");
+    const s = room.snapshotState();
+    expect(s.epoch).toBe(1);
+    expect(s.seq).toBe(0);
+    expect(textOf(s.state)).toBe("");
+  });
+
+  test("updates commit in order and subscribers hear ack then update", async () => {
+    const room = await local("order");
+    const frames: Record<string, unknown>[] = [];
+    const client = { send: (f: Record<string, unknown>) => frames.push(f) };
+    room.subscribe(client, "s1");
+    const a = textUpdate(null, "hello");
+    const seq1 = await room.submit(who, 1, a.update, client, "s1");
+    expect(seq1).toBe(1);
+    const b = textUpdate(room.snapshotState().state, " world");
+    const seq2 = await room.submit(who, 1, b.update, client, "s1");
+    expect(seq2).toBe(2);
+    expect(textOf(room.snapshotState().state)).toBe(" worldhello");
+    expect(frames.map((f) => f.op)).toEqual(["doc_ack", "doc_update", "doc_ack", "doc_update"]);
+    expect(frames[0]!.seq).toBe(1);
+    room.unsubscribe(client);
+  });
+
+  test("a stale epoch is a conflict carrying the current epoch", async () => {
+    const room = await local("epoch");
+    expect(() => room.submit(who, 7, textUpdate(null, "x").update, null, null)).toThrow(/stale epoch/);
+  });
+
+  test("an oversized update is refused before anything is queued", async () => {
+    const room = await local("big");
+    const huge = textUpdate(null, "x".repeat(600 * 1024)).update;
+    expect(() => room.submit(who, 1, huge, null, null)).toThrow(/exceeds/);
+    expect(room.seq).toBe(0);
+  });
+
+  test("garbage bytes are rejected and never touch the live document", async () => {
+    const room = await local("garbage");
+    await room.submit(who, 1, textUpdate(null, "keep").update, null, null);
+    const frames: Record<string, unknown>[] = [];
+    const client = { send: (f: Record<string, unknown>) => frames.push(f) };
+    room.subscribe(client, "s1");
+    await expect(room.submit(who, 1, new Uint8Array([1, 2, 3, 4, 5]), client, "s1")).rejects.toThrow(/not a valid Yjs update/);
+    expect(frames[0]!.op).toBe("doc_rejected");
+    expect(textOf(room.snapshotState().state)).toBe("keep");
+    expect(room.seq).toBe(1);
+    room.unsubscribe(client);
+  });
+
+  test("one bad update in a batch does not sink the good ones", async () => {
+    const room = await local("batch");
+    const good = room.submit(who, 1, textUpdate(null, "ok").update, null, null);
+    // Both settle in the same flush; attach the handler now so the rejection is never unhandled.
+    const bad = room.submit(who, 1, new Uint8Array([9, 9, 9]), null, null).then(() => null, (e: Error) => e);
+    expect(await good).toBe(1);
+    expect(await bad).toBeInstanceOf(Error);
+    expect(textOf(room.snapshotState().state)).toBe("ok");
+  });
+
+  test("a crash before any snapshot replays the committed log", async () => {
+    const room = await local("crash");
+    await room.submit(who, 1, textUpdate(null, "one").update, null, null);
+    await room.submit(who, 1, textUpdate(room.snapshotState().state, " two").update, null, null);
+    await docs.forgetRoom(SITE, N("crash"));
+    const again = await local("crash");
+    expect(again.seq).toBe(2);
+    expect(textOf(again.snapshotState().state)).toBe(" twoone");
+  });
+
+  test("a snapshot truncates the log and reloads identically", async () => {
+    const room = await local("snap");
+    for (let i = 0; i < 3; i++) await room.submit(who, 1, textUpdate(room.snapshotState().state, String(i)).update, null, null);
+    await room.snapshot();
+    const [rows] = await db.sql`SELECT count(*) AS n FROM doc_updates WHERE site = ${SITE} AND name = ${N("snap")}`;
+    expect(Number(rows.n)).toBe(0);
+    const before = textOf(room.snapshotState().state);
+    await docs.forgetRoom(SITE, N("snap"));
+    const again = await local("snap");
+    expect(again.seq).toBe(3);
+    expect(textOf(again.snapshotState().state)).toBe(before);
+  });
+
+  test("updatesSince hands back the tail, or null past the snapshot", async () => {
+    const room = await local("tail");
+    await room.submit(who, 1, textUpdate(null, "a").update, null, null);
+    await room.submit(who, 1, textUpdate(room.snapshotState().state, "b").update, null, null);
+    expect((await room.updatesSince(1, 1))!.length).toBe(1);
+    expect(await room.updatesSince(1, 2)).toEqual([]);
+    expect(await room.updatesSince(2, 0)).toBeNull();
+    await room.snapshot();
+    expect(await room.updatesSince(1, 0)).toBeNull();
+  });
+
+  test("rotation installs a compact state as a new epoch and resets subscribers", async () => {
+    const room = await local("rotate");
+    await room.submit(who, 1, textUpdate(null, "old").update, null, null);
+    const frames: Record<string, unknown>[] = [];
+    const client = { send: (f: Record<string, unknown>) => frames.push(f) };
+    room.subscribe(client, "s1");
+    const fresh = new Y.Doc();
+    fresh.get("root", Y.XmlText).insert(0, "compact");
+    const s = await room.rotate(who, 1, Y.encodeStateAsUpdate(fresh));
+    expect(s.epoch).toBe(2);
+    expect(s.seq).toBe(0);
+    expect(textOf(s.state)).toBe("compact");
+    expect(frames.at(-1)!.op).toBe("doc_reset");
+    expect(() => room.submit(who, 1, textUpdate(null, "x").update, null, null)).toThrow(/stale epoch/);
+    await docs.forgetRoom(SITE, N("rotate"));
+    const again = await local("rotate");
+    expect(again.epoch).toBe(2);
+    expect(textOf(again.snapshotState().state)).toBe("compact");
+    room.unsubscribe(client);
+  });
+
+  test("an idle room closes with a snapshot and a late subscriber gets a fresh, equal room", async () => {
+    const room = await local("idle");
+    const client = { send: () => {} };
+    room.subscribe(client, "s1");
+    await room.submit(who, 1, textUpdate(null, "bye").update, client, "s1");
+    room.unsubscribe(client);
+    await Bun.sleep(400);
+    const again = await local("idle");
+    expect(again).not.toBe(room);
+    expect(textOf(again.snapshotState().state)).toBe("bye");
+  });
+
+  test("deleting a document fails pending writes, tells subscribers, drops rows and frees the slot", async () => {
+    const room = await local("gone");
+    await room.submit(who, 1, textUpdate(null, "bye").update, null, null);
+    const frames: Record<string, unknown>[] = [];
+    room.subscribe({ send: (f: Record<string, unknown>) => frames.push(f) }, "s1");
+    const before = (await docs.listDocs(SITE)).length;
+    expect(await docs.deleteDoc(SITE, N("gone"))).toEqual({ deleted: true });
+    expect(frames.at(-1)).toMatchObject({ op: "error", id: "s1", error: { code: "not_found" } });
+    const [rows] = await db.sql`SELECT count(*) AS n FROM docs WHERE site = ${SITE} AND name = ${N("gone")}`;
+    expect(Number(rows.n)).toBe(0);
+    expect((await docs.listDocs(SITE)).length).toBe(before - 1);
+    expect(await docs.deleteDoc(SITE, N("gone"))).toEqual({ deleted: false });
+    const again = await local("gone");
+    expect(again.seq).toBe(0);
+    expect(textOf(again.snapshotState().state)).toBe("");
+  });
+
+  test("document names are validated and per-site quota is enforced", async () => {
+    await expect(docs.getRoom(SITE, "Bad Name")).rejects.toThrow(/bad document name/);
+    const list = await docs.listDocs(SITE);
+    expect(list.map((d) => d.name)).toContain(N("order"));
+  });
+});

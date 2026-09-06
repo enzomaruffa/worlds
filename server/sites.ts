@@ -3,6 +3,7 @@ import type { Identity } from "./identity";
 import { config } from "./config";
 import { WorldsError } from "./errors";
 import { asText, ILIKE, jsonArg, jsonArrayAppend, jsonArrayHas, jsonParam, NOW } from "./dialect";
+import { invalidatePolicies, NO_POLICIES, type SitePolicies } from "./policies";
 
 export interface SiteRow {
   name: string;
@@ -15,6 +16,7 @@ export interface SiteRow {
   visits: number;
   embed_pos: number[] | null;
   screenshot: string | null;
+  policies: SitePolicies | null;
   created_at: string;
   updated_at: string;
 }
@@ -75,7 +77,7 @@ export async function publishSiteDoc(site: string, created: boolean): Promise<vo
 export async function upsertSite(
   name: string,
   who: Identity,
-  meta: { description?: string; spa_fallback?: boolean; category?: string },
+  meta: { description?: string; spa_fallback?: boolean; category?: string; policies?: SitePolicies },
 ): Promise<{ created: boolean }> {
   requireDb();
   const category = CATEGORIES.has(meta.category ?? "") ? meta.category! : "misc";
@@ -85,8 +87,8 @@ export async function upsertSite(
   const [existing] = await sql`SELECT 1 AS present FROM sites WHERE name = ${name}`;
   const created = !existing;
   await sql.unsafe(
-    `INSERT INTO sites (name, description, creator, contributors, spa_fallback, category)
-     VALUES ($1, $2, $3, ${jsonArg("$4")}, $5, $6)
+    `INSERT INTO sites (name, description, creator, contributors, spa_fallback, category, policies)
+     VALUES ($1, $2, $3, ${jsonArg("$4")}, $5, $6, ${jsonArg("$8")})
      ON CONFLICT (name) DO UPDATE SET
        description = COALESCE(NULLIF($2, ''), sites.description),
        spa_fallback = $5,
@@ -95,12 +97,15 @@ export async function upsertSite(
          WHEN ${jsonArrayHas("sites.contributors", "$3")} THEN sites.contributors
          ELSE ${jsonArrayAppend("sites.contributors", "$3", "$4")}
        END,
+       policies = ${jsonArg("$8")},
        updated_at = ${NOW}`,
     [
       name, meta.description ?? "", who.handle, jsonParam([who.handle]),
       meta.spa_fallback ?? false, category, meta.category ?? "",
+      jsonParam(meta.policies ?? NO_POLICIES),
     ],
   );
+  invalidatePolicies(name);
   return { created };
 }
 

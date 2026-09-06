@@ -26,7 +26,7 @@ function bind(v: unknown): string | number | bigint | boolean | null | Uint8Arra
 
 // Columns that hold JSON. SQLite hands them back as text, but Postgres hands back
 // parsed values, so parse here to keep row shapes identical across backends.
-const JSON_COLUMNS = new Set(["data", "doc", "contributors", "embed_pos"]);
+const JSON_COLUMNS = new Set(["data", "doc", "contributors", "embed_pos", "policies"]);
 const BOOLEAN_COLUMNS = new Set(["spa_fallback"]);
 
 function revive(row: Record<string, unknown>): Record<string, unknown> {
