@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Who's Here · Worlds</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #09090b;
+    --surface: #0c0c0f;
+    --surface-2: #131318;
+    --border: #27272a;
+    --gold: #f59e0b;
+    --text: #e4e4e7;
+    --muted: #a1a1aa;
+    --good: #22c55e;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.5 "Space Grotesk", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: flex; flex-direction: column; min-height: 100vh;
+  }
+  ::selection { background: rgba(245, 158, 11, .35); }
+  a { color: inherit; }
+
+  header.topbar {
+    display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .6rem 1rem;
+    padding: .85rem 1.2rem; border-bottom: 1px solid var(--border); background: var(--surface); flex-shrink: 0;
+  }
+  .topbar-left { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+  .topbar-left h1 { font-size: 1.1rem; margin: 0; letter-spacing: .01em; }
+  .topbar-left h1 span { color: var(--gold); }
+  .headcount { display: flex; align-items: center; gap: .45rem; font-size: .82rem; color: var(--muted); }
+  .live-dot {
+    width: .5rem; height: .5rem; border-radius: 50%; background: var(--good); flex-shrink: 0;
+    box-shadow: 0 0 8px rgba(34, 197, 94, .6); animation: pulse 2s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+  .headcount b { color: var(--text); font-weight: 600; }
+  .who { font-size: .78rem; color: var(--muted); }
+  .who b { color: var(--text); font-weight: 600; }
+
+  .note {
+    margin: 0; padding: .55rem 1.2rem; font-size: .76rem; color: var(--muted);
+    border-bottom: 1px solid var(--border); background: var(--surface); flex-shrink: 0;
+  }
+
+  main { flex: 1; padding: 1.2rem; }
+
+  .grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 1rem;
+    max-width: 1200px; margin: 0 auto;
+  }
+
+  .card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: .7rem;
+    overflow: hidden; opacity: 1; transform: translateY(0); transition: opacity .25s ease, transform .25s ease;
+  }
+  .card.entering, .card.leaving { opacity: 0; transform: translateY(6px); }
+
+  .card-head {
+    display: flex; align-items: center; justify-content: space-between; gap: .5rem;
+    padding: .7rem .9rem; border-bottom: 1px solid var(--border); background: var(--surface-2);
+  }
+  .card-title {
+    font-weight: 600; font-size: .92rem; text-decoration: none; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap;
+  }
+  .card-title:hover { color: var(--gold); text-decoration: underline; }
+  .pill {
+    padding: .12rem .5rem; border-radius: 999px; background: var(--surface); border: 1px solid var(--border);
+    font-size: .7rem; color: var(--muted); white-space: nowrap; flex-shrink: 0;
+  }
+
+  .card-list { padding: .5rem; display: flex; flex-direction: column; gap: .1rem; }
+  .person {
+    display: flex; align-items: center; gap: .55rem; padding: .4rem .45rem; border-radius: .5rem;
+    opacity: 1; transform: translateX(0); transition: opacity .25s ease, transform .25s ease, background-color .2s ease;
+  }
+  .person:hover { background: var(--surface-2); }
+  .person.entering, .person.leaving { opacity: 0; transform: translateX(-6px); }
+  .avatar {
+    width: 1.7rem; height: 1.7rem; border-radius: 50%; flex-shrink: 0; display: flex;
+    align-items: center; justify-content: center; font-size: .74rem; font-weight: 700; color: #fff;
+  }
+  .person-name { font-size: .84rem; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .person-handle { font-size: .74rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .you-pill { margin-left: auto; color: var(--gold); border-color: var(--gold); background: rgba(245, 158, 11, .1); }
+
+  .empty {
+    max-width: 420px; margin: 3rem auto; text-align: center; color: var(--muted); font-size: .9rem;
+    display: flex; flex-direction: column; gap: .5rem; align-items: center;
+  }
+  .empty .empty-title { font-size: 1.05rem; color: var(--text); font-weight: 600; }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-left">
+    <h1>Who's <span>Here</span></h1>
+    <span class="headcount"><span class="live-dot"></span><b id="headcountNum">…</b> signed in</span>
+  </div>
+  <div class="who" id="whoami">…</div>
+</header>
+
+<p class="note">Presence updates the moment anyone connects or disconnects — except a lost connection (closed laptop, dead wifi), which lingers here until that socket actually times out and closes.</p>
+
+<main>
+  <div class="grid" id="grid" hidden></div>
+  <div class="empty" id="empty">
+    <div class="empty-title">It's quiet in here</div>
+    <div>You're the only one signed in across the instance right now.</div>
+  </div>
+</main>
+
+<script src="/worlds.js"></script>
+<script>
+(async function () {
+  "use strict";
+
+  // ---------- tiny DOM helpers ----------
+  const $ = (sel) => document.querySelector(sel);
+  function el(tag, attrs, ...children) {
+    attrs = attrs || {};
+    const e = document.createElement(tag);
+    if (attrs.class) e.className = attrs.class;
+    if (attrs.href != null) e.setAttribute("href", attrs.href);
+    if (attrs.target) e.target = attrs.target;
+    if (attrs.rel) e.rel = attrs.rel;
+    if (attrs.title != null) e.title = attrs.title;
+    if (attrs.text != null) e.textContent = attrs.text;
+    if (attrs.style) Object.assign(e.style, attrs.style);
+    for (const c of children) if (c != null) e.appendChild(typeof c === "string" ? document.createTextNode(c) : c);
+    return e;
+  }
+  function reportError(e, fallback) {
+    if (e instanceof worlds.WorldsError) worlds.toast(`${e.code}: ${e.message}`);
+    else worlds.toast(fallback || (e && e.message) || "something went wrong");
+    console.error(e);
+  }
+
+  // ---------- elements ----------
+  const whoamiEl = $("#whoami");
+  const headcountNumEl = $("#headcountNum");
+  const gridEl = $("#grid");
+  const emptyEl = $("#empty");
+
+  // ---------- identity ----------
+  let me = null;
+  try {
+    me = await worlds.me();
+    whoamiEl.textContent = "";
+    whoamiEl.append("signed in as ", el("b", { text: me.name || me.handle }), ` (@${me.handle})`);
+  } catch (e) {
+    reportError(e, "could not load identity");
+  }
+
+  // ---------- site URL map (for linking world cards) ----------
+  function apiHeaders() {
+    const h = { "x-worlds-csrf": "1" };
+    const m = location.pathname.match(/^\/app\/([^/]+)/);
+    if (m) h["x-worlds-site"] = m[1];
+    return h;
+  }
+
+  const siteUrls = new Map(); // site name -> live URL
+  async function refreshSiteUrls() {
+    try {
+      const res = await fetch("/api/v1/sites?limit=200", { headers: apiHeaders() });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) return;
+      for (const s of data.items || []) siteUrls.set(s.name, s.url);
+    } catch {
+      // best-effort — the relative fallback below still links somewhere sensible
+    }
+  }
+  await refreshSiteUrls();
+  setInterval(refreshSiteUrls, 30000); // pick up newly-deployed sites
+
+  function siteHref(site) {
+    if (siteUrls.has(site)) return siteUrls.get(site);
+    const pathMode = location.pathname.match(/^\/app\/([^/]+)/);
+    if (pathMode) return site === "home" ? "/" : `../${site}/`;
+    const labels = location.hostname.split(".");
+    const base = labels.length > 1 ? labels.slice(1).join(".") : location.hostname;
+    const port = location.port ? `:${location.port}` : "";
+    return site === "home" ? `${location.protocol}//${base}${port}` : `${location.protocol}//${site}.${base}${port}`;
+  }
+
+  // ---------- card / row rendering, keyed so arrivals & departures can animate ----------
+  const cards = new Map(); // site -> { cardEl, listEl, countEl, rows: Map<handle, rowEl> }
+
+  function personRow(member) {
+    const isMe = !!(me && member.handle === me.handle);
+    const initial = (member.name || member.handle || "?").trim().slice(0, 1).toUpperCase();
+    const row = el(
+      "div",
+      { class: "person entering" },
+      el("span", { class: "avatar", text: initial, style: { background: worlds.colorFor(member.handle) } }),
+      el("span", { class: "person-name", text: member.name || member.handle }),
+      el("span", { class: "person-handle", text: "@" + member.handle }),
+      isMe ? el("span", { class: "pill you-pill", text: "you" }) : null,
+    );
+    return row;
+  }
+
+  function ensureCard(site) {
+    let c = cards.get(site);
+    if (c) return c;
+    const listEl = el("div", { class: "card-list" });
+    const countEl = el("span", { class: "pill", text: "0" });
+    const cardEl = el(
+      "div",
+      { class: "card entering" },
+      el(
+        "div",
+        { class: "card-head" },
+        el("a", { class: "card-title", href: siteHref(site), target: "_blank", rel: "noopener", text: site }),
+        countEl,
+      ),
+      listEl,
+    );
+    gridEl.appendChild(cardEl);
+    requestAnimationFrame(() => requestAnimationFrame(() => cardEl.classList.remove("entering")));
+    c = { cardEl, listEl, countEl, rows: new Map() };
+    cards.set(site, c);
+    return c;
+  }
+
+  function removeCard(site) {
+    const c = cards.get(site);
+    if (!c) return;
+    cards.delete(site);
+    c.cardEl.classList.add("leaving");
+    setTimeout(() => c.cardEl.remove(), 260);
+  }
+
+  function render(members) {
+    const grouped = new Map(); // site -> Map<handle, member>
+    for (const m of members || []) {
+      if (!m || !m.site || !m.handle) continue;
+      if (!grouped.has(m.site)) grouped.set(m.site, new Map());
+      grouped.get(m.site).set(m.handle, m);
+    }
+
+    const total = (members || []).length;
+    headcountNumEl.textContent = total;
+
+    if (total <= 1) {
+      for (const site of [...cards.keys()]) removeCard(site);
+      gridEl.hidden = true;
+      emptyEl.hidden = false;
+      return;
+    }
+    emptyEl.hidden = true;
+    gridEl.hidden = false;
+
+    for (const site of [...cards.keys()]) if (!grouped.has(site)) removeCard(site);
+
+    const siteNames = [...grouped.keys()].sort((a, b) => a.localeCompare(b));
+    for (const site of siteNames) {
+      const membersMap = grouped.get(site);
+      const c = ensureCard(site);
+      c.countEl.textContent = membersMap.size;
+
+      for (const handle of [...c.rows.keys()]) {
+        if (membersMap.has(handle)) continue;
+        const row = c.rows.get(handle);
+        c.rows.delete(handle);
+        row.classList.add("leaving");
+        setTimeout(() => row.remove(), 260);
+      }
+      for (const [handle, member] of membersMap) {
+        if (c.rows.has(handle)) continue;
+        const row = personRow(member);
+        c.listEl.appendChild(row);
+        requestAnimationFrame(() => requestAnimationFrame(() => row.classList.remove("entering")));
+        c.rows.set(handle, row);
+      }
+      gridEl.appendChild(c.cardEl); // keep DOM order matching the sorted site list
+    }
+  }
+
+  // ---------- boot: subscribe to the instance-wide roster ----------
+  let unsubscribe = null;
+  try {
+    unsubscribe = worlds.ws.platform((members) => {
+      try { render(members); } catch (e) { console.error(e); }
+    });
+  } catch (e) {
+    reportError(e, "could not subscribe to platform presence");
+  }
+  window.addEventListener("beforeunload", () => { if (unsubscribe) unsubscribe(); });
+})();
+</script>
+</body>
+</html>
