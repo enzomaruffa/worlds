@@ -22,6 +22,7 @@ interface Sub {
   onActorEvent?: (from: any, payload: any) => void; // actors: a peer's one-off event
   onActorLeave?: (ids: string[]) => void; // actors: members who left the zone
   onDoc?: (frame: any) => void; // doc: every doc_* frame, undecoded
+  onPlatform?: (members: any[]) => void; // platform: instance-wide roster
   onError?: (error: { code: string; message: string }) => void;
 }
 
@@ -76,6 +77,8 @@ export const sock = {
         sub.handler({ type: f.type, doc: f.doc });
       } else if (f.op === "msg") {
         sub.handler({ payload: f.payload, from: f.from, at: f.at });
+      } else if (f.op === "platform" && sub.onPlatform) {
+        sub.onPlatform(f.members || []);
       } else if (f.op === "presence" && sub.onPresence) {
         sub.onPresence(f.members);
       } else if (f.op === "actors_snapshot" && sub.onSnapshot) {

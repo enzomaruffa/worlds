@@ -474,6 +474,34 @@ describe("realtime", () => {
     expect(pong.at as number).toBeGreaterThanOrEqual(before);
   });
 
+  test("platform presence spans sites and updates when a socket joins", async () => {
+    const watcher = new WebSocket(`ws://localhost:${PORT}/api/v1/socket`, "worlds.v1");
+    const frames: any[] = [];
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("no platform frame within 3s")), 3000);
+      watcher.onopen = () => watcher.send(JSON.stringify({ op: "sub", id: "pf", kind: "platform" }));
+      watcher.onmessage = (m) => {
+        const f = JSON.parse(String(m.data));
+        if (f.op === "platform") { frames.push(f); clearTimeout(timer); resolve(); }
+      };
+    });
+    // A second socket on a different site must show up as its own row.
+    const other = new WebSocket(`ws://localhost:${PORT}/api/v1/socket`, {
+      protocols: ["worlds.v1"],
+      headers: { host: `${S1}.worlds.localhost` },
+    } as never);
+    const grew = await new Promise<any>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("roster never grew")), 3000);
+      watcher.onmessage = (m) => {
+        const f = JSON.parse(String(m.data));
+        if (f.op === "platform" && f.members.some((x: any) => x.site === S1)) { clearTimeout(timer); resolve(f); }
+      };
+    });
+    other.close(); watcher.close();
+    expect(frames[0].id).toBe("pf");
+    expect(grew.members.some((x: any) => x.site === S1 && x.handle === "dev")).toBe(true);
+  });
+
   test("db subscription receives create events over the socket", async () => {
     const ws = new WebSocket(`ws://localhost:${PORT}/api/v1/socket`, "worlds.v1");
     const got: Record<string, unknown>[] = [];
