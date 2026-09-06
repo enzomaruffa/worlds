@@ -12,6 +12,7 @@ import * as docs from "./docs";
 import * as uploads from "./uploads";
 import * as ai from "./ai";
 import { notifySlack } from "./notify";
+import * as connect from "./connect";
 import { universe, universeEntry, creator } from "./universe";
 import { resolveProfile, updateProfile, overlayCreators } from "./profile";
 import { handleMcp } from "./mcp";
@@ -311,6 +312,12 @@ async function api(req: Request, url: URL, site: string): Promise<Response> {
   }
 
   if (p[0] === "notify" && p[1] === "slack" && method === "POST") return notifySlack(req, site);
+
+  if (p[0] === "connect") {
+    if (p.length === 1 && method === "GET") return connect.list(req, site);
+    if (p.length === 3 && p[2] === "tools" && method === "GET") return connect.tools(req, site, p[1]!);
+    if (p.length === 3 && p[2] === "call" && method === "POST") return connect.call(req, site, p[1]!);
+  }
   if (p[0] === "universe" && method === "GET") return universe();
   if (p[0] === "creators" && p[1] && method === "GET") return creator(p[1]);
   if (p[0] === "beacon" && p[1] === "visit" && method === "POST") {
