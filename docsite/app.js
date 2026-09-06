@@ -106,6 +106,7 @@ async function main() {
     safe("idle", initIdle),
     safe("utils", initUtils),
     safe("notify", initNotify),
+    safe("connect", initConnect),
     safe("errors", initErrors),
     safe("how", initHow),
   ]);
@@ -683,6 +684,19 @@ async function initNotify() {
     if (!target) { show(out, "name a channel first (e.g. #general)"); return; }
     show(out, `posting to ${target}…`);
     try { show(out, await worlds.notify.slack(target, $("slackText").value), "ok"); } catch (e) { fail(out, e); }
+  };
+}
+
+// ---- connectors ---------------------------------------------------------------
+async function initConnect() {
+  $("connectList").onclick = async () => {
+    const out = $("connectOut");
+    show(out, "asking…");
+    try {
+      const res = await worlds.connect.list();
+      if (!res.items.length) { show(out, "no connectors granted to this site — an operator adds them in WORLDS_CONNECTORS"); return; }
+      show(out, res.items.map((c) => `${c.name}: ${c.tools.join(", ")}`).join("\n"), "ok");
+    } catch (e) { fail(out, e); }
   };
 }
 

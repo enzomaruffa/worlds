@@ -27,6 +27,9 @@ worlds.ws.channel: <T = any>(name: string) => Channel<T>
 worlds.ws.platform: (handler: (members: PlatformMember[]) => void) => () => void
 worlds.ws.ping: () => Promise<Pong>
 worlds.notify.slack: (target: string, text: string) => Promise<any>
+worlds.connect.list: () => Promise<{ items: ConnectorInfo[]; next_cursor: null; }>
+worlds.connect.tools: (name: string) => Promise<{ items: ToolInfo[]; next_cursor: null; }>
+worlds.connect.call: (name: string, tool: string, args?: Record<string, unknown>) => Promise<any>
 worlds.room: <T extends Record<string, any> = any>(name: string, opts?: RoomOptions<T>) => Room<T>
 worlds.rooms: <T extends Record<string, any> = any>(name: string, opts?: RoomsOptions<T>) => Hall<T>
 worlds.actors: <T = any>(name: string, opts?: ActorsOptions<T>) => Actors<T>
@@ -840,6 +843,9 @@ Quotas are floors: they can go up, never down for existing behavior.
 | `aiInputChars` | 200000 |
 | `wsPayloadBytes` | 16 KB |
 | `slackPerUserPerDay` | 50 |
+| `connectArgsBytes` | 64 KB |
+| `connectCallsPerUserPerDay` | 100 |
+| `connectCallsPerSitePerHour` | 200 |
 
 Reserved site names (cannot be deployed to): `api`, `www`, `home`, `hello`, `assets`, `uploads`, `list`, `mcp`, `docs`, `u`.
 
@@ -882,6 +888,9 @@ The SDK is a thin client over these endpoints (`spec/world-v1.yaml`, frozen and 
 | GET | `/api/v1/uploads` | list uploads |
 | DELETE | `/api/v1/uploads/{name}` | delete upload |
 | POST | `/api/v1/notify/slack` | capped, sender-stamped Slack message |
+| GET | `/api/v1/connect` | connectors this site may reach |
+| GET | `/api/v1/connect/{name}/tools` | allowed tools and their input schemas |
+| POST | `/api/v1/connect/{name}/call` | invoke one tool under the platform credential |
 | GET | `/api/v1/universe` | homepage payload |
 | GET | `/api/v1/creators/{handle}` | creator page data |
 | POST | `/api/v1/beacon/visit` | sendBeacon page view, always 204 |
