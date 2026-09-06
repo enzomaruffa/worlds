@@ -1436,3 +1436,36 @@ describe("connectors", () => {
     expect((await res.json()).error.code).toBe("invalid_request");
   });
 });
+
+// The built SDK is browser code, but the socket half only needs WebSocket + a location,
+// so it can be exercised against the real server. This covers sock.request's pending map
+// and the lazy-connect path — the wire op is tested above, this is the client half.
+describe("sdk socket over the real server", () => {
+  test("worlds.ws.ping() resolves on a page that has only just loaded", async () => {
+    const js = await Bun.file(new URL("../sdk/worlds.js", import.meta.url)).text();
+    const sandbox: Record<string, unknown> = {
+      WebSocket,
+      location: { protocol: "http:", host: `localhost:${PORT}`, pathname: "/", href: `http://localhost:${PORT}/` },
+      performance,
+      setTimeout, clearTimeout, setInterval, clearInterval,
+      fetch: () => Promise.reject(new Error("no http in this sandbox")),
+      document: undefined,
+      addEventListener: () => {},
+      navigator: { sendBeacon: () => true },
+      console,
+    };
+    const globalsObj: Record<string, unknown> = {};
+    sandbox.globalThis = globalsObj;
+    const run = new Function(...Object.keys(sandbox), `${js}\nreturn globalThis.worlds;`);
+    const w = run(...Object.values(sandbox)) as any;
+    // First call on a cold socket: it is still CONNECTING, and must wait rather than fail.
+    const pong = await w.ws.ping();
+    expect(typeof pong.rtt).toBe("number");
+    expect(pong.rtt).toBeGreaterThanOrEqual(0);
+    expect(typeof pong.serverAt).toBe("number");
+    expect(typeof pong.skew).toBe("number");
+    // And again on a warm one.
+    const second = await w.ws.ping();
+    expect(typeof second.rtt).toBe("number");
+  });
+});
