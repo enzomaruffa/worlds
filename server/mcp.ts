@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { WorldsError, asWorldsError } from "./errors";
 import { identityFrom, type Identity } from "./identity";
 import { deployFileMap } from "./deploy";
+import { deleteSite } from "./remove";
 import { listSites, getSiteOr404, publicSite } from "./sites";
 import { universeEntry } from "./universe";
 import * as dbapi from "./dbapi";
@@ -80,6 +81,13 @@ const TOOLS: Record<string, Tool> = {
     async run(_args, who) {
       const sites = await listSites({ creator: who.handle, limit: 100 });
       return { items: sites.map(publicSite) };
+    },
+  },
+  delete_site: {
+    description: "Delete a site you own. Its files, uploads, collections, documents and deploy log are removed and the name is free again. Irreversible.",
+    inputSchema: obj({ name: { type: "string", description: "the site name" } }, ["name"]),
+    async run(args, who) {
+      return deleteSite(String(args.name ?? ""), who);
     },
   },
   db_query: {

@@ -141,6 +141,38 @@ describe("hosting", () => {
 
     expect((await deploy(site, { "index.html": "<h1>v2</h1>" })).status).toBe(200); // owner still can
   });
+
+  test("the owner can delete a site — files, uploads, data and the registry entry go, the name is free again", async () => {
+    const site = `${S1}-gone`;
+    expect((await deploy(site, { "index.html": "<h1>gone</h1>" })).status).toBe(200);
+    expect((await req("POST", "/api/v1/db/things", { body: { a: 1 }, site })).status).toBe(200);
+    const up = new FormData();
+    up.set("file", new Blob(["x"]), "x.txt");
+    expect((await req("POST", "/api/v1/uploads", { form: up, site })).status).toBe(200);
+    expect((await req("GET", `/api/v1/db/sites/site_${site}?site=home`, { site: "home" })).status).toBe(200);
+
+    const intruder = await req("DELETE", `/api/v1/sites/${site}`, { site: "home", headers: { "x-auth-request-email": "intruder@example.com" } });
+    expect(intruder.status).toBe(403);
+
+    const res = await req("DELETE", `/api/v1/sites/${site}`, { site: "home" });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ deleted: true, site });
+
+    expect((await req("GET", "/", { site })).status).toBe(404);
+    expect((await req("GET", `/api/v1/sites/${site}`, { site: "home" })).status).toBe(404);
+    expect((await req("GET", `/api/v1/sites/${site}/deploys`, { site: "home" })).status).toBe(404);
+    expect((await req("GET", `/u/${site}/x.txt`, { site: "home" })).status).toBe(404);
+    expect((await (await req("GET", `/api/v1/db/things?site=${site}`, { site: "home" })).json()).items).toEqual([]);
+    expect((await req("GET", `/api/v1/db/sites/site_${site}?site=home`, { site: "home" })).status).toBe(404);
+
+    const again = await (await deploy(site, { "index.html": "<h1>again</h1>" })).json();
+    expect(again.created).toBe(true); // a fresh site, not an overwrite
+  });
+
+  test("reserved and unknown names cannot be deleted", async () => {
+    expect((await req("DELETE", "/api/v1/sites/api", { site: "home" })).status).toBe(409);
+    expect((await req("DELETE", `/api/v1/sites/${S1}-never-deployed`, { site: "home" })).status).toBe(404);
+  });
 });
 
 describe("identity", () => {
@@ -672,7 +704,7 @@ describe("mcp", () => {
     const list = await (await rpc("tools/list", {})).json();
     const names = list.result.tools.map((t: { name: string }) => t.name);
     expect(names).toEqual(
-      expect.arrayContaining(["deploy_site", "list_sites", "get_site", "my_sites", "db_query", "read_docs", "search_docs"]),
+      expect.arrayContaining(["deploy_site", "delete_site", "list_sites", "get_site", "my_sites", "db_query", "read_docs", "search_docs"]),
     );
   });
 
@@ -688,6 +720,15 @@ describe("mcp", () => {
     expect(r.result.content[0].text).toContain(site);
     const page = await req("GET", "/", { site });
     expect(await page.text()).toContain(site);
+  });
+
+  test("tools/call delete_site removes a site the caller owns", async () => {
+    const site = `${S1}-mcp-gone`;
+    expect((await deploy(site)).status).toBe(200);
+    const r = await (await rpc("tools/call", { name: "delete_site", arguments: { name: site } })).json();
+    expect(r.result.isError).toBeFalsy();
+    expect(r.result.content[0].text).toContain('"deleted": true');
+    expect((await req("GET", "/", { site })).status).toBe(404);
   });
 
   test("tools/call surfaces errors as isError, reserved names included", async () => {

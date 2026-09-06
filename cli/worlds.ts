@@ -110,6 +110,15 @@ async function cmdOpen(siteArg?: string): Promise<void> {
   console.log(`✓ ${out.url}`);
 }
 
+async function cmdDelete(siteArg?: string, flag?: string): Promise<void> {
+  const site = siteArg ?? siteNameFromCwd(process.cwd());
+  if (flag !== "--yes") {
+    fail(`this removes ${site}'s files, uploads, data and documents for good — re-run as \`worlds delete ${site} --yes\``);
+  }
+  const out = await api("DELETE", `/api/v1/sites/${site}`);
+  console.log(`✓ deleted ${out.site} — the name is free again`);
+}
+
 async function cmdLogin(): Promise<void> {
   if (API.includes("localhost") || API.includes("127.0.0.1")) {
     console.log(`✓ local dev (${API}) — no login needed; you are dev@localhost`);
@@ -136,10 +145,11 @@ or create an Access service token and save it:
   EOF`);
 }
 
-const [cmd, arg] = process.argv.slice(2);
+const [cmd, arg, flag] = process.argv.slice(2);
 switch (cmd) {
   case "init": await cmdInit(arg); break;
   case "deploy": await cmdDeploy(arg); break;
+  case "delete": await cmdDelete(arg, flag); break;
   case "list": await cmdList(); break;
   case "open": await cmdOpen(arg); break;
   case "login": await cmdLogin(); break;
@@ -150,6 +160,7 @@ switch (cmd) {
   worlds deploy [site]   tar the folder, ship it (defaults to folder name)
   worlds open [site]     open the site in a browser
   worlds list            all worlds
+  worlds delete <site> --yes   remove a site you own — files, uploads, data, documents
   worlds login           CLI auth setup
 
 server: ${API} (override with WORLDS_URL)`);

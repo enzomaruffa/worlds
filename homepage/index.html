@@ -66,6 +66,8 @@
   .meta .by { color:var(--soft); }
   .meta .spacer { margin-left:auto; }
   .meta .visits { color:var(--soft); }
+  .meta .del { margin-left:6px; border:1px solid var(--rule); background:transparent; color:var(--mute); border-radius:6px; padding:1px 7px; cursor:pointer; font:600 11px var(--disp); }
+  .meta .del:hover { color:#f87171; border-color:#f87171; }
   .meta .prof { cursor:pointer; }
   .meta .by.prof:hover { color:var(--gold); }
   .meta img.prof:hover { border-color:var(--gold); }
@@ -206,6 +208,12 @@
 
   worlds.db.collection("sites").subscribe((ev) => {
     if (!ev.doc || !ev.doc.name) return;
+    if (ev.type === "delete") {
+      seen.delete(ev.doc.name);
+      sites = sites.filter((s) => s.name !== ev.doc.name);
+      render();
+      return;
+    }
     const existing = seen.get(ev.doc.name);
     if (existing) Object.assign(existing, ev.doc);
     else { const fresh = { ...ev.doc }; seen.set(ev.doc.name, fresh); sites.push(fresh); }
@@ -227,8 +235,30 @@
   q.addEventListener("input", render);
   sortSel.addEventListener("change", render);
 
-  // clicking a creator's avatar/handle on a card opens their profile, not the site.
-  document.getElementById("grid").addEventListener("click", (e) => {
+  // Only your own cards carry the ✕; the server refuses everyone else anyway.
+  let me = null;
+  worlds.me().then((m) => { me = m; render(); }).catch(() => {});
+
+  // clicking a creator's avatar/handle on a card opens their profile, not the site;
+  // the ✕ deletes the world after a confirmation.
+  document.getElementById("grid").addEventListener("click", async (e) => {
+    const del = e.target.closest(".del");
+    if (del) {
+      e.preventDefault();
+      e.stopPropagation();
+      const name = del.dataset.site;
+      if (!confirm(`Delete "${name}"? Its files, uploads, data and documents are removed for good.`)) return;
+      const res = await fetch(`/api/v1/sites/${encodeURIComponent(name)}`, { method: "DELETE", headers: { "x-worlds-csrf": "1" } });
+      if (!res.ok) {
+        const err = (await res.json().catch(() => ({}))).error || {};
+        worlds.toast(`couldn't delete: ${err.message || res.status}`);
+        return;
+      }
+      sites = sites.filter((s) => s.name !== name);
+      render();
+      worlds.toast(`deleted ${name}`);
+      return;
+    }
     const pf = e.target.closest(".prof");
     if (!pf) return;
     e.preventDefault();
@@ -257,6 +287,7 @@
           <span class="by prof" data-h="${esc(s.creator.handle)}">@${esc(s.creator.handle)}</span>
           <span class="spacer"></span>
           <span class="visits">▲ ${s.visits_30d ?? 0}</span>
+          ${me && s.creator.handle === me.handle ? `<button class="del" data-site="${esc(s.name)}" title="delete this world">✕</button>` : ""}
         </div>
       </div>
     </a>`;
