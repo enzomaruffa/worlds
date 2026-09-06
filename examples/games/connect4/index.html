@@ -212,17 +212,24 @@
   }
   .cell.r .disc-fill { background: radial-gradient(circle at 35% 30%, #ff7a7e, var(--red-2)); }
   .cell.y .disc-fill { background: radial-gradient(circle at 35% 30%, #ffe27a, var(--yellow-2)); }
-  .cell .disc-fill { animation: drop .26s cubic-bezier(.34,1.2,.64,1); }
+  /* Only the disc that just landed falls. Applied per-cell and cleared on animationend,
+     so a re-render never re-drops the discs already on the board. */
+  .cell.dropping .disc-fill { animation: drop .26s cubic-bezier(.34,1.2,.64,1); }
   @keyframes drop {
     0% { transform: translateY(-560%); }
     80% { transform: translateY(4%); }
     100% { transform: translateY(0); }
   }
+  /* The win highlight pulses the ring, not `transform` — so it composes with the drop
+     instead of overriding it. */
   .cell.win .disc-fill {
     box-shadow: 0 0 0 3px var(--win), 0 0 16px rgba(110,231,165,.7), inset 0 2px 4px rgba(255,255,255,.25);
     animation: pulse 1.1s ease-in-out infinite;
   }
-  @keyframes pulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.08); } }
+  @keyframes pulse {
+    0%,100% { box-shadow: 0 0 0 3px var(--win), 0 0 10px rgba(110,231,165,.55), inset 0 2px 4px rgba(255,255,255,.25); }
+    50%     { box-shadow: 0 0 0 4px var(--win), 0 0 22px rgba(110,231,165,.95), inset 0 2px 4px rgba(255,255,255,.25); }
+  }
 
   .gamefoot { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin-top: 16px; }
   .note { text-align: center; color: var(--muted); font-size: 13px; margin: 12px 0 0; min-height: 18px; }
@@ -388,7 +395,7 @@
     let presence = [];             // [{handle,name}] — the table roster
     let presenceLoaded = false;    // has the presence roster reported at least once?
     let busy = false;              // re-entrancy guard for writes
-    let lastRenderSig = "";        // dedupe identical renders (for drop animation control)
+    let shownBoard = [];           // what the DOM currently shows, to diff against
     let prevDiscs = 0, prevPhase = null; // for drop/win sound + confetti transitions
 
     // ── Sound — a tiny WebAudio synth (no asset files; resumes on first input) ──
@@ -598,7 +605,7 @@
         // if both seats now filled, start playing
         if (next.players.p1 && next.players.p2) startPlaying(next);
         const ok = await writeDoc(next);
-        if (!ok) { toast("Someone grabbed it — syncing…"); await refetch(); }
+        if (!ok) { toast("Couldn't save that — syncing…"); await refetch(); }
       } finally { busy = false; }
     }
 
@@ -680,7 +687,7 @@
         }
 
         const ok = await writeDoc(next);
-        if (!ok) { toast("Move conflict — re-syncing…"); await refetch(); }
+        if (!ok) { toast("Couldn't save that move — re-syncing…"); await refetch(); }
       } finally { busy = false; }
     }
 
@@ -826,28 +833,48 @@
       }
     }
 
+    // The grid is built once and then patched cell by cell. Rebuilding it would recreate
+    // every .disc-fill, and a fresh element restarts its animation — so the whole board
+    // would re-drop on every move.
+    function buildBoard() {
+      boardEl.innerHTML = "";
+      for (let i = 0; i < ROWS * COLS; i++) {
+        boardEl.appendChild(document.createElement("div")).className = "cell";
+      }
+      shownBoard = new Array(ROWS * COLS).fill(0);
+    }
+
     function renderBoard() {
-      const sig = game.board.join(",") + "|" + (game.line ? game.line.join(",") : "");
+      if (boardEl.children.length !== ROWS * COLS || shownBoard.length !== ROWS * COLS) buildBoard();
       const winSet = new Set(game.line || []);
-      // rebuild only when board content changes (preserve / trigger drop animation on new discs)
-      if (sig !== lastRenderSig) {
-        boardEl.innerHTML = "";
-        for (let r = 0; r < ROWS; r++) {
-          for (let c = 0; c < COLS; c++) {
-            const i = idx(r, c);
-            const v = game.board[i];
-            const cell = document.createElement("div");
-            cell.className = "cell" + (v === 1 ? " r" : v === 2 ? " y" : "") + (winSet.has(i) ? " win" : "");
-            if (v) { const f = document.createElement("div"); f.className = "disc-fill"; cell.appendChild(f); }
-            boardEl.appendChild(cell);
+      const changed = [];
+      let landed = 0;
+      for (let i = 0; i < ROWS * COLS; i++) {
+        const v = game.board[i];
+        if (v !== shownBoard[i]) {
+          changed.push(i);
+          if (v && !shownBoard[i]) landed++;
+        }
+      }
+      // One new disc is a move worth animating. Several at once is a join or a replay
+      // arriving in a single sync — those should already be sitting on the board.
+      const animate = landed === 1;
+      for (const i of changed) {
+        const cell = boardEl.children[i];
+        const v = game.board[i];
+        cell.classList.toggle("r", v === 1);
+        cell.classList.toggle("y", v === 2);
+        cell.textContent = "";
+        if (v) {
+          cell.appendChild(document.createElement("div")).className = "disc-fill";
+          if (animate) {
+            cell.classList.add("dropping");
+            cell.addEventListener("animationend", () => cell.classList.remove("dropping"), { once: true });
           }
         }
-        lastRenderSig = sig;
-      } else {
-        // just refresh win highlight without re-animating
-        const cells = boardEl.children;
-        for (let i = 0; i < cells.length; i++) cells[i].classList.toggle("win", winSet.has(i));
+        shownBoard[i] = v;
       }
+      for (let i = 0; i < ROWS * COLS; i++) boardEl.children[i].classList.toggle("win", winSet.has(i));
     }
 
     function renderColBtns() {
@@ -959,7 +986,7 @@
     function mountRoom(room) {
       if (unsubRoom) { try { unsubRoom(); } catch (_) {} }
       ROOM = room;
-      game = null; presence = []; presenceLoaded = false; lastRenderSig = "";
+      game = null; presence = []; presenceLoaded = false; shownBoard = [];
       location.hash = room.code;
       $("tableCode").textContent = "code " + room.code;
       $("inviteLink").value = location.origin + location.pathname + "#" + room.code;
