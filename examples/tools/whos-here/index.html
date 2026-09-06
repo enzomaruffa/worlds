@@ -173,7 +173,7 @@
   const siteUrls = new Map(); // site name -> live URL
   async function refreshSiteUrls() {
     try {
-      const res = await fetch("/api/v1/sites?limit=200", { headers: apiHeaders() });
+      const res = await fetch("/api/v1/sites?limit=100", { headers: apiHeaders() });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) return;
       for (const s of data.items || []) siteUrls.set(s.name, s.url);
