@@ -845,6 +845,7 @@ The SDK is a thin client over these endpoints (`spec/world-v1.yaml`, frozen and 
 | GET | `/api/v1/sites` | site directory |
 | GET | `/api/v1/sites/{name}` | one site |
 | GET | `/api/v1/sites/{name}/deploys` | deploy history |
+| GET | `/api/v1/deploys` | every deploy, newest first (?limit, ?cursor) |
 | GET | `/api/v1/db` | list collections |
 | POST | `/api/v1/db/{collection}` | create document |
 | GET | `/api/v1/db/{collection}` | list documents (filter, sort, cursor) |

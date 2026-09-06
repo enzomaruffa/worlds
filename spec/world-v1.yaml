@@ -11,6 +11,7 @@ paths:
   /api/v1/sites: { get: { summary: site directory } }
   /api/v1/sites/{name}: { get: { summary: one site } }
   /api/v1/sites/{name}/deploys: { get: { summary: deploy history } }
+  /api/v1/deploys: { get: { summary: "every deploy, newest first (?limit, ?cursor)" } }
   /api/v1/db: { get: { summary: list collections } }
   /api/v1/db/{collection}:
     post: { summary: create document }

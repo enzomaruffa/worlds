@@ -115,3 +115,12 @@ export const asText = (param: string): string => (isSqlite ? param : `${param}::
 export function timestampEq(col: string, param: string): string {
   return isSqlite ? `${col} = ${param}` : `date_trunc('milliseconds', ${col}) = ${param}::timestamptz`;
 }
+
+// Keyset page on a newest-first timestamp column. The id tiebreak is what makes it a
+// keyset and not a guess: rows sharing a millisecond would otherwise be skipped or
+// repeated across pages.
+export function timestampKeysetBefore(col: string, idCol: string, tsParam: string, idParam: string): string {
+  const ts = isSqlite ? tsParam : `${tsParam}::timestamptz`;
+  const c = isSqlite ? col : `date_trunc('milliseconds', ${col})`;
+  return `(${c} < ${ts} OR (${c} = ${ts} AND ${idCol} < ${idParam}))`;
+}

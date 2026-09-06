@@ -373,6 +373,23 @@ describe("platform surfaces", () => {
     expect(hist.items[0].by.handle).toBe("dev");
   });
 
+  test("global deploy feed spans sites and pages by cursor", async () => {
+    const all = await (await req("GET", "/api/v1/deploys", { site: "home" })).json();
+    expect(all.items.length).toBeGreaterThanOrEqual(2);
+    expect(all.items[0].site).toBeTruthy();
+    expect(all.items[0].by.handle).toBe("dev");
+    // newest first
+    const times = all.items.map((d: { at: string }) => new Date(d.at).getTime());
+    expect(times).toEqual([...times].sort((a: number, b: number) => b - a));
+
+    const first = await (await req("GET", "/api/v1/deploys?limit=1", { site: "home" })).json();
+    expect(first.items.length).toBe(1);
+    expect(first.next_cursor).toBeTruthy();
+    const second = await (await req("GET", `/api/v1/deploys?limit=1&cursor=${encodeURIComponent(first.next_cursor)}`, { site: "home" })).json();
+    expect(second.items.length).toBe(1);
+    expect(second.items[0].deploy_id).not.toBe(first.items[0].deploy_id);
+  });
+
   test("universe entries carry seeded layout", async () => {
     const u = await (await req("GET", "/api/v1/universe", { site: "home" })).json();
     const t1 = u.items.find((s: { name: string }) => s.name === S1);
