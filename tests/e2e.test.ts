@@ -1427,6 +1427,24 @@ describe("connectors", () => {
     expect((await res.json()).error.code).toBe("payload_too_large");
   });
 
+  test("the SDK hands back the tool's result, not the HTTP envelope", async () => {
+    const js = await Bun.file(new URL("../sdk/worlds.js", import.meta.url)).text();
+    const sandbox: Record<string, unknown> = {
+      WebSocket,
+      location: { protocol: "http:", host: `localhost:${CPORT}`, pathname: "/", href: `${CB}/` },
+      performance, setTimeout, clearTimeout, setInterval, clearInterval,
+      fetch: (url: string, init: RequestInit = {}) =>
+        fetch(`${CB}${url}`, { ...init, headers: { ...((init.headers ?? {}) as Record<string, string>), host: `${GRANTED}.worlds.localhost` } }),
+      document: undefined, addEventListener: () => {}, navigator: { sendBeacon: () => true }, console,
+    };
+    sandbox.globalThis = {};
+    const w = new Function(...Object.keys(sandbox), `${js}\nreturn globalThis.worlds;`)(...Object.values(sandbox)) as any;
+    const out = await w.connect.call("linear", "create_issue", { title: "t" });
+    // The envelope's ok/connector/tool are for curl and the audit log, not for callers.
+    expect(out.identifier).toBe("ENG-9");
+    expect(out.ok).toBeUndefined();
+  });
+
   test("a call without the CSRF header is refused", async () => {
     const res = await fetch(`${CB}/api/v1/connect/linear/call`, {
       method: "POST",

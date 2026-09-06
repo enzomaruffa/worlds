@@ -375,7 +375,7 @@
   var connect = {
     list: () => call("GET", "/api/v1/connect"),
     tools: (name) => call("GET", `/api/v1/connect/${encodeURIComponent(name)}/tools`),
-    call: (name, tool, args = {}) => call("POST", `/api/v1/connect/${encodeURIComponent(name)}/call`, { tool, args })
+    call: (name, tool, args = {}) => call("POST", `/api/v1/connect/${encodeURIComponent(name)}/call`, { tool, args }).then((r) => r.result)
   };
 
   // sdk/src/room.ts

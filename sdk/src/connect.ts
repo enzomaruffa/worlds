@@ -25,8 +25,10 @@ export const connect = {
   tools: (name: string): Promise<{ items: ToolInfo[]; next_cursor: null }> =>
     call("GET", `/api/v1/connect/${encodeURIComponent(name)}/tools`),
 
-  // Invoke one tool. Never retried internally — a repeated call would file the issue
-  // twice — so a timeout is yours to decide about.
+  // Invoke one tool and get the tool's own result — the HTTP envelope around it is for
+  // curl and the audit log, not for callers. Never retried internally, because a repeated
+  // call would file the issue twice, so a timeout is yours to decide about.
   call: (name: string, tool: string, args: Record<string, unknown> = {}): Promise<any> =>
-    call("POST", `/api/v1/connect/${encodeURIComponent(name)}/call`, { tool, args }),
+    call("POST", `/api/v1/connect/${encodeURIComponent(name)}/call`, { tool, args })
+      .then((r: { result: unknown }) => r.result),
 };
