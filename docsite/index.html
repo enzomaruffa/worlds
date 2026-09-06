@@ -107,7 +107,7 @@ claude mcp add worlds --transport http <span data-root-text>https://your-worlds-
 
 <span class="c"># then just ask:</span>
 "Deploy this folder to Worlds as 'my-demo'."</code></pre>
-      <p class="lede">The MCP server exposes <code>deploy_site</code>, <code>list_sites</code>, <code>get_site</code>, <code>my_sites</code>, <code>db_query</code>, <code>read_docs</code> and <code>search_docs</code>. Auth rides your session cookie. More in <a href="#agents">Agents &amp; MCP</a>.</p>
+      <p class="lede">The MCP server exposes <code>deploy_site</code>, <code>delete_site</code>, <code>list_sites</code>, <code>get_site</code>, <code>my_sites</code>, <code>db_query</code>, <code>read_docs</code> and <code>search_docs</code>. Auth rides your session cookie. More in <a href="#agents">Agents &amp; MCP</a>.</p>
     </div>
   </div>
   <h3>Optional <code>.world.json</code></h3>
@@ -118,6 +118,7 @@ claude mcp add worlds --transport http <span data-root-text>https://your-worlds-
     <li>Reserved names you can't deploy to: <code>api www home hello assets uploads list mcp docs u</code>.</li>
     <li>Relative URLs inside a site (<code>./style.css</code>); only <code>/worlds.js</code> is absolute. Sites also work in path-routing mode (<code>/app/&lt;name&gt;/</code>) that way.</li>
     <li>Re-deploys overwrite. The deploy log (<code>GET /api/v1/sites/&lt;name&gt;/deploys</code>) is the audit trail. Only the first uploader can overwrite a site.</li>
+    <li>Delete a site you own from the ✕ on its homepage card, <code>worlds delete &lt;name&gt; --yes</code>, or the MCP <code>delete_site</code> tool (<code>DELETE /api/v1/sites/&lt;name&gt;</code>). Files, uploads, collections, documents and the deploy log go with it, and the name is free to deploy again.</li>
     <li>Sites live forever without a rebuild: <code>/api/v1</code> and <code>/worlds.js</code> are frozen, additive-only.</li>
   </ul>
 </section>
@@ -613,7 +614,7 @@ GET /healthz              <span class="c">// "ok" — exempt from the sign-in wa
     <div class="card"><h4>llms.txt</h4><p>The index: one line per doc page with a blurb. <a data-root-href="/llms.txt">/llms.txt</a></p></div>
     <div class="card"><h4>llms-full.txt</h4><p>Every doc page concatenated — quickstart, the narrative SDK guide, the generated reference and the limits. <a data-root-href="/llms-full.txt">/llms-full.txt</a></p></div>
     <div class="card"><h4>reference.md</h4><p>The complete SDK surface — every exported type, option and signature with its source comment, plus errors, limits, model aliases, the HTTP table and the MCP tools — regenerated from <code>sdk/src</code> on every build. <a data-root-href="/docs/reference.md">/docs/reference.md</a></p></div>
-    <div class="card"><h4>MCP server</h4><p><code><span data-root-text>https://your-worlds-host</span>/mcp</code> — JSON-RPC over HTTP, no SDK needed. Tools: <code>deploy_site</code> <code>list_sites</code> <code>get_site</code> <code>my_sites</code> <code>db_query</code> <code>read_docs</code> <code>search_docs</code>.</p></div>
+    <div class="card"><h4>MCP server</h4><p><code><span data-root-text>https://your-worlds-host</span>/mcp</code> — JSON-RPC over HTTP, no SDK needed. Tools: <code>deploy_site</code> <code>delete_site</code> <code>list_sites</code> <code>get_site</code> <code>my_sites</code> <code>db_query</code> <code>read_docs</code> <code>search_docs</code>.</p></div>
     <div class="card"><h4>world-site skill</h4><p>A Claude skill with the deploy path, an SDK cheat sheet, copy-paste recipes and a starter template. <a href="https://github.com/enzomaruffa/worlds/tree/main/skills/world-site" target="_blank" rel="noopener">skills/world-site ↗</a></p></div>
     <div class="card"><h4>OpenAPI</h4><p><code>spec/world-v1.yaml</code> is the frozen HTTP contract the SDK sits on; the generated reference renders it as a table.</p></div>
   </div>
