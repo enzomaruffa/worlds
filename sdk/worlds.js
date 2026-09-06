@@ -347,6 +347,13 @@
     slack: (target, text) => call("POST", "/api/v1/notify/slack", { target, text })
   };
 
+  // sdk/src/connect.ts
+  var connect = {
+    list: () => call("GET", "/api/v1/connect"),
+    tools: (name) => call("GET", `/api/v1/connect/${encodeURIComponent(name)}/tools`),
+    call: (name, tool, args = {}) => call("POST", `/api/v1/connect/${encodeURIComponent(name)}/call`, { tool, args })
+  };
+
   // sdk/src/room.ts
   function room(name, opts = {}) {
     const chan = ws.channel(opts.channel || name);
@@ -1504,6 +1511,7 @@
     uploads,
     ws,
     notify,
+    connect,
     room,
     rooms,
     actors,

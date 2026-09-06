@@ -387,3 +387,36 @@ await worlds.notify.slack("#my-channel", "the dashboard went red");
 ```
 
 Capped per user/day and always stamped with the site + sender. Notify, never impersonate.
+
+## Connectors — `worlds.connect`
+
+Call an external service — Linear, GitHub, anything speaking MCP — through the platform's
+own credential. The browser never sees a key.
+
+```js
+await worlds.connect.list();            // {items:[{name, tools}]} — what this site may reach
+await worlds.connect.tools("linear");   // the allowed tools and their input schemas
+
+const issue = await worlds.connect.call("linear", "create_issue", {
+  title: "Standups run long",
+  description: "From the sprint 42 retro",
+});
+```
+
+Which connectors a site may reach, which tools it may call, and which arguments are pinned
+are **operator configuration**, not site configuration: a site cannot grant itself access,
+and cannot override a pinned argument even by rewriting its own JavaScript. That is how the
+retro board can file an issue without being able to choose the team.
+
+Calls go out under the platform's service token, so the external system sees the bot, not
+you — requests are stamped with the site and the requester instead, and every call is
+written to an audit log keyed on your identity. A site with no grant sees an empty `list()`
+rather than an error, so a page can feature-detect.
+
+Nothing is retried internally: a repeated `create_issue` would file the issue twice, so a
+timeout is yours to decide about. Guard against double-writes by recording the result.
+
+Errors: `not_found` (no such connector, or this site isn't granted it — the same code for
+both, so existence can't be probed), `forbidden` (granted the connector, not that tool),
+`quota_exceeded`, `rate_limited`, `payload_too_large`, `upstream_error` (the service failed
+or rejected the call — carries the service's own message).

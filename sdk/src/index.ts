@@ -7,6 +7,7 @@ import { ai } from "./ai";
 import { uploads } from "./uploads";
 import { ws } from "./channels";
 import { notify } from "./notify";
+import { connect } from "./connect";
 import { room } from "./room";
 import { rooms } from "./rooms";
 import { actors } from "./actors";
@@ -35,6 +36,7 @@ const worlds: any = {
   uploads,
   ws,
   notify,
+  connect,
   room,
   rooms,
   actors,
