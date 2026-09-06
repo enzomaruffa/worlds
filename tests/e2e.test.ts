@@ -1306,3 +1306,133 @@ describe("worlds.doc", () => {
   });
 });
 
+
+describe("connectors", () => {
+  const CPORT = 9950 + Math.floor(Math.random() * 300);
+  const CB = `http://localhost:${CPORT}`;
+  const GRANTED = `c1-${RUN}`;
+  const UNGRANTED = `c2-${RUN}`;
+  let cproc: ReturnType<typeof Bun.spawn>;
+  let cdir: string;
+  let stub: ReturnType<typeof Bun.serve>;
+  let seen: { method: string; params: any }[] = [];
+
+  const creq = (method: string, path: string, opts: { body?: unknown; site?: string } = {}) => {
+    const headers: Record<string, string> = { host: `${opts.site ?? GRANTED}.worlds.localhost`, "x-worlds-csrf": "1" };
+    let body: BodyInit | undefined;
+    if (opts.body !== undefined) { headers["content-type"] = "application/json"; body = JSON.stringify(opts.body); }
+    return fetch(`${CB}${path}`, { method, headers, body });
+  };
+
+  beforeAll(async () => {
+    // A stub MCP server, not a dev short-circuit: a fake success would make "did the
+    // issue actually get filed?" indistinguishable from the real thing.
+    stub = Bun.serve({
+      port: 0,
+      async fetch(r) {
+        const b = (await r.json()) as { method: string; params: any; id?: number };
+        seen.push({ method: b.method, params: b.params });
+        if (b.method === "notifications/initialized") return new Response(null, { status: 202 });
+        const reply = (result: unknown) => Response.json({ jsonrpc: "2.0", id: b.id, result });
+        if (b.method === "initialize") return reply({ protocolVersion: "2025-06-18" });
+        if (b.method === "tools/list") {
+          return reply({ tools: [
+            { name: "create_issue", description: "file one", inputSchema: { type: "object" } },
+            { name: "delete_everything", description: "nope", inputSchema: { type: "object" } },
+          ] });
+        }
+        if (b.params?.name === "boom") return reply({ isError: true, content: [{ type: "text", text: "team not found" }] });
+        return reply({ content: [{ type: "text", text: JSON.stringify({ identifier: "ENG-9" }) }] });
+      },
+    });
+    const registry = JSON.stringify([{
+      name: "linear",
+      url: `http://localhost:${stub.port}/mcp`,
+      token_env: "STUB_TOKEN",
+      sites: { [GRANTED]: {
+        tools: ["create_issue", "boom"],
+        args: { create_issue: { teamId: "PINNED" } },
+        stamp: { create_issue: ["description"] },
+      } },
+    }]);
+    cdir = await mkdtemp(join(tmpdir(), "worlds-connect-"));
+    cproc = Bun.spawn(["bun", "server/index.ts"], {
+      cwd: new URL("..", import.meta.url).pathname,
+      env: { ...process.env, WORLDS_PORT: String(CPORT), WORLDS_DATA_DIR: cdir, WORLDS_DEV: "1",
+             WORLDS_DISABLE_WORKERS: "1", WORLDS_SEED: "0",
+             WORLDS_CONNECTORS: registry, STUB_TOKEN: "stub_secret" },
+      stdout: "ignore", stderr: "ignore",
+    });
+    for (let i = 0; i < 60; i++) {
+      try { if ((await fetch(`${CB}/healthz`)).ok) break; } catch { /* booting */ }
+      await Bun.sleep(100);
+    }
+  });
+  afterAll(async () => { cproc?.kill(); stub?.stop(true); await rm(cdir, { recursive: true, force: true }); });
+
+  test("a granted site lists its connector; an ungranted one sees nothing", async () => {
+    const mine = await (await creq("GET", "/api/v1/connect")).json();
+    expect(mine.items).toEqual([{ name: "linear", tools: ["create_issue", "boom"] }]);
+    const theirs = await (await creq("GET", "/api/v1/connect", { site: UNGRANTED })).json();
+    expect(theirs.items).toEqual([]);
+  });
+
+  test("tools are filtered to the allowlist", async () => {
+    const res = await (await creq("GET", "/api/v1/connect/linear/tools")).json();
+    expect(res.items.map((t: any) => t.name)).toEqual(["create_issue"]);
+  });
+
+  test("an ungranted site cannot call, and cannot tell the connector exists", async () => {
+    const res = await creq("POST", "/api/v1/connect/linear/call", { site: UNGRANTED, body: { tool: "create_issue", args: {} } });
+    expect(res.status).toBe(404);
+    expect((await res.json()).error.code).toBe("not_found");
+    const missing = await creq("POST", "/api/v1/connect/nope/call", { body: { tool: "x", args: {} } });
+    expect((await missing.json()).error.code).toBe("not_found");
+  });
+
+  test("a granted connector still refuses a tool outside the allowlist", async () => {
+    const res = await creq("POST", "/api/v1/connect/linear/call", { body: { tool: "delete_everything", args: {} } });
+    expect(res.status).toBe(403);
+    expect((await res.json()).error.code).toBe("forbidden");
+  });
+
+  test("forced args beat a hostile caller, and the stamp names the site and requester", async () => {
+    seen = [];
+    const res = await creq("POST", "/api/v1/connect/linear/call", {
+      body: { tool: "create_issue", args: { title: "t", description: "body", teamId: "ATTACKER" } },
+    });
+    expect(res.status).toBe(200);
+    const out = await res.json();
+    expect(out.result.identifier).toBe("ENG-9");
+    const call = seen.find((s) => s.method === "tools/call")!;
+    expect(call.params.arguments.teamId).toBe("PINNED");
+    expect(call.params.arguments.description).toContain("body");
+    expect(call.params.arguments.description).toContain(GRANTED);
+    expect(call.params.arguments.description).toContain("dev@localhost");
+  });
+
+  test("a tool error surfaces the tool's own message as upstream_error", async () => {
+    const res = await creq("POST", "/api/v1/connect/linear/call", { body: { tool: "boom", args: {} } });
+    expect(res.status).toBe(502);
+    const err = (await res.json()).error;
+    expect(err.code).toBe("upstream_error");
+    expect(err.message).toContain("team not found");
+  });
+
+  test("oversized args are refused", async () => {
+    const res = await creq("POST", "/api/v1/connect/linear/call", {
+      body: { tool: "create_issue", args: { title: "x".repeat(70000) } },
+    });
+    expect(res.status).toBe(413);
+    expect((await res.json()).error.code).toBe("payload_too_large");
+  });
+
+  test("a call without the CSRF header is refused", async () => {
+    const res = await fetch(`${CB}/api/v1/connect/linear/call`, {
+      method: "POST",
+      headers: { host: `${GRANTED}.worlds.localhost`, "content-type": "application/json" },
+      body: JSON.stringify({ tool: "create_issue", args: {} }),
+    });
+    expect((await res.json()).error.code).toBe("invalid_request");
+  });
+});
