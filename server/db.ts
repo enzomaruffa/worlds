@@ -129,6 +129,25 @@ async function migratePostgres(): Promise<void> {
       at         timestamptz NOT NULL DEFAULT now()
     )`;
   await sql`CREATE INDEX IF NOT EXISTS events_scope ON events (site, collection, seq)`;
+  // Every call made with the platform's own credential. The identity is the session's,
+  // which is not forgeable; the site is whatever the caller claimed. Keyed on the person
+  // for that reason.
+  await sql`
+    CREATE TABLE IF NOT EXISTS connector_calls (
+      id         text PRIMARY KEY,
+      connector  text NOT NULL,
+      tool       text NOT NULL,
+      site       text NOT NULL,
+      by_handle  text NOT NULL,
+      by_email   text NOT NULL,
+      args       jsonb NOT NULL,
+      outcome    text NOT NULL DEFAULT 'pending',
+      detail     text,
+      ms         int,
+      at         timestamptz NOT NULL DEFAULT now()
+    )`;
+  await sql`CREATE INDEX IF NOT EXISTS connector_calls_at ON connector_calls (at DESC)`;
+  await sql`CREATE INDEX IF NOT EXISTS connector_calls_who ON connector_calls (by_handle, at DESC)`;
   // Collaborative documents (docs.ts): one snapshot per doc plus the log of committed
   // updates since it, per epoch.
   await sql`
@@ -220,6 +239,22 @@ async function migrateSqlite(): Promise<void> {
     )`);
   await sql.unsafe(`CREATE INDEX IF NOT EXISTS events_scope ON events (site, collection, seq)`);
   await sql.unsafe(`
+    CREATE TABLE IF NOT EXISTS connector_calls (
+      id         TEXT PRIMARY KEY,
+      connector  TEXT NOT NULL,
+      tool       TEXT NOT NULL,
+      site       TEXT NOT NULL,
+      by_handle  TEXT NOT NULL,
+      by_email   TEXT NOT NULL,
+      args       TEXT NOT NULL,
+      outcome    TEXT NOT NULL DEFAULT 'pending',
+      detail     TEXT,
+      ms         INTEGER,
+      at         TEXT NOT NULL DEFAULT (${NOW})
+    )`);
+  await sql.unsafe(`CREATE INDEX IF NOT EXISTS connector_calls_at ON connector_calls (at DESC)`);
+  await sql.unsafe(`CREATE INDEX IF NOT EXISTS connector_calls_who ON connector_calls (by_handle, at DESC)`);
+  await sql.unsafe(`
     CREATE TABLE IF NOT EXISTS docs (
       site         TEXT NOT NULL,
       name         TEXT NOT NULL,
@@ -258,8 +293,10 @@ let pruneStarted = false;
 function startPrune(): void {
   if (pruneStarted) return;
   pruneStarted = true;
-  const prune = () =>
+  const prune = () => {
     sql.unsafe(`DELETE FROM events WHERE at < ${hoursAgo(EVENT_RETENTION_HOURS)}`).catch(() => {});
+    sql.unsafe(`DELETE FROM connector_calls WHERE at < ${hoursAgo(CONNECTOR_AUDIT_RETENTION_HOURS)}`).catch(() => {});
+  };
   prune();
   setInterval(prune, 60 * 60 * 1000).unref?.();
 }
@@ -330,6 +367,8 @@ export async function emitChange(
 }
 
 export const EVENT_RETENTION_HOURS = 24;
+// The only record of who made the platform's credential do what.
+export const CONNECTOR_AUDIT_RETENTION_HOURS = 90 * 24;
 
 export async function replaySince(
   site: string,

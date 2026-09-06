@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Spawn · Worlds</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    color-scheme: dark;
+    --bg:#09090b; --surface:#0c0c0f; --surface-2:#131318;
+    --border:#27272a; --border-soft:#1c1c20;
+    --gold:#f59e0b; --gold-bright:#fbbf24;
+    --text:#e4e4e7; --muted:#a1a1aa; --muted-2:#71717a;
+    --danger:#ef4444; --good:#22c55e;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.55 "Space Grotesk", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 28px 20px 80px; }
+  header { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 6px; }
+  h1 { font-size: 26px; margin: 0; letter-spacing: -.02em; }
+  h1 .dot { color: var(--gold); }
+  .lede { color: var(--muted); margin: 0 0 26px; max-width: 62ch; }
+
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 18px; margin-bottom: 16px; }
+  .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .14em; color: var(--muted-2); margin: 0 0 14px; font-weight: 600; }
+
+  label.field { display: block; margin-bottom: 14px; }
+  label.field span { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+  input[type=text], textarea {
+    width: 100%; background: var(--surface-2); color: var(--text);
+    border: 1px solid var(--border); border-radius: 9px; padding: 10px 12px;
+    font: inherit; font-size: 14px;
+  }
+  textarea { min-height: 90px; resize: vertical; }
+  input[type=text]:focus, textarea:focus { outline: none; border-color: var(--gold); }
+  .hint { font-size: 12px; color: var(--muted-2); margin-top: 5px; }
+
+  .prims { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 9px; }
+  .prim {
+    display: flex; gap: 9px; align-items: flex-start; padding: 10px 11px;
+    background: var(--surface-2); border: 1px solid var(--border-soft); border-radius: 10px;
+    cursor: pointer; transition: border-color .12s ease, background .12s ease;
+  }
+  .prim:hover { border-color: var(--border); }
+  .prim.on { border-color: var(--gold); background: #17140c; }
+  .prim input { margin: 3px 0 0; accent-color: var(--gold); flex: none; }
+  .prim b { display: block; font-size: 13.5px; font-weight: 600; }
+  .prim em { display: block; font-style: normal; font-size: 12px; color: var(--muted-2); line-height: 1.4; }
+
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .btn {
+    background: var(--gold); color: #1a1206; border: 0; border-radius: 9px;
+    padding: 10px 16px; font: inherit; font-weight: 600; cursor: pointer;
+  }
+  .btn:hover { background: var(--gold-bright); }
+  .btn[disabled] { opacity: .45; cursor: not-allowed; }
+  .btn.ghost { background: transparent; color: var(--text); border: 1px solid var(--border); }
+  .btn.ghost:hover { border-color: var(--gold); background: transparent; }
+
+  pre.code {
+    background: #08080a; border: 1px solid var(--border-soft); border-radius: 10px;
+    padding: 13px; overflow-x: auto; font-size: 12.5px; line-height: 1.5;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    max-height: 420px; overflow-y: auto; margin: 0;
+  }
+  .status { font-size: 13.5px; color: var(--muted); min-height: 20px; }
+  .status.err { color: var(--danger); }
+  .status.ok { color: var(--good); }
+  .live { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
+  .live a { color: var(--gold); font-weight: 600; }
+  .note { font-size: 12.5px; color: var(--muted-2); border-left: 2px solid var(--border); padding-left: 11px; margin-top: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header><h1>Spawn<span class="dot">.</span></h1></header>
+  <p class="lede">A Worlds site that builds Worlds sites. Pick the primitives you want, say what it should do, and this page writes the page and deploys it live under your name.</p>
+
+  <div class="card">
+    <h2>What is it</h2>
+    <label class="field">
+      <span>Site name</span>
+      <input type="text" id="name" placeholder="team-standup" autocomplete="off" />
+      <div class="hint">Lowercase letters, digits and dashes. This becomes the address.</div>
+    </label>
+    <label class="field">
+      <span>What should it do?</span>
+      <textarea id="idea" placeholder="A board where the team drops one line each morning and everyone sees the list live. Anyone can clear yesterday's."></textarea>
+    </label>
+  </div>
+
+  <div class="card">
+    <h2>Primitives</h2>
+    <div class="prims" id="prims"></div>
+  </div>
+
+  <div class="card">
+    <h2>Build</h2>
+    <div class="row">
+      <button class="btn" id="go">Write it</button>
+      <button class="btn ghost" id="deploy" disabled>Deploy</button>
+      <button class="btn ghost" id="download" disabled>Download</button>
+      <span class="status" id="status"></span>
+    </div>
+    <div class="live" id="live" hidden></div>
+    <div class="note">Deploys run as <b id="whoami">you</b>, so you own whatever you make here and only you can redeploy that name. A name someone else already took will be refused.</div>
+  </div>
+
+  <div class="card" id="outCard" hidden>
+    <h2>index.html</h2>
+    <pre class="code" id="out"></pre>
+  </div>
+</div>
+
+<script src="/worlds.js"></script>
+<script>
+(() => {
+  "use strict";
+  const { esc, toast } = worlds;
+  const $ = (id) => document.getElementById(id);
+
+  // Each entry is the exact SDK surface the model is told it may use. Keeping the
+  // snippets here rather than in the prompt means the generated page is written against
+  // signatures that came from this repo, not from whatever the model remembers.
+  const PRIMS = [
+    { id: "db", name: "Shared data", why: "documents everyone can read and write, live",
+      api: `const c = worlds.db.collection("items");
+await c.create({ text: "hi" });
+await c.list({ sort: "-created_at", limit: 50 });  // limit is 1..100
+await c.update(id, { done: true });
+await c.increment(id, "votes", 1);                 // atomic
+await c.delete(id);
+c.subscribe(ev => { /* {type:"create"|"update"|"delete", doc} */ });` },
+    { id: "me", name: "Who you are", why: "name, handle and avatar, no sign-in code",
+      api: `const me = await worlds.me();   // {email, handle, name, avatar_url}` },
+    { id: "room", name: "One shared room", why: "roster, host, ready, plus one authoritative doc",
+      api: `const r = worlds.room("game", { initial: { turn: null } });
+await r.ready;
+r.onChange(s => render(s));   // s = {members, host, isHost, started, state, ...}
+await r.set(next);            // last-write-wins, no conflict detection
+r.toggleReady(); r.start();` },
+    { id: "rooms", name: "Many rooms", why: "a lobby browser with private join codes",
+      api: `const hall = worlds.rooms("tables", { initial: {} });
+hall.onList(list => render(list));
+const room = await hall.create({ name: "Table 1" });
+await hall.joinByCode("ABCD");` },
+    { id: "actors", name: "Live positions", why: "per-member state at frame rate, coalesced",
+      api: `const net = worlds.actors("field", { rate: 15 });
+net.set({ x, y });                      // not rate-limited, use for movement
+net.setMetadata({ team: "red" });
+net.send({ t: "hit" });                 // discrete event; {to: id} targets one member
+net.onChange((id, state, peer) => draw(peer));
+net.others();                           // [{id, handle, name, state, metadata}]` },
+    { id: "channel", name: "Broadcast", why: "chat, buzzers, reactions",
+      api: `const ch = worlds.ws.channel("chat");
+ch.publish({ text });                   // capped at 40/s — not for movement
+ch.subscribe(m => show(m.payload, m.from));
+ch.presence(list => count(list));` },
+    { id: "ai", name: "AI", why: "completions and embeddings, key stays server-side",
+      api: `const { text } = await worlds.ai.complete("write a haiku about " + topic);
+await worlds.ai.complete({ prompt, stream: true, onToken: t => append(t) });` },
+    { id: "uploads", name: "File uploads", why: "drop a file, get a URL",
+      api: `const { url } = await worlds.uploads.put(file);   // <=25MB
+await worlds.uploads.list();` },
+    { id: "slack", name: "Slack", why: "ping a channel when something happens",
+      api: `await worlds.notify.slack("#team", "the board is full");` },
+    { id: "batteries", name: "Batteries", why: "toast, colours, escaping, countdowns",
+      api: `worlds.toast("saved");
+worlds.colorFor(handle);    // stable hsl() per person
+worlds.esc(userText);       // escape before innerHTML
+worlds.countdown(endsAt, { onTick, onEnd });` },
+  ];
+
+  const chosen = new Set(["db", "me", "batteries"]);
+  let generated = null;
+
+  function renderPrims() {
+    $("prims").innerHTML = "";
+    for (const p of PRIMS) {
+      const el = document.createElement("label");
+      el.className = "prim" + (chosen.has(p.id) ? " on" : "");
+      el.innerHTML = `<input type="checkbox" ${chosen.has(p.id) ? "checked" : ""} />
+        <span><b>${esc(p.name)}</b><em>${esc(p.why)}</em></span>`;
+      el.querySelector("input").addEventListener("change", (e) => {
+        if (e.target.checked) chosen.add(p.id); else chosen.delete(p.id);
+        el.classList.toggle("on", e.target.checked);
+      });
+      $("prims").appendChild(el);
+    }
+  }
+
+  function setStatus(msg, kind) {
+    const el = $("status");
+    el.textContent = msg;
+    el.className = "status" + (kind ? " " + kind : "");
+  }
+
+  function buildPrompt(name, idea) {
+    const picked = PRIMS.filter((p) => chosen.has(p.id));
+    return [
+      "Write ONE complete self-contained index.html for a site on the Worlds platform.",
+      "",
+      "What it should do:",
+      idea,
+      "",
+      "HARD RULES:",
+      "- Output ONLY the HTML. No markdown fences, no commentary before or after.",
+      "- One file. Inline <style> and one inline <script> IIFE. No build step, no npm, no CDN scripts.",
+      // The closing tag is split so this string cannot end the script element it lives in.
+      '- Include <script src="/worlds.js"><\/script> before your own script.',
+      "- Use ONLY the SDK calls listed below. Do not invent method names.",
+      "- Escape any user-supplied text with worlds.esc() before putting it in innerHTML.",
+      "- Dark theme. Use these CSS variables on :root and nothing else for colour:",
+      "  --bg:#09090b; --surface:#0c0c0f; --surface-2:#131318; --border:#27272a;",
+      "  --gold:#f59e0b; --text:#e4e4e7; --muted:#a1a1aa; --danger:#ef4444; --good:#22c55e;",
+      '  Set color-scheme: dark. Font: "Space Grotesk" from Google Fonts with a system fallback.',
+      "- Handle the empty state and errors. A rejected promise is a WorldsError with .code and .message.",
+      "- Make it work on a phone.",
+      "",
+      "THE SDK YOU MAY USE:",
+      ...picked.map((p) => `\n// ${p.name} — ${p.why}\n${p.api}`),
+      "",
+      `The site is called "${name}". Give it a <title> of "${name} · Worlds".`,
+    ].join("\n");
+  }
+
+  // The model likes to wrap output in a fence no matter how firmly it is asked not to.
+  function stripFence(s) {
+    const m = s.match(/```(?:html)?\s*\n([\s\S]*?)```/);
+    return (m ? m[1] : s).trim();
+  }
+
+  $("go").addEventListener("click", async () => {
+    const name = $("name").value.trim().toLowerCase();
+    const idea = $("idea").value.trim();
+    if (!name) return setStatus("Give it a name first.", "err");
+    if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(name)) return setStatus("Names are lowercase letters, digits and dashes.", "err");
+    if (!idea) return setStatus("Say what it should do.", "err");
+    if (!chosen.size) return setStatus("Pick at least one primitive.", "err");
+
+    $("go").disabled = true;
+    $("deploy").disabled = true;
+    $("download").disabled = true;
+    $("live").hidden = true;
+    $("outCard").hidden = false;
+    $("out").textContent = "";
+    setStatus("Writing…");
+
+    try {
+      const res = await worlds.ai.complete({
+        prompt: buildPrompt(name, idea),
+        model: "smart",
+        max_tokens: 8000,
+        stream: true,
+        onToken: (t) => { $("out").textContent += t; $("out").scrollTop = $("out").scrollHeight; },
+      });
+      generated = stripFence(res.text || $("out").textContent);
+      $("out").textContent = generated;
+      if (!/<script[^>]*src=["']\/worlds\.js/.test(generated)) {
+        setStatus("Written, but it left out the /worlds.js tag — check before deploying.", "err");
+      } else {
+        setStatus(`Written — ${generated.length.toLocaleString()} characters.`, "ok");
+      }
+      $("deploy").disabled = false;
+      $("download").disabled = false;
+    } catch (e) {
+      setStatus(`${e.code || "error"}: ${e.message}`, "err");
+    } finally {
+      $("go").disabled = false;
+    }
+  });
+
+  $("deploy").addEventListener("click", async () => {
+    if (!generated) return;
+    const name = $("name").value.trim().toLowerCase();
+    $("deploy").disabled = true;
+    setStatus("Deploying…");
+    try {
+      // Same endpoint the homepage drag-drop uses: each form field name is the file's
+      // path, and the value is its bytes.
+      const form = new FormData();
+      form.set("site", name);
+      form.set("index.html", new Blob([generated], { type: "text/html" }), "index.html");
+      form.set(".world.json", new Blob([JSON.stringify({
+        description: $("idea").value.trim().slice(0, 140),
+        category: "experiments",
+      })], { type: "application/json" }), ".world.json");
+
+      const res = await fetch("/api/v1/deploy-folder", {
+        method: "POST",
+        headers: { "x-worlds-csrf": "1" },
+        body: form,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const err = data.error || {};
+        throw Object.assign(new Error(err.message || res.statusText), { code: err.code });
+      }
+      setStatus("Live.", "ok");
+      const url = data.url || `/app/${name}/`;
+      $("live").hidden = false;
+      $("live").innerHTML = `<a href="${esc(url)}" target="_blank" rel="noopener">Open ${esc(name)} →</a>`;
+      toast("Deployed");
+    } catch (e) {
+      setStatus(`${e.code || "error"}: ${e.message}`, "err");
+      $("deploy").disabled = false;
+    }
+  });
+
+  $("download").addEventListener("click", () => {
+    if (!generated) return;
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([generated], { type: "text/html" }));
+    a.download = "index.html";
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
+
+  renderPrims();
+  worlds.me().then((me) => { $("whoami").textContent = me.name || me.handle; }).catch(() => {});
+})();
+</script>
+</body>
+</html>

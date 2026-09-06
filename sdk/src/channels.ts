@@ -14,6 +14,18 @@ export interface Channel<T = any> {
   presence(handler: (members: Person[]) => void): () => void;
 }
 
+export interface PlatformMember {
+  handle: string;
+  name: string;
+  site: string; // the world they are in right now
+}
+
+export interface Pong {
+  rtt: number;      // ms, this socket's round trip
+  serverAt: number; // the server's Date.now() when it replied
+  skew: number;     // serverAt - the local clock's midpoint of the trip, in ms
+}
+
 // Named pub/sub channels for multiplayer/collab, multiplexed over the one socket.
 export const ws = {
   channel<T = any>(name: string): Channel<T> {
@@ -24,5 +36,20 @@ export const ws = {
       presence: (handler: (members: Person[]) => void) =>
         sock.subscribe({ op: "sub", kind: "channel", channel: name, presence: true }, () => {}, { onPresence: handler }),
     };
+  },
+
+  // Who is signed in across the whole instance, and which world each is in. Read-only:
+  // there is no publish side, so this never becomes a way into another site's channel.
+  platform(handler: (members: PlatformMember[]) => void): () => void {
+    return sock.subscribe({ op: "sub", kind: "platform" }, () => {}, { onPlatform: handler });
+  },
+
+  // Round trip over the live socket. `skew` assumes a symmetric path, which real
+  // networks often aren't — treat it as an estimate, not a measurement.
+  async ping(): Promise<Pong> {
+    const t0 = performance.now();
+    const f = await sock.request({ op: "ping" });
+    const rtt = performance.now() - t0;
+    return { rtt, serverAt: f.at, skew: f.at - (Date.now() - rtt / 2) };
   },
 };

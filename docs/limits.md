@@ -11,7 +11,10 @@ Quotas are floors — they can go up, never down for existing behavior.
 | Uploads per site | 1GB |
 | AI completions | 200 / user / day |
 | AI images | 50 / user / day |
+| AI prompt size | 200,000 characters |
 | Slack notifies | 50 / user / day |
+| Connector calls | 100 / user / day, 200 / site / hour |
+| Connector arguments | 64KB |
 | WS payload | 16KB |
 | Document update (`worlds.doc`) | 512KB |
 | Document state | 4MB before a rotation is asked for; 8MB hard ceiling |

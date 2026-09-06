@@ -24,7 +24,12 @@ worlds.uploads.put: (file: Blob, opts?: { name?: string; }) => Promise<any>
 worlds.uploads.list: () => Promise<any>
 worlds.uploads.delete: (name: string) => Promise<any>
 worlds.ws.channel: <T = any>(name: string) => Channel<T>
+worlds.ws.platform: (handler: (members: PlatformMember[]) => void) => () => void
+worlds.ws.ping: () => Promise<Pong>
 worlds.notify.slack: (target: string, text: string) => Promise<any>
+worlds.connect.list: () => Promise<{ items: ConnectorInfo[]; next_cursor: null; }>
+worlds.connect.tools: (name: string) => Promise<{ items: ToolInfo[]; next_cursor: null; }>
+worlds.connect.call: (name: string, tool: string, args?: Record<string, unknown>) => Promise<any>
 worlds.room: <T extends Record<string, any> = any>(name: string, opts?: RoomOptions<T>) => Room<T>
 worlds.rooms: <T extends Record<string, any> = any>(name: string, opts?: RoomsOptions<T>) => Hall<T>
 worlds.actors: <T = any>(name: string, opts?: ActorsOptions<T>) => Actors<T>
@@ -225,10 +230,36 @@ export interface Channel<T = any> {
 }
 ```
 
+### `interface PlatformMember`
+
+```ts
+export interface PlatformMember {
+  handle: string;
+  name: string;
+  site: string; // the world they are in right now
+}
+```
+
+### `interface Pong`
+
+```ts
+export interface Pong {
+  rtt: number;      // ms, this socket's round trip
+  serverAt: number; // the server's Date.now() when it replied
+  skew: number;     // serverAt - the local clock's midpoint of the trip, in ms
+}
+```
+
 ### `ws`
 
 ```ts
 ws.channel: <T = any>(name: string) => Channel<T>
+// Who is signed in across the whole instance, and which world each is in. Read-only:
+// there is no publish side, so this never becomes a way into another site's channel.
+ws.platform: (handler: (members: PlatformMember[]) => void) => () => void
+// Round trip over the live socket. `skew` assumes a symmetric path, which real
+// networks often aren't — treat it as an estimate, not a measurement.
+ws.ping: () => Promise<Pong>
 ```
 
 Named pub/sub channels for multiplayer/collab, multiplexed over the one socket.
@@ -435,6 +466,7 @@ const net = worlds.actors("race", { zoneKey: s => s.cell, rate: 15, metadata: { 
 net.set({ x, y, cell });                       // frame state
 net.setMetadata({ level: 6 });                 // infrequent metadata
 net.send({ t: "horn" });                       // one-off event to in-zone peers
+net.send({ key }, { to: peerId });              // …or to one member, for hidden info
 net.onChange((id, state, peer) => draw(peer)); // peer.state + peer.metadata
 net.onEvent((id, payload, from) => honk(id));  // a peer's discrete event
 net.onLeave(id => remove(id));
@@ -479,7 +511,7 @@ export interface ActorRecord<T = any> extends ActorFrom {
 export interface Actors<T = any> {
   set(state: T): void;
   setMetadata(patch: Record<string, any>): void;
-  send(payload: any): void;
+  send(payload: any, opts?: { to?: string }): void;
   others(): ActorRecord<T>[];
   onChange(fn: (id: string, state: T, peer: ActorRecord<T>) => void): () => void;
   onEvent(fn: (id: string, payload: any, from: ActorFrom) => void): () => void;
@@ -760,10 +792,6 @@ export class WorldsError extends Error {
 
 Source: `sdk/src/socket.ts`
 
-One multiplexed WebSocket for the whole page: db subscriptions and channels
-share it. Reconnects with backoff, replays db cursors, and queues frames sent
-while still connecting so nothing is dropped.
-
 ### `interface Person`
 
 ```ts
@@ -815,6 +843,9 @@ Quotas are floors: they can go up, never down for existing behavior.
 | `aiInputChars` | 200000 |
 | `wsPayloadBytes` | 16 KB |
 | `slackPerUserPerDay` | 50 |
+| `connectArgsBytes` | 64 KB |
+| `connectCallsPerUserPerDay` | 100 |
+| `connectCallsPerSitePerHour` | 200 |
 
 Reserved site names (cannot be deployed to): `api`, `www`, `home`, `hello`, `assets`, `uploads`, `list`, `mcp`, `docs`, `u`.
 
@@ -835,6 +866,7 @@ The SDK is a thin client over these endpoints (`spec/world-v1.yaml`, frozen and 
 | GET | `/api/v1/sites/{name}` | one site |
 | DELETE | `/api/v1/sites/{name}` | delete a site you own: files, uploads, collections, documents and the deploy log go; the name is free again |
 | GET | `/api/v1/sites/{name}/deploys` | deploy history |
+| GET | `/api/v1/deploys` | every deploy, newest first (?limit, ?cursor) |
 | GET | `/api/v1/db` | list collections |
 | POST | `/api/v1/db/{collection}` | create document |
 | GET | `/api/v1/db/{collection}` | list documents (filter, sort, cursor) |
@@ -857,6 +889,9 @@ The SDK is a thin client over these endpoints (`spec/world-v1.yaml`, frozen and 
 | GET | `/api/v1/uploads` | list uploads |
 | DELETE | `/api/v1/uploads/{name}` | delete upload |
 | POST | `/api/v1/notify/slack` | capped, sender-stamped Slack message |
+| GET | `/api/v1/connect` | connectors this site may reach |
+| GET | `/api/v1/connect/{name}/tools` | allowed tools and their input schemas |
+| POST | `/api/v1/connect/{name}/call` | invoke one tool under the platform credential |
 | GET | `/api/v1/universe` | homepage payload |
 | GET | `/api/v1/creators/{handle}` | creator page data |
 | POST | `/api/v1/beacon/visit` | sendBeacon page view, always 204 |

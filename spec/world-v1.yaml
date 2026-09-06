@@ -13,6 +13,7 @@ paths:
     get: { summary: one site }
     delete: { summary: "delete a site you own: files, uploads, collections, documents and the deploy log go; the name is free again" }
   /api/v1/sites/{name}/deploys: { get: { summary: deploy history } }
+  /api/v1/deploys: { get: { summary: "every deploy, newest first (?limit, ?cursor)" } }
   /api/v1/db: { get: { summary: list collections } }
   /api/v1/db/{collection}:
     post: { summary: create document }
@@ -39,6 +40,9 @@ paths:
     get: { summary: list uploads }
   /api/v1/uploads/{name}: { delete: { summary: delete upload } }
   /api/v1/notify/slack: { post: { summary: "capped, sender-stamped Slack message" } }
+  /api/v1/connect: { get: { summary: "connectors this site may reach" } }
+  /api/v1/connect/{name}/tools: { get: { summary: "allowed tools and their input schemas" } }
+  /api/v1/connect/{name}/call: { post: { summary: "invoke one tool under the platform credential" } }
   /api/v1/universe: { get: { summary: homepage payload } }
   /api/v1/creators/{handle}: { get: { summary: creator page data } }
   /api/v1/beacon/visit: { post: { summary: "sendBeacon page view, always 204" } }
@@ -54,7 +58,7 @@ components:
           properties:
             code:
               enum: [unauthorized, not_found, rate_limited, payload_too_large, quota_exceeded,
-                     invalid_request, reserved_name, conflict, replay_expired, maintenance,
-                     upstream_error, internal]
+                     invalid_request, reserved_name, forbidden, conflict, replay_expired,
+                     maintenance, upstream_error, internal]
             message: { type: string }
             retry_after: { type: number }

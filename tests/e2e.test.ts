@@ -405,6 +405,23 @@ describe("platform surfaces", () => {
     expect(hist.items[0].by.handle).toBe("dev");
   });
 
+  test("global deploy feed spans sites and pages by cursor", async () => {
+    const all = await (await req("GET", "/api/v1/deploys", { site: "home" })).json();
+    expect(all.items.length).toBeGreaterThanOrEqual(2);
+    expect(all.items[0].site).toBeTruthy();
+    expect(all.items[0].by.handle).toBe("dev");
+    // newest first
+    const times = all.items.map((d: { at: string }) => new Date(d.at).getTime());
+    expect(times).toEqual([...times].sort((a: number, b: number) => b - a));
+
+    const first = await (await req("GET", "/api/v1/deploys?limit=1", { site: "home" })).json();
+    expect(first.items.length).toBe(1);
+    expect(first.next_cursor).toBeTruthy();
+    const second = await (await req("GET", `/api/v1/deploys?limit=1&cursor=${encodeURIComponent(first.next_cursor)}`, { site: "home" })).json();
+    expect(second.items.length).toBe(1);
+    expect(second.items[0].deploy_id).not.toBe(first.items[0].deploy_id);
+  });
+
   test("universe entries carry seeded layout", async () => {
     const u = await (await req("GET", "/api/v1/universe", { site: "home" })).json();
     const t1 = u.items.find((s: { name: string }) => s.name === S1);
@@ -469,6 +486,54 @@ describe("platform surfaces", () => {
 });
 
 describe("realtime", () => {
+  test("ping is answered with a pong carrying the same id and a server clock", async () => {
+    const ws = new WebSocket(`ws://localhost:${PORT}/api/v1/socket`, "worlds.v1");
+    const before = Date.now();
+    const pong = await new Promise<Record<string, unknown>>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("no pong within 3s")), 3000);
+      ws.onopen = () => ws.send(JSON.stringify({ op: "ping", id: "q1" }));
+      ws.onmessage = (m) => {
+        const f = JSON.parse(String(m.data));
+        if (f.op === "pong") {
+          clearTimeout(timer);
+          resolve(f);
+        }
+      };
+    });
+    ws.close();
+    expect(pong.id).toBe("q1");
+    expect(typeof pong.at).toBe("number");
+    expect(pong.at as number).toBeGreaterThanOrEqual(before);
+  });
+
+  test("platform presence spans sites and updates when a socket joins", async () => {
+    const watcher = new WebSocket(`ws://localhost:${PORT}/api/v1/socket`, "worlds.v1");
+    const frames: any[] = [];
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("no platform frame within 3s")), 3000);
+      watcher.onopen = () => watcher.send(JSON.stringify({ op: "sub", id: "pf", kind: "platform" }));
+      watcher.onmessage = (m) => {
+        const f = JSON.parse(String(m.data));
+        if (f.op === "platform") { frames.push(f); clearTimeout(timer); resolve(); }
+      };
+    });
+    // A second socket on a different site must show up as its own row.
+    const other = new WebSocket(`ws://localhost:${PORT}/api/v1/socket`, {
+      protocols: ["worlds.v1"],
+      headers: { host: `${S1}.worlds.localhost` },
+    } as never);
+    const grew = await new Promise<any>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("roster never grew")), 3000);
+      watcher.onmessage = (m) => {
+        const f = JSON.parse(String(m.data));
+        if (f.op === "platform" && f.members.some((x: any) => x.site === S1)) { clearTimeout(timer); resolve(f); }
+      };
+    });
+    other.close(); watcher.close();
+    expect(frames[0].id).toBe("pf");
+    expect(grew.members.some((x: any) => x.site === S1 && x.handle === "dev")).toBe(true);
+  });
+
   test("db subscription receives create events over the socket", async () => {
     const ws = new WebSocket(`ws://localhost:${PORT}/api/v1/socket`, "worlds.v1");
     const got: Record<string, unknown>[] = [];
@@ -557,6 +622,25 @@ describe("realtime actors", () => {
         if (pred(f)) { clearTimeout(timer); resolve(f); }
       };
     });
+
+  test("an event with `to` reaches only that member", async () => {
+    const a = mk(), b = mk(), c = mk();
+    await Promise.all([opened(a), opened(b), opened(c)]);
+    sub(a, "a1", "A", "z9", "secret");
+    sub(b, "b1", "B", "z9", "secret");
+    sub(c, "c1", "C", "z9", "secret");
+    await Bun.sleep(120);
+    const toB = waitFor(b, (f) => f.op === "actor_event");
+    let cGot = false;
+    c.onmessage = (m) => { if (JSON.parse(String(m.data)).op === "actor_event") cGot = true; };
+    a.send(JSON.stringify({ op: "aevent", id: "aevent", channel: "secret", cid: "A", to: "B", payload: { card: 7 } }));
+    const ev = await toB;
+    await Bun.sleep(150); // C had every chance to receive it
+    a.close(); b.close(); c.close();
+    expect(ev.payload.card).toBe(7);
+    expect(ev.from.id).toBe("A");
+    expect(cGot).toBe(false);
+  });
 
   test("a joiner gets an in-zone last-value snapshot of existing members", async () => {
     const a = mk(), b = mk();
@@ -1263,3 +1347,197 @@ describe("worlds.doc", () => {
   });
 });
 
+
+describe("connectors", () => {
+  const CPORT = 9950 + Math.floor(Math.random() * 300);
+  const CB = `http://localhost:${CPORT}`;
+  const GRANTED = `c1-${RUN}`;
+  const UNGRANTED = `c2-${RUN}`;
+  let cproc: ReturnType<typeof Bun.spawn>;
+  let cdir: string;
+  let stub: ReturnType<typeof Bun.serve>;
+  let seen: { method: string; params: any }[] = [];
+
+  const creq = (method: string, path: string, opts: { body?: unknown; site?: string } = {}) => {
+    const headers: Record<string, string> = { host: `${opts.site ?? GRANTED}.worlds.localhost`, "x-worlds-csrf": "1" };
+    let body: BodyInit | undefined;
+    if (opts.body !== undefined) { headers["content-type"] = "application/json"; body = JSON.stringify(opts.body); }
+    return fetch(`${CB}${path}`, { method, headers, body });
+  };
+
+  beforeAll(async () => {
+    // A stub MCP server, not a dev short-circuit: a fake success would make "did the
+    // issue actually get filed?" indistinguishable from the real thing.
+    stub = Bun.serve({
+      port: 0,
+      async fetch(r) {
+        const b = (await r.json()) as { method: string; params: any; id?: number };
+        seen.push({ method: b.method, params: b.params });
+        if (b.method === "notifications/initialized") return new Response(null, { status: 202 });
+        const reply = (result: unknown) => Response.json({ jsonrpc: "2.0", id: b.id, result });
+        if (b.method === "initialize") return reply({ protocolVersion: "2025-06-18" });
+        if (b.method === "tools/list") {
+          return reply({ tools: [
+            { name: "create_issue", description: "file one", inputSchema: { type: "object" } },
+            { name: "delete_everything", description: "nope", inputSchema: { type: "object" } },
+          ] });
+        }
+        if (b.params?.name === "boom") return reply({ isError: true, content: [{ type: "text", text: "team not found" }] });
+        return reply({ content: [{ type: "text", text: JSON.stringify({ identifier: "ENG-9" }) }] });
+      },
+    });
+    const registry = JSON.stringify([{
+      name: "linear",
+      url: `http://localhost:${stub.port}/mcp`,
+      token_env: "STUB_TOKEN",
+      sites: { [GRANTED]: {
+        tools: ["create_issue", "boom"],
+        args: { create_issue: { teamId: "PINNED" } },
+        stamp: { create_issue: ["description"] },
+      } },
+    }, {
+      // Granted, but the operator never set the token — the first thing a real setup hits.
+      name: "halfwired",
+      url: `http://localhost:${stub.port}/mcp`,
+      token_env: "NEVER_SET_TOKEN",
+      sites: { [GRANTED]: { tools: ["create_issue"] } },
+    }]);
+    cdir = await mkdtemp(join(tmpdir(), "worlds-connect-"));
+    cproc = Bun.spawn(["bun", "server/index.ts"], {
+      cwd: new URL("..", import.meta.url).pathname,
+      env: { ...process.env, WORLDS_PORT: String(CPORT), WORLDS_DATA_DIR: cdir, WORLDS_DEV: "1",
+             WORLDS_DISABLE_WORKERS: "1", WORLDS_SEED: "0",
+             WORLDS_CONNECTORS: registry, STUB_TOKEN: "stub_secret" },
+      stdout: "ignore", stderr: "ignore",
+    });
+    for (let i = 0; i < 60; i++) {
+      try { if ((await fetch(`${CB}/healthz`)).ok) break; } catch { /* booting */ }
+      await Bun.sleep(100);
+    }
+  });
+  afterAll(async () => { cproc?.kill(); stub?.stop(true); await rm(cdir, { recursive: true, force: true }); });
+
+  test("a granted site lists its connector; an ungranted one sees nothing", async () => {
+    const mine = await (await creq("GET", "/api/v1/connect")).json();
+    expect(mine.items).toContainEqual({ name: "linear", tools: ["create_issue", "boom"] });
+    const theirs = await (await creq("GET", "/api/v1/connect", { site: UNGRANTED })).json();
+    expect(theirs.items).toEqual([]);
+  });
+
+  test("tools are filtered to the allowlist", async () => {
+    const res = await (await creq("GET", "/api/v1/connect/linear/tools")).json();
+    expect(res.items.map((t: any) => t.name)).toEqual(["create_issue"]);
+  });
+
+  test("an ungranted site cannot call, and cannot tell the connector exists", async () => {
+    const res = await creq("POST", "/api/v1/connect/linear/call", { site: UNGRANTED, body: { tool: "create_issue", args: {} } });
+    expect(res.status).toBe(404);
+    expect((await res.json()).error.code).toBe("not_found");
+    const missing = await creq("POST", "/api/v1/connect/nope/call", { body: { tool: "x", args: {} } });
+    expect((await missing.json()).error.code).toBe("not_found");
+  });
+
+  test("a connector with no token names the missing variable instead of failing vaguely", async () => {
+    const res = await creq("POST", "/api/v1/connect/halfwired/call", { body: { tool: "create_issue", args: {} } });
+    const err = (await res.json()).error;
+    expect(err.code).toBe("upstream_error");
+    expect(err.message).toContain("NEVER_SET_TOKEN");
+  });
+
+  test("a granted connector still refuses a tool outside the allowlist", async () => {
+    const res = await creq("POST", "/api/v1/connect/linear/call", { body: { tool: "delete_everything", args: {} } });
+    expect(res.status).toBe(403);
+    expect((await res.json()).error.code).toBe("forbidden");
+  });
+
+  test("forced args beat a hostile caller, and the stamp names the site and requester", async () => {
+    seen = [];
+    const res = await creq("POST", "/api/v1/connect/linear/call", {
+      body: { tool: "create_issue", args: { title: "t", description: "body", teamId: "ATTACKER" } },
+    });
+    expect(res.status).toBe(200);
+    const out = await res.json();
+    expect(out.result.identifier).toBe("ENG-9");
+    const call = seen.find((s) => s.method === "tools/call")!;
+    expect(call.params.arguments.teamId).toBe("PINNED");
+    expect(call.params.arguments.description).toContain("body");
+    expect(call.params.arguments.description).toContain(GRANTED);
+    expect(call.params.arguments.description).toContain("dev@localhost");
+  });
+
+  test("a tool error surfaces the tool's own message as upstream_error", async () => {
+    const res = await creq("POST", "/api/v1/connect/linear/call", { body: { tool: "boom", args: {} } });
+    expect(res.status).toBe(502);
+    const err = (await res.json()).error;
+    expect(err.code).toBe("upstream_error");
+    expect(err.message).toContain("team not found");
+  });
+
+  test("oversized args are refused", async () => {
+    const res = await creq("POST", "/api/v1/connect/linear/call", {
+      body: { tool: "create_issue", args: { title: "x".repeat(70000) } },
+    });
+    expect(res.status).toBe(413);
+    expect((await res.json()).error.code).toBe("payload_too_large");
+  });
+
+  test("the SDK hands back the tool's result, not the HTTP envelope", async () => {
+    const js = await Bun.file(new URL("../sdk/worlds.js", import.meta.url)).text();
+    const sandbox: Record<string, unknown> = {
+      WebSocket,
+      location: { protocol: "http:", host: `localhost:${CPORT}`, pathname: "/", href: `${CB}/` },
+      performance, setTimeout, clearTimeout, setInterval, clearInterval,
+      fetch: (url: string, init: RequestInit = {}) =>
+        fetch(`${CB}${url}`, { ...init, headers: { ...((init.headers ?? {}) as Record<string, string>), host: `${GRANTED}.worlds.localhost` } }),
+      document: undefined, addEventListener: () => {}, navigator: { sendBeacon: () => true }, console,
+    };
+    sandbox.globalThis = {};
+    const w = new Function(...Object.keys(sandbox), `${js}\nreturn globalThis.worlds;`)(...Object.values(sandbox)) as any;
+    const out = await w.connect.call("linear", "create_issue", { title: "t" });
+    // The envelope's ok/connector/tool are for curl and the audit log, not for callers.
+    expect(out.identifier).toBe("ENG-9");
+    expect(out.ok).toBeUndefined();
+  });
+
+  test("a call without the CSRF header is refused", async () => {
+    const res = await fetch(`${CB}/api/v1/connect/linear/call`, {
+      method: "POST",
+      headers: { host: `${GRANTED}.worlds.localhost`, "content-type": "application/json" },
+      body: JSON.stringify({ tool: "create_issue", args: {} }),
+    });
+    expect((await res.json()).error.code).toBe("invalid_request");
+  });
+});
+
+// The built SDK is browser code, but the socket half only needs WebSocket + a location,
+// so it can be exercised against the real server. This covers sock.request's pending map
+// and the lazy-connect path — the wire op is tested above, this is the client half.
+describe("sdk socket over the real server", () => {
+  test("worlds.ws.ping() resolves on a page that has only just loaded", async () => {
+    const js = await Bun.file(new URL("../sdk/worlds.js", import.meta.url)).text();
+    const sandbox: Record<string, unknown> = {
+      WebSocket,
+      location: { protocol: "http:", host: `localhost:${PORT}`, pathname: "/", href: `http://localhost:${PORT}/` },
+      performance,
+      setTimeout, clearTimeout, setInterval, clearInterval,
+      fetch: () => Promise.reject(new Error("no http in this sandbox")),
+      document: undefined,
+      addEventListener: () => {},
+      navigator: { sendBeacon: () => true },
+      console,
+    };
+    const globalsObj: Record<string, unknown> = {};
+    sandbox.globalThis = globalsObj;
+    const run = new Function(...Object.keys(sandbox), `${js}\nreturn globalThis.worlds;`);
+    const w = run(...Object.values(sandbox)) as any;
+    // First call on a cold socket: it is still CONNECTING, and must wait rather than fail.
+    const pong = await w.ws.ping();
+    expect(typeof pong.rtt).toBe("number");
+    expect(pong.rtt).toBeGreaterThanOrEqual(0);
+    expect(typeof pong.serverAt).toBe("number");
+    expect(typeof pong.skew).toBe("number");
+    // And again on a warm one.
+    const second = await w.ws.ping();
+    expect(typeof second.rtt).toBe("number");
+  });
+});

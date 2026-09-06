@@ -557,7 +557,7 @@
     let lobby = null;            // worlds.room(ROOM) — ready/host/start roster
     let snap = null;             // latest room snapshot
 
-    // Host is decided by worlds.room (smallest handle in roster).
+    // Host is decided by worlds.room (first to join, stable for the room's life).
     function isHost() {
       return !!(snap && snap.isHost);
     }

@@ -31,6 +31,7 @@
     <a href="#idle">Idle progress</a>
     <a href="#utils">Utilities</a>
     <a href="#notify">Notify</a>
+    <a href="#connect">Connectors</a>
     <a href="#errors">Errors</a>
     <div class="grp">platform</div>
     <a href="#limits">Limits &amp; contract</a>
@@ -510,6 +511,28 @@ const t = worlds.countdown(Date.now() + 10_000, {
       </div>
     </div>
   </div>
+</section>
+
+<!-- ======================================================================= -->
+<section id="connect">
+  <h2>Connectors <span class="k">worlds.connect</span></h2>
+  <p class="lede">Call an external service — Linear, GitHub, anything speaking MCP — through the platform's own credential. The browser never sees a key. Which connectors a site may reach, which tools it may call, and which arguments are <b>pinned server-side</b> are operator configuration: a site cannot grant itself access, and cannot override a pinned argument even by rewriting its own JavaScript. Calls are stamped with the site and requester, capped, and written to an audit log.</p>
+  <div class="demo">
+    <div class="demo-head"><span class="dot"></span><span class="title">what this site may reach</span><span class="hint">empty unless an operator granted this site a connector</span></div>
+    <div class="demo-body">
+<pre><code>await worlds.connect.list();          // {items:[{name, tools}]}
+await worlds.connect.tools("linear"); // allowed tools + input schemas
+
+await worlds.connect.call("linear", "create_issue", {
+  title: "Standups run long",
+});</code></pre>
+      <div class="panel">
+        <div class="row"><button class="btn" id="connectList">list connectors</button></div>
+        <div class="out" id="connectOut">…</div>
+      </div>
+    </div>
+  </div>
+  <p class="note">Nothing is retried internally — a repeated <code>create_issue</code> would file the issue twice — so a timeout is yours to decide about. <code>not_found</code> covers both "no such connector" and "not granted", so existence can't be probed; <code>forbidden</code> means the connector is granted but that tool is not.</p>
 </section>
 
 <!-- ======================================================================= -->

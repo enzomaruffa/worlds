@@ -1,0 +1,1165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>Bomber Brawl · Worlds</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #09090b; --surface: #0c0c0f; --border: #27272a; --gold: #f59e0b;
+    --gold-bright: #fbbf24; --text: #e4e4e7; --muted: #a1a1aa;
+    --danger: #ef4444; --good: #22c55e; --steel: #71717a; --soft: #8a5a34;
+    --curse: #a855f7;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+    overflow: hidden; user-select: none; -webkit-user-select: none; touch-action: none;
+  }
+  #app { position: fixed; inset: 0; display: flex; flex-direction: column; }
+  header {
+    flex: 0 0 auto; display: flex; align-items: center; gap: .5rem; flex-wrap: wrap;
+    padding: .5rem .8rem; background: var(--surface); border-bottom: 1px solid var(--border);
+    min-height: 46px;
+  }
+  header .title { font-weight: 800; font-size: 1rem; letter-spacing: .03em; white-space: nowrap; }
+  header .title .dot {
+    display: inline-block; width: .55rem; height: .55rem; border-radius: 50%;
+    margin: 0 .3rem; vertical-align: middle; background: var(--gold);
+    box-shadow: 0 0 8px var(--gold);
+  }
+  header .spacer { flex: 1 1 auto; }
+  header .pill {
+    padding: .2rem .55rem; border: 1px solid var(--border); border-radius: 999px;
+    background: var(--bg); font-size: .72rem; color: var(--muted); white-space: nowrap;
+  }
+  header .pill b { color: var(--gold-bright); }
+  header .pill.ref { border-color: var(--gold); color: var(--gold-bright); }
+  header .pill.trust { color: #71717a; }
+  #stage {
+    flex: 1 1 auto; position: relative; min-height: 0; display: flex;
+    align-items: center; justify-content: center; background: #050506;
+  }
+  canvas { display: block; }
+  .overlay {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; text-align: center; gap: .4rem;
+    pointer-events: none; opacity: 0; transition: opacity .25s; padding: 1rem;
+    background: rgba(9, 9, 11, .82); z-index: 15;
+  }
+  .overlay.show { opacity: 1; pointer-events: auto; }
+  #resultsOverlay .big {
+    font-size: clamp(1.5rem, 7vw, 2.4rem); font-weight: 800; color: var(--gold-bright);
+    text-shadow: 0 0 20px rgba(245, 158, 11, .5);
+  }
+  #resultsOverlay .sub { color: var(--muted); font-size: .88rem; }
+  #reconnecting { z-index: 20; }
+  #reconnecting .spin {
+    width: 2rem; height: 2rem; border-radius: 50%; border: 3px solid var(--border);
+    border-top-color: var(--gold); animation: spin 1s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #spectateNote {
+    position: absolute; top: .6rem; left: 50%; transform: translateX(-50%); z-index: 6;
+    background: rgba(12, 12, 15, .92); border: 1px solid var(--border); border-radius: 999px;
+    padding: .35rem .8rem; font-size: .72rem; color: var(--gold-bright);
+    opacity: 0; pointer-events: none; transition: opacity .2s;
+  }
+  #spectateNote.show { opacity: 1; }
+  #curseBanner {
+    position: absolute; top: .6rem; left: 50%; transform: translateX(-50%); z-index: 7;
+    background: rgba(88, 28, 135, .92); border: 1px solid var(--curse); border-radius: 999px;
+    padding: .35rem .9rem; font-size: .74rem; font-weight: 700; color: #f3e8ff;
+    opacity: 0; transition: opacity .2s; pointer-events: none; white-space: nowrap;
+  }
+  #curseBanner.show { opacity: 1; }
+  #hud {
+    position: absolute; top: .6rem; right: .6rem; display: flex; flex-direction: column;
+    gap: .3rem; align-items: flex-end; z-index: 5;
+  }
+  #hud .chip {
+    background: rgba(12, 12, 15, .85); border: 1px solid var(--border); border-radius: .5rem;
+    padding: .22rem .55rem; font-size: .72rem; color: var(--muted);
+  }
+  #hud .chip b { color: var(--text); }
+  #loadout {
+    position: absolute; bottom: .6rem; left: 50%; transform: translateX(-50%);
+    display: flex; gap: .32rem; z-index: 5;
+  }
+  #loadout .ic {
+    width: 1.9rem; height: 1.9rem; border-radius: .4rem; background: rgba(12, 12, 15, .85);
+    border: 1px solid var(--border); display: flex; align-items: center; justify-content: center;
+    font-size: .8rem; color: var(--muted); position: relative;
+  }
+  #loadout .ic.on { color: var(--gold-bright); border-color: var(--gold); }
+  #loadout .ic span { position: absolute; bottom: -.35rem; right: -.2rem; font-size: .6rem; color: var(--gold-bright); font-weight: 700; }
+  #dpad {
+    position: absolute; left: .6rem; bottom: .6rem; display: none;
+    grid-template-columns: repeat(3, 2.5rem); grid-template-rows: repeat(3, 2.5rem);
+    gap: .22rem; z-index: 8;
+  }
+  #dpad button {
+    border: 1px solid var(--border); background: rgba(12, 12, 15, .85); color: var(--text);
+    border-radius: .4rem; font-size: 1rem; touch-action: none;
+  }
+  #bombBtn {
+    position: absolute; right: .8rem; bottom: .8rem; width: 4rem; height: 4rem;
+    border-radius: 50%; background: var(--gold); border: none; color: #101012;
+    font-weight: 800; font-size: .78rem; display: none; z-index: 8;
+    box-shadow: 0 4px 0 #b45309; touch-action: none;
+  }
+  #emoteBar { position: absolute; left: .6rem; top: .6rem; display: flex; gap: .3rem; z-index: 6; }
+  #emoteBar button {
+    width: 1.8rem; height: 1.8rem; border-radius: 50%; border: 1px solid var(--border);
+    background: rgba(12, 12, 15, .85); font-size: .9rem;
+  }
+  footer {
+    flex: 0 0 auto; padding: .4rem .8rem; background: var(--surface);
+    border-top: 1px solid var(--border); font-size: .68rem; color: #71717a; text-align: center;
+  }
+  footer b { color: var(--muted); }
+  @media (pointer: coarse) {
+    #dpad { display: grid; }
+    #bombBtn { display: flex; align-items: center; justify-content: center; }
+    #emoteBar { display: none; }
+  }
+</style>
+</head>
+<body>
+  <div id="app">
+    <header>
+      <span class="title">BOMBER<span class="dot"></span>BRAWL</span>
+      <span class="spacer"></span>
+      <span class="pill" id="aliveP"><b id="aliveN">1</b>/<span id="totalN">1</span> alive</span>
+      <span class="pill ref" id="refPill" style="display:none">referee: you</span>
+      <span class="pill trust">client-authoritative — a modified client can cheat</span>
+    </header>
+
+    <div id="stage">
+      <canvas id="c"></canvas>
+      <div id="spectateNote">round in progress — you'll join the next one</div>
+      <div id="curseBanner"></div>
+
+      <div id="hud">
+        <div class="chip">round <b id="roundN">–</b></div>
+        <div class="chip">ring <b id="ringN">–</b></div>
+      </div>
+
+      <div id="loadout">
+        <div class="ic" id="icBomb">💣<span id="icBombN"></span></div>
+        <div class="ic" id="icFlame">🔥<span id="icFlameN"></span></div>
+        <div class="ic" id="icSpeed">⚡</div>
+        <div class="ic" id="icKick">🥾</div>
+        <div class="ic" id="icGlove">🧤</div>
+      </div>
+
+      <div id="emoteBar">
+        <button type="button" data-e="👋">👋</button>
+        <button type="button" data-e="😂">😂</button>
+        <button type="button" data-e="😱">😱</button>
+        <button type="button" data-e="🔥">🔥</button>
+      </div>
+
+      <div class="overlay" id="resultsOverlay">
+        <div class="big" id="resultsBig">Round over</div>
+        <div class="sub" id="resultsSub">next round starting…</div>
+      </div>
+
+      <div class="overlay" id="reconnecting">
+        <div class="spin"></div>
+        <div class="sub">reconnecting…</div>
+      </div>
+
+      <div id="dpad">
+        <button type="button" style="grid-column:2;grid-row:1" data-dir="up">▲</button>
+        <button type="button" style="grid-column:1;grid-row:2" data-dir="left">◀</button>
+        <button type="button" style="grid-column:3;grid-row:2" data-dir="right">▶</button>
+        <button type="button" style="grid-column:2;grid-row:3" data-dir="down">▼</button>
+      </div>
+      <button type="button" id="bombBtn">BOMB</button>
+    </div>
+
+    <footer>
+      WASD / arrows to move · <b>Space</b> to bomb — realtime here is client-authoritative,
+      the server validates no gameplay, so a modified client can cheat. That's the platform's trade.
+    </footer>
+  </div>
+
+  <script src="/worlds.js"></script>
+  <script>
+  (() => {
+    "use strict";
+
+    // ── Constants ────────────────────────────────────────────────────────
+    const ACTORS_P = "bomb-p", ACTORS_W = "bomb-w";
+    const POSE_RATE = 10, WORLD_RATE = 4;
+    const MATCH_COLLECTION = "bomber";
+    const TICK_MS = 100, WORLD_TICK_MS = 250;
+    const LIVE_MS = 2500, REF_GRACE = 1500, STALE_KILL = 4000;
+    const DEATH_CLAIM_MS = 900;
+    const FLAME_MS = 500;
+    const BOMB_FUSE_MS = 2600, SHORT_FUSE_MS = 1000;
+    const MOVE_SPEED = 3.15;          // cells/sec, base
+    const SPEED_STACK = 0.22;         // +22%/stack
+    const MAX_SPEED_STACKS = 4;
+    const THROW_DIST = 3, MOVE_ANIM_MS = 260;
+    const RING_TOTAL_MS = 55000;
+    const RESULTS_MS = 5000;
+    const GHOST_BOMB_COOLDOWN = 25000;
+    const LANDMINE_TRIGGER_DELAY = 150;
+    const PLAYER_R = 0.32;
+    const CURSE_MS = 12000;
+    const CURSE_TYPES = ["diarrhea", "constipation", "molasses", "rocket", "short-fuse", "pinprick"];
+    const CURSE_LABEL = {
+      diarrhea: "DIARRHEA — auto-bombing", constipation: "CONSTIPATION — can't place",
+      molasses: "MOLASSES — half speed", rocket: "ROCKET — can't stop",
+      "short-fuse": "SHORT FUSE — 1s bombs", pinprick: "PINPRICK — flame 1",
+    };
+    const FLOOR = 0, HARD = 1, SOFT = 2, STEEL = 3;
+    const DROP_ICON = { bomb: "💣", flame: "🔥", speed: "⚡", kick: "🥾", glove: "🧤", skull: "💀", mine: "⛏" };
+    function peaceMs(n) { return clamp(40000 + 2200 * n, 40000, 95000); }
+
+    // ── Utility / PRNG ───────────────────────────────────────────────────
+    function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
+    function lerp(a, b, t) { return a + (b - a) * t; }
+    function fnv1a32(str) {
+      let h = 0x811c9dc5;
+      for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+      return h >>> 0;
+    }
+    // mulberry32 — copied verbatim from examples/games/tumble/main.js
+    function mulberry32(seed) {
+      let a = seed >>> 0;
+      return () => {
+        a |= 0; a = (a + 0x6d2b79f5) | 0;
+        let t = Math.imul(a ^ (a >>> 15), 1 | a);
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
+    }
+    function mix32(a, b) {
+      let h = (a ^ 0x9e3779b9) >>> 0;
+      h = Math.imul(h ^ b, 0x85ebca6b) >>> 0;
+      h ^= h >>> 13; h = Math.imul(h, 0xc2b2ae35) >>> 0; h ^= h >>> 16;
+      return h >>> 0;
+    }
+    // prng(seed, cellIndex) — every cell's contents are an O(1) pure function of
+    // (seed, idx, salt), so no map is ever transmitted and any cell can be
+    // recomputed independently (late joiners, contested-pickup checks, etc).
+    function cellRoll(seed, idx, salt) { return mulberry32(mix32(seed, idx * 4 + salt))(); }
+    function idxOf(x, y, w) { return y * w + x; }
+    function oddClamp(v, lo, hi) {
+      let r = Math.round(v);
+      if (r % 2 === 0) r += 1;
+      r = clamp(r, lo, hi);
+      if (r % 2 === 0) r -= 1;
+      return r;
+    }
+
+    // ── Arena generation — pure function of (seed, n), never transmitted ───
+    function arenaDims(n) {
+      const cellsN = 60 + 26 * clamp(n, 2, 24);
+      const h = oddClamp(Math.round(Math.sqrt(cellsN / 1.25)), 13, 25);
+      const w = oddClamp(Math.round(h * 1.25), 15, 31);
+      return { w, h };
+    }
+    // clockwise inward spiral over the interior, skipping the centre 3x3 (which
+    // never gets steel — the ring alone can never resolve a round).
+    function buildRingSpiral(w, h) {
+      const cx = (w - 1) / 2, cy = (h - 1) / 2;
+      const cells = [];
+      let top = 1, bottom = h - 2, left = 1, right = w - 2;
+      while (top <= bottom && left <= right) {
+        for (let x = left; x <= right; x++) cells.push(idxOf(x, top, w));
+        top++;
+        for (let y = top; y <= bottom; y++) cells.push(idxOf(right, y, w));
+        right--;
+        if (top <= bottom) { for (let x = right; x >= left; x--) cells.push(idxOf(x, bottom, w)); bottom--; }
+        if (left <= right) { for (let y = bottom; y >= top; y--) cells.push(idxOf(left, y, w)); left++; }
+      }
+      return cells.filter((i) => {
+        const x = i % w, y = (i / w) | 0;
+        return Math.abs(x - cx) > 1 || Math.abs(y - cy) > 1;
+      });
+    }
+    // ~40% of soft blocks carry a drop; salts 2/3 keep the roll independent of
+    // the salt=1 soft/floor roll so changing one table never perturbs the other.
+    function rollDrop(seed, idx) {
+      if (cellRoll(seed, idx, 2) >= 0.40) return null;
+      const r = cellRoll(seed, idx, 3);
+      if (r < 0.26) return "bomb";
+      if (r < 0.52) return "flame";
+      if (r < 0.68) return "speed";
+      if (r < 0.80) return "kick";
+      if (r < 0.88) return "glove";
+      if (r < 0.96) return "skull";
+      return "mine";
+    }
+    function buildArena(seed, n) {
+      const { w, h } = arenaDims(n);
+      const grid = new Uint8Array(w * h).fill(FLOOR);
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+        if (x === 0 || y === 0 || x === w - 1 || y === h - 1) grid[idxOf(x, y, w)] = HARD;
+        else if (x % 2 === 0 && y % 2 === 0) grid[idxOf(x, y, w)] = HARD;
+      }
+      const cx = (w - 1) / 2, cy = (h - 1) / 2;
+      const inradius = Math.min(cx, cy) - 1;
+      const spawnR = inradius * 0.72;
+      const slots = n + 6;
+      const spawns = [];
+      for (let i = 0; i < slots; i++) {
+        const ang = -Math.PI / 2 + (2 * Math.PI * i) / slots;
+        const sx = oddClamp(Math.round(cx + spawnR * Math.cos(ang)), 1, w - 2);
+        const sy = oddClamp(Math.round(cy + spawnR * Math.sin(ang)), 1, h - 2);
+        spawns.push({ x: sx, y: sy });
+      }
+      const protect = new Set();
+      for (const s of spawns) {
+        protect.add(idxOf(s.x, s.y, w));
+        if (s.x + 1 <= w - 2) protect.add(idxOf(s.x + 1, s.y, w));
+        if (s.x - 1 >= 1) protect.add(idxOf(s.x - 1, s.y, w));
+        if (s.y + 1 <= h - 2) protect.add(idxOf(s.x, s.y + 1, w));
+        if (s.y - 1 >= 1) protect.add(idxOf(s.x, s.y - 1, w));
+      }
+      for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
+        const i = idxOf(x, y, w);
+        if (grid[i] !== FLOOR || protect.has(i)) continue;
+        if (cellRoll(seed, i, 1) < 0.68) grid[i] = SOFT;
+      }
+      const drops = new Map();
+      for (let i = 0; i < grid.length; i++) if (grid[i] === SOFT) {
+        const d = rollDrop(seed, i);
+        if (d) drops.set(i, d);
+      }
+      return { w, h, grid, drops, spawns, ring: buildRingSpiral(w, h) };
+    }
+
+    // ── Identity, match clock ────────────────────────────────────────────
+    const { colorFor, toast, id: worldsId } = worlds;
+    const clientId = worldsId();
+    const params = new URLSearchParams(location.search);
+    const watchMode = params.has("watch");
+    let me = { handle: null, name: "you", color: "#f59e0b" };
+    let skew = 0;
+    function matchNow() { return Date.now() + skew; }
+    async function syncClock() {
+      try { const r = await worlds.ws.ping(); skew += (r.skew - skew) * 0.15; } catch (_) {}
+    }
+
+    // ── Local + shared world state ───────────────────────────────────────
+    let arena = null;              // {w,h,grid,drops,spawns,ring}
+    let ringIndex = 0;
+    let ringStartAt = Infinity;
+    let claimed = new Set();       // ground-item cells already picked up (monotonic union)
+    let bombs = new Map();         // id -> bomb
+    let activeFlames = new Map();  // cellIdx -> explodedAt (lethal while now-ts < FLAME_MS)
+    let deadCids = new Set();      // monotonic union — never resurrect
+    let roster = new Map();        // cid -> remote player view
+    let liveSeenAt = new Map();    // cid -> perf.now() of last pose flush (liveness/referee)
+    let enrolled = new Set();      // cids playing the current round
+    let matchDoc = null, matchCol = null;
+    let curRoundIndex = -1;
+    let roundEndedAt = 0, pulledForward = false;
+    let disconnected = false, lastInboundAt = performance.now();
+    let sawPeerFlush = false;
+    const bootAt = performance.now();
+
+    const self = {
+      cid: clientId, x: 0, y: 0, alive: true, ghost: watchMode,
+      facing: { x: 0, y: 1 }, seq: 0, intents: [], bombSeq: 0,
+      maxBombs: 1, bombsOut: 0, flame: 1, speedStacks: 0, kick: false, glove: false,
+      mines: 0, holding: null, curse: null, lastGhostBombAt: 0, lastAutoBomb: 0,
+      triggeredMines: new Set(), exemptBombId: null, spawnIdx: 0,
+    };
+    function pushIntent(kind, args) {
+      self.seq++;
+      self.intents.push([self.seq, kind, ...args]);
+      if (self.intents.length > 4) self.intents.shift();
+    }
+
+    // ── Referee election ─────────────────────────────────────────────────
+    // refRank is a pure function of (cid, matchId) — lowest rank among live
+    // cids is the referee. NOT join order, NOT presence[0].
+    function refRank(cid) { return fnv1a32(cid + ":" + (matchDoc ? matchDoc.id : "x")); }
+    function liveCidsSet(nowP) {
+      const s = new Set([clientId]);
+      for (const [cid, t] of liveSeenAt) if (nowP - t < LIVE_MS) s.add(cid);
+      return s;
+    }
+    function isReferee() {
+      if (watchMode) return false;
+      const nowP = performance.now();
+      if (nowP - bootAt < REF_GRACE) return false;
+      if (!sawPeerFlush && liveSeenAt.size === 0 && nowP - bootAt < 4000) return false;
+      const cands = [...liveCidsSet(nowP)].sort((a, b) => refRank(a) - refRank(b));
+      return cands[0] === clientId;
+    }
+
+    // ── Movement + collision ─────────────────────────────────────────────
+    const keys = new Set();
+    const KEY_DIR = {
+      w: "up", W: "up", ArrowUp: "up", s: "down", S: "down", ArrowDown: "down",
+      a: "left", A: "left", ArrowLeft: "left", d: "right", D: "right", ArrowRight: "right",
+    };
+    window.addEventListener("keydown", (e) => {
+      if (KEY_DIR[e.key]) keys.add(KEY_DIR[e.key]);
+      if (e.key === " " || e.key === "Spacebar") { e.preventDefault(); bombAction(); }
+    }, { passive: false });
+    window.addEventListener("keyup", (e) => { if (KEY_DIR[e.key]) keys.delete(KEY_DIR[e.key]); });
+    window.addEventListener("blur", () => keys.clear());
+    document.addEventListener("visibilitychange", () => { if (document.hidden) keys.clear(); });
+
+    function effSpeed() {
+      let mul = 1 + Math.min(self.speedStacks, MAX_SPEED_STACKS) * SPEED_STACK;
+      if (self.curse) {
+        if (self.curse.type === "molasses") mul *= 0.5;
+        else if (self.curse.type === "rocket") mul *= 1.9;
+      }
+      return MOVE_SPEED * mul;
+    }
+    function solidAt(x, y) {
+      if (!arena) return true;
+      if (x < 0 || y < 0 || x >= arena.w || y >= arena.h) return true;
+      const i = idxOf(x, y, arena.w);
+      const t = arena.grid[i];
+      if (t === HARD || t === STEEL || t === SOFT) return true;
+      for (const b of bombs.values()) {
+        if (b.exploded) continue;
+        if (b.cell.x === x && b.cell.y === y) return self.exemptBombId !== b.id;
+      }
+      return false;
+    }
+    function collideRect(cx, cy, r) {
+      const x0 = Math.floor(cx - r), x1 = Math.floor(cx + r);
+      const y0 = Math.floor(cy - r), y1 = Math.floor(cy + r);
+      for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) if (solidAt(x, y)) return true;
+      return false;
+    }
+    function slideDestination(from, dx, dy) {
+      let cx = from.x, cy = from.y;
+      for (let s = 1; s <= 6; s++) {
+        const nx = from.x + dx * s, ny = from.y + dy * s;
+        if (nx < 0 || ny < 0 || nx >= arena.w || ny >= arena.h) break;
+        const i = idxOf(nx, ny, arena.w);
+        if (arena.grid[i] === HARD || arena.grid[i] === STEEL || arena.grid[i] === SOFT) break;
+        let blocked = false;
+        for (const b of bombs.values()) if (!b.exploded && b.cell.x === nx && b.cell.y === ny) { blocked = true; break; }
+        if (blocked) break;
+        cx = nx; cy = ny;
+      }
+      return { x: cx, y: cy };
+    }
+    function maybeKick(dx, dy) {
+      if (!self.kick || (!dx && !dy)) return;
+      const tx = Math.round(self.x + dx * 0.6), ty = Math.round(self.y + dy * 0.6);
+      for (const b of bombs.values()) {
+        if (b.exploded || b.move) continue;
+        if (b.cell.x === tx && b.cell.y === ty) { doKick(b, dx, dy); return; }
+      }
+    }
+    function applyMove(b, to, kind, ts) {
+      b.move = { from: { ...b.cell }, to, at: ts, dur: MOVE_ANIM_MS, kind };
+      b.cell = to;
+    }
+    function doKick(b, dx, dy) {
+      const to = slideDestination(b.cell, dx, dy);
+      const ts = matchNow();
+      applyMove(b, to, "kick", ts);
+      pushIntent("k", [b.id, to.x, to.y, ts]);
+    }
+    function integrateMovement(dt) {
+      if (!arena) return;
+      let dx = 0, dy = 0;
+      if (keys.has("left")) dx -= 1;
+      if (keys.has("right")) dx += 1;
+      if (keys.has("up")) dy -= 1;
+      if (keys.has("down")) dy += 1;
+      if (self.curse && self.curse.type === "rocket" && !dx && !dy) { dx = self.facing.x; dy = self.facing.y; }
+      if (dx || dy) {
+        const len = Math.hypot(dx, dy) || 1; dx /= len; dy /= len;
+        self.facing = { x: dx, y: dy };
+      }
+      const spd = effSpeed();
+      const nx = self.x + dx * spd * dt, ny = self.y + dy * spd * dt;
+      if (self.ghost) { self.x = clamp(nx, 0.5, arena.w - 1.5); self.y = clamp(ny, 0.5, arena.h - 1.5); return; }
+      if (!self.alive) return;
+      if (self.exemptBombId) {
+        const b = bombs.get(self.exemptBombId);
+        if (!b || Math.round(self.x) !== b.cell.x || Math.round(self.y) !== b.cell.y) self.exemptBombId = null;
+      }
+      const r = PLAYER_R;
+      if (!collideRect(nx, self.y, r)) self.x = nx; else maybeKick(Math.sign(dx), 0);
+      if (!collideRect(self.x, ny, r)) self.y = ny; else maybeKick(0, Math.sign(dy));
+      self.x = clamp(self.x, 1, arena.w - 2);
+      self.y = clamp(self.y, 1, arena.h - 2);
+    }
+
+    // ── Bombs: placement, kick, throw, landmines, ghost bombs ───────────
+    // A bomb is a pure function of (cell, owner, power, placedAt) — its id is
+    // derived from the owner + a per-owner sequence, so every client that
+    // learns of it (via the intent ring) constructs the identical object.
+    function bombAction() {
+      if (watchMode) return;
+      if (!self.alive) { if (self.ghost) ghostBomb(); return; }
+      if (self.curse && self.curse.type === "constipation") return;
+      if (self.holding) { throwHeld(); return; }
+      if (self.glove) {
+        const fx = Math.round(self.x + self.facing.x), fy = Math.round(self.y + self.facing.y);
+        for (const b of bombs.values()) {
+          if (b.exploded || b.move || String(b.owner || "").startsWith("ghost:")) continue;
+          if (b.cell.x === fx && b.cell.y === fy) { bombs.delete(b.id); self.holding = b; return; }
+        }
+      }
+      placeBomb();
+    }
+    function placeBomb() {
+      if (self.bombsOut >= self.maxBombs) return;
+      const cx = Math.round(self.x), cy = Math.round(self.y);
+      if (!arena || arena.grid[idxOf(cx, cy, arena.w)] !== FLOOR) return;
+      for (const b of bombs.values()) if (!b.exploded && b.cell.x === cx && b.cell.y === cy) return;
+      const ts = matchNow();
+      const fuse = self.curse && self.curse.type === "short-fuse" ? SHORT_FUSE_MS : BOMB_FUSE_MS;
+      const power = self.curse && self.curse.type === "pinprick" ? 1 : self.flame;
+      const isMine = self.mines > 0;
+      if (isMine) self.mines--;
+      const localSeq = ++self.bombSeq;
+      const id = clientId + ":" + localSeq;
+      bombs.set(id, {
+        id, owner: clientId, power, placedAt: ts, fuseMs: isMine ? Infinity : fuse,
+        cell: { x: cx, y: cy }, move: null, mine: isMine, armed: isMine, exploded: false, ghost: false,
+      });
+      self.exemptBombId = id;
+      self.bombsOut++;
+      sfxPlace();
+      pushIntent("b", [cx, cy, power, ts, fuse, localSeq, isMine ? 1 : 0]);
+    }
+    function throwHeld() {
+      const b = self.holding; if (!b) return;
+      const from = { x: Math.round(self.x), y: Math.round(self.y) };
+      let to = from;
+      for (let s = 1; s <= THROW_DIST; s++) {
+        const nx = from.x + self.facing.x * s, ny = from.y + self.facing.y * s;
+        if (nx < 0 || ny < 0 || nx >= arena.w || ny >= arena.h) break;
+        const i = idxOf(nx, ny, arena.w);
+        if (arena.grid[i] === HARD || arena.grid[i] === STEEL || arena.grid[i] === SOFT) break;
+        let occ = false;
+        for (const bb of bombs.values()) if (!bb.exploded && bb.cell.x === nx && bb.cell.y === ny) occ = true;
+        if (occ) break;
+        to = { x: nx, y: ny };
+      }
+      const ts = matchNow();
+      b.placedAt = ts; b.fuseMs = BOMB_FUSE_MS;
+      b.move = { from, to, at: ts, dur: MOVE_ANIM_MS, kind: "throw" };
+      b.cell = to;
+      bombs.set(b.id, b);
+      self.holding = null;
+      pushIntent("t", [b.id, to.x, to.y, ts]);
+    }
+    function ghostBomb() {
+      const now = matchNow();
+      if (now - self.lastGhostBombAt < GHOST_BOMB_COOLDOWN) return;
+      if (!arena) return;
+      const cx = Math.round(self.x), cy = Math.round(self.y);
+      if (cx < 0 || cy < 0 || cx >= arena.w || cy >= arena.h) return;
+      if (arena.grid[idxOf(cx, cy, arena.w)] !== FLOOR) return;
+      self.lastGhostBombAt = now;
+      const localSeq = ++self.bombSeq;
+      const id = clientId + ":g" + localSeq;
+      bombs.set(id, {
+        id, owner: "ghost:" + clientId, power: 1, placedAt: now, fuseMs: BOMB_FUSE_MS,
+        cell: { x: cx, y: cy }, move: null, mine: false, armed: false, exploded: false, ghost: true,
+      });
+      sfxPlace();
+      pushIntent("gb", [cx, cy, now]);
+    }
+
+    // ── Flames / chain reactions — order-independent BFS over a snapshot ──
+    function computeFlameCells(gridSnap, w, h, cell, power) {
+      const cells = [idxOf(cell.x, cell.y, w)];
+      const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+      for (const [dx, dy] of dirs) {
+        for (let s = 1; s <= power; s++) {
+          const nx = cell.x + dx * s, ny = cell.y + dy * s;
+          if (nx < 0 || ny < 0 || nx >= w || ny >= h) break;
+          const i = idxOf(nx, ny, w);
+          const t = gridSnap[i];
+          if (t === HARD || t === STEEL) break;
+          cells.push(i);
+          if (t === SOFT) break;
+        }
+      }
+      return cells;
+    }
+    function detonate(initialIds, now) {
+      if (!arena || !initialIds.length) return;
+      const snap = arena.grid.slice();
+      const queue = [...initialIds], processed = new Set(), hit = new Set();
+      while (queue.length) {
+        const id = queue.pop();
+        if (processed.has(id)) continue;
+        processed.add(id);
+        const b = bombs.get(id);
+        if (!b) continue;
+        for (const i of computeFlameCells(snap, arena.w, arena.h, b.cell, b.power)) {
+          hit.add(i);
+          for (const [oid, ob] of bombs) {
+            if (processed.has(oid) || ob.exploded) continue;
+            if (idxOf(ob.cell.x, ob.cell.y, arena.w) === i) queue.push(oid);
+          }
+        }
+      }
+      for (const id of processed) {
+        const b = bombs.get(id);
+        if (!b) continue;
+        b.exploded = true; b.explodedAt = now;
+        if (b.owner === clientId) self.bombsOut = Math.max(0, self.bombsOut - 1);
+      }
+      for (const i of hit) {
+        activeFlames.set(i, now);
+        if (arena.grid[i] === SOFT) arena.grid[i] = FLOOR;
+      }
+      setTimeout(() => { for (const id of processed) bombs.delete(id); }, FLAME_MS + 80);
+    }
+    function stepBombs(now) {
+      const ready = [];
+      for (const [id, b] of bombs) {
+        if (b.exploded || (b.mine && b.armed)) continue;
+        if (now - b.placedAt >= b.fuseMs) ready.push(id);
+      }
+      if (ready.length) { sfxBoom(); detonate(ready, now); }
+      // landmine: the victim who steps beside it owns the trigger
+      for (const [id, b] of bombs) {
+        if (!b.mine || !b.armed || b.exploded || self.triggeredMines.has(id)) continue;
+        if (Math.hypot(self.x - b.cell.x, self.y - b.cell.y) < 1.05) {
+          self.triggeredMines.add(id);
+          b.armed = false; b.placedAt = now; b.fuseMs = LANDMINE_TRIGGER_DELAY;
+          pushIntent("lm", [id, now]);
+        }
+      }
+    }
+
+    // ── Closing ring — pure function of (ringStartAt, i), never transmitted ─
+    function stepRing(now) {
+      if (!arena || !arena.ring.length) return;
+      const total = arena.ring.length;
+      const t = clamp((now - ringStartAt) / RING_TOTAL_MS, 0, 1);
+      const target = Math.floor(t * t * total); // quadratic ease-in — accelerates
+      if (target > ringIndex) {
+        for (let i = ringIndex; i < target; i++) {
+          const ci = arena.ring[i];
+          arena.grid[ci] = STEEL;
+          claimed.add(ci);
+        }
+        ringIndex = target;
+      }
+    }
+    function maybePullRingForward(now) {
+      if (pulledForward || !isReferee() || !matchDoc) return;
+      if (countAlive() > 3) return;
+      if (ringStartAt - now < 5000) return;
+      pulledForward = true;
+      matchCol.update(matchDoc.id, { ringStartAt: Date.now() }, { ifUpdatedAt: matchDoc.updated_at })
+        .then((d) => { matchDoc = d; ringStartAt = d.data.ringStartAt; })
+        .catch(async (e) => {
+          if (e && e.code === "conflict") { try { matchDoc = await matchCol.get(matchDoc.id); ringStartAt = matchDoc.data.ringStartAt; } catch (_) {} }
+        });
+    }
+
+    // ── Curses — contagious 12s status, own info same as your own position ─
+    function applyCurse(type, now) { self.curse = { type, until: now + CURSE_MS }; }
+    function stepCurse(now) {
+      if (self.curse && now > self.curse.until) self.curse = null;
+      for (const [cid, p] of roster) {
+        if (!p.alive) continue;
+        const d = Math.hypot(self.x - p.x, self.y - p.y);
+        if (d < 0.75 && p.curseType) {
+          if (self.curse) self.curse.until = now + CURSE_MS;
+          else applyCurse(p.curseType, now);
+        }
+      }
+      if (self.curse && self.curse.type === "diarrhea" && now - self.lastAutoBomb > 1000) {
+        self.lastAutoBomb = now; placeBomb();
+      }
+    }
+
+    // ── Pickups — contested claim: both players get it, referee just removes
+    // the ground item on the first claim it sees.
+    function stepPickups(now) {
+      if (!arena || watchMode || !self.alive) return;
+      const cx = Math.round(self.x), cy = Math.round(self.y);
+      const i = idxOf(cx, cy, arena.w);
+      if (arena.grid[i] !== FLOOR || claimed.has(i)) return;
+      const drop = arena.drops.get(i);
+      if (!drop) return;
+      claimed.add(i);
+      applyPowerup(drop, now);
+      pushIntent("pu", [i]);
+    }
+    function applyPowerup(drop, now) {
+      if (drop === "bomb") self.maxBombs = Math.min(8, self.maxBombs + 1);
+      else if (drop === "flame") self.flame = Math.min(8, self.flame + 1);
+      else if (drop === "speed") self.speedStacks = Math.min(MAX_SPEED_STACKS, self.speedStacks + 1);
+      else if (drop === "kick") self.kick = true;
+      else if (drop === "glove") self.glove = true;
+      else if (drop === "mine") self.mines = 3;
+      else if (drop === "skull") applyCurse(CURSE_TYPES[Math.floor(Math.random() * CURSE_TYPES.length)], now);
+    }
+
+    // ── Death — self-adjudicated; the referee is only a backstop ───────────
+    function checkSelfDeath(now) {
+      if (!self.alive || self.ghost || watchMode || !arena) return;
+      const cx = Math.round(self.x), cy = Math.round(self.y);
+      const i = idxOf(cx, cy, arena.w);
+      const ft = activeFlames.get(i);
+      if (ft !== undefined && now - ft < FLAME_MS) { die("flame"); return; }
+      if (arena.grid[i] === STEEL) die("ring");
+    }
+    function die(cause) {
+      self.alive = false; self.ghost = true;
+      deadCids.add(clientId);
+      pushIntent("d", [cause]);
+    }
+
+    // ── Minimal WebAudio SFX ─────────────────────────────────────────────
+    let actx = null;
+    function beep(freq, dur, type) {
+      try {
+        if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
+        const o = actx.createOscillator(), g = actx.createGain();
+        o.type = type || "sine"; o.frequency.value = freq; g.gain.value = 0.08;
+        o.connect(g); g.connect(actx.destination);
+        o.start(); g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur);
+        o.stop(actx.currentTime + dur);
+      } catch (_) {}
+    }
+    function sfxPlace() { beep(360, 0.08, "square"); }
+    function sfxBoom() { beep(90, 0.35, "sawtooth"); }
+
+    // ── Match doc — list/create race + CAS rollover ─────────────────────
+    async function acquireMatch() {
+      matchCol = worlds.db.collection(MATCH_COLLECTION);
+      let res = await matchCol.list({ filter: { _k: "main" }, limit: 1 });
+      if (!res.items || !res.items.length) {
+        try {
+          await matchCol.create({
+            _k: "main", seed: (Date.now() ^ 0x2545f491) >>> 0, n: 8, roundIndex: 0,
+            startedAt: Date.now(), ringStartAt: Date.now() + peaceMs(8),
+          });
+        } catch (_) {}
+        res = await matchCol.list({ filter: { _k: "main" }, limit: 1 });
+      }
+      matchDoc = res.items[0];
+      applyMatchDoc(matchDoc);
+      matchCol.subscribe((ev) => {
+        if (!ev || !ev.doc || ev.doc.data._k !== "main") return;
+        matchDoc = ev.doc;
+        applyMatchDoc(matchDoc);
+      });
+    }
+    let firstApply = true;
+    function applyMatchDoc(doc) {
+      if (!doc || doc.data.roundIndex === curRoundIndex) return;
+      curRoundIndex = doc.data.roundIndex;
+      // arriving mid-round (an existing doc, already underway) → spectate and
+      // enrol next round, same as any late joiner; a doc we just created (or
+      // that just rolled over) starts everyone together.
+      if (firstApply && (doc.data.roundIndex > 0 || Date.now() - doc.data.startedAt > 2000)) spectateNext = true;
+      firstApply = false;
+      startRound(doc.data.seed, doc.data.n, doc.data.ringStartAt);
+    }
+    let spectateNext = watchMode;
+    function startRound(seed, n, ringStart) {
+      arena = buildArena(seed, n);
+      ringIndex = 0; ringStartAt = ringStart;
+      claimed.clear(); bombs.clear(); activeFlames.clear(); deadCids.clear();
+      const nowP = performance.now();
+      enrolled = liveCidsSet(nowP); // whoever's live right now plays this round
+      const spectating = spectateNext;
+      if (spectating) enrolled.delete(clientId); // late joiner — watch, enrol next round
+      const rank = [...enrolled].sort((a, b) => refRank(a) - refRank(b));
+      const mySlot = spectating ? 0 : rank.indexOf(clientId) % arena.spawns.length;
+      self.alive = !spectating;
+      self.ghost = spectating;
+      self.curse = null; self.holding = null; self.mines = 0; self.exemptBombId = null;
+      self.maxBombs = 1; self.flame = 1; self.speedStacks = 0; self.kick = false; self.glove = false;
+      self.triggeredMines = new Set(); self.bombsOut = 0;
+      const sp = arena.spawns[mySlot] || arena.spawns[0];
+      self.x = sp.x; self.y = sp.y; self.spawnIdx = mySlot;
+      hideResults();
+      updateSpectateNote(spectating);
+      spectateNext = watchMode; // spectators re-enrol automatically next round unless ?watch=1
+    }
+    function countAlive() {
+      let n = 0;
+      for (const cid of enrolled) {
+        if (cid === clientId) { if (self.alive) n++; continue; }
+        const p = roster.get(cid);
+        if (p && p.alive) n++;
+      }
+      return n;
+    }
+    function checkRoundEnd(now) {
+      if (!arena || roundEndedAt || enrolled.size === 0) return;
+      const aliveN = countAlive();
+      // solo testing shouldn't instantly "win" — a lone player's round only ends on death
+      if (enrolled.size > 1 ? aliveN <= 1 : aliveN === 0) {
+        roundEndedAt = now;
+        showResults(aliveN);
+        if (isReferee()) scheduleRollover();
+      }
+    }
+    function scheduleRollover() {
+      setTimeout(async () => {
+        if (!matchDoc) return;
+        const n = clamp(liveCidsSet(performance.now()).size, 2, 24);
+        const seed = (Date.now() ^ Math.floor(Math.random() * 0xffffffff)) >>> 0;
+        const patch = {
+          seed, n, roundIndex: matchDoc.data.roundIndex + 1,
+          startedAt: Date.now(), ringStartAt: Date.now() + peaceMs(n),
+        };
+        try { matchDoc = await matchCol.update(matchDoc.id, patch, { ifUpdatedAt: matchDoc.updated_at }); }
+        catch (e) { if (e && e.code === "conflict") { try { matchDoc = await matchCol.get(matchDoc.id); } catch (_) {} } }
+      }, RESULTS_MS);
+    }
+
+    // ── Actors: poses (bomb-p, 10Hz) + world (bomb-w, 4Hz) ──────────────
+    // Two separate rooms because a room's flush rate is fixed by its first
+    // subscriber — this buys 10Hz for poses and 4Hz for the world independently.
+    let netP = null, netW = null;
+    function loadoutSnapshot() { return { mb: self.maxBombs, fp: self.flame, ss: self.speedStacks, kk: self.kick ? 1 : 0, gl: self.glove ? 1 : 0 }; }
+    function curseSnapshot() { return self.curse ? [self.curse.type, self.curse.until] : null; }
+    function setupActors() {
+      netP = worlds.actors(ACTORS_P, { zoneKey: () => "m", rate: POSE_RATE, observer: watchMode });
+      netP.setMetadata({ n: me.name, c: me.color, ld: loadoutSnapshot(), cs: curseSnapshot() });
+      netP.onChange(onPoseChange);
+      netP.onLeave(onPoseLeave);
+      netP.onEvent((cid, payload) => { if (payload && payload.t === "emote") showEmoteBubble(cid, payload.e); });
+      netW = worlds.actors(ACTORS_W, { zoneKey: () => "m", rate: WORLD_RATE });
+      netW.setMetadata({ ref: clientId });
+      netW.onChange(onWorldChange);
+    }
+    function onPoseChange(cid, state, peer) {
+      if (!state || cid === clientId) return;
+      markInbound();
+      liveSeenAt.set(cid, performance.now());
+      sawPeerFlush = true;
+      let p = roster.get(cid);
+      if (!p) { p = { name: cid, color: colorFor(cid), x: 0, y: 0, rx: 0, ry: 0, seen: false, alive: true, lastSeq: -1, curseType: null, ld: {} }; roster.set(cid, p); }
+      if (typeof state.x === "number") p.x = state.x;
+      if (typeof state.y === "number") p.y = state.y;
+      if (!p.seen) { p.seen = true; p.rx = p.x; p.ry = p.y; } // snap on first sighting, then interpolate
+      p.alive = state.a !== 0;
+      const md = peer && peer.metadata;
+      if (md) {
+        if (md.n) p.name = md.n;
+        if (md.c) p.color = md.c;
+        if (md.ld) p.ld = md.ld;
+        p.curseType = md.cs ? md.cs[0] : null;
+      }
+      applyPeerIntents(cid, p, state.e);
+      if (!p.alive) deadCids.add(cid);
+    }
+    function onPoseLeave(cid) { roster.delete(cid); liveSeenAt.delete(cid); }
+    function applyPeerIntents(cid, p, ring) {
+      if (!Array.isArray(ring)) return;
+      for (const entry of ring) {
+        const seq = entry[0];
+        if (seq <= p.lastSeq) continue;
+        p.lastSeq = seq;
+        const kind = entry[1];
+        if (kind === "b") {
+          const [, , cx, cy, power, ts, fuse, localSeq, isMine] = entry;
+          const id = cid + ":" + localSeq;
+          if (!bombs.has(id)) bombs.set(id, { id, owner: cid, power, placedAt: ts, fuseMs: isMine ? Infinity : fuse, cell: { x: cx, y: cy }, move: null, mine: !!isMine, armed: !!isMine, exploded: false, ghost: false });
+        } else if (kind === "k" || kind === "t") {
+          const [, , bombId, tx, ty, ts] = entry;
+          const b = bombs.get(bombId);
+          if (b && !b.exploded) applyMove(b, { x: tx, y: ty }, kind === "k" ? "kick" : "throw", ts);
+        } else if (kind === "lm") {
+          const [, , bombId, ts] = entry;
+          const b = bombs.get(bombId);
+          if (b && b.mine && b.armed) { b.armed = false; b.placedAt = ts; b.fuseMs = LANDMINE_TRIGGER_DELAY; }
+        } else if (kind === "pu") {
+          claimed.add(entry[2]);
+        } else if (kind === "gb") {
+          const [, , cx, cy, ts] = entry;
+          const id = cid + ":g" + seq;
+          if (!bombs.has(id)) bombs.set(id, { id, owner: "ghost:" + cid, power: 1, placedAt: ts, fuseMs: BOMB_FUSE_MS, cell: { x: cx, y: cy }, move: null, mine: false, armed: false, exploded: false, ghost: true });
+        } else if (kind === "d") {
+          deadCids.add(cid); p.alive = false;
+        }
+      }
+    }
+    function onWorldChange(cid, state) {
+      if (!state || !arena) return;
+      markInbound();
+      if (typeof state.g === "string") for (let i = 0; i < state.g.length && i < arena.grid.length; i++) arena.grid[i] = state.g.charCodeAt(i) - 48;
+      if (Array.isArray(state.cl)) for (const i of state.cl) claimed.add(i);
+      if (Array.isArray(state.b)) for (const e of state.b) unionBomb(e);
+      if (Array.isArray(state.dn)) for (const c of state.dn) { deadCids.add(c); if (c === clientId && self.alive) die("backstop"); }
+      if (typeof state.ri === "number" && state.ri > ringIndex) {
+        for (let i = ringIndex; i < state.ri; i++) { const ci = arena.ring[i]; if (ci !== undefined) arena.grid[ci] = STEEL; }
+        ringIndex = state.ri;
+      }
+    }
+    function unionBomb(e) {
+      const [id, x, y, power, placedAt, fuseMs, flag] = e;
+      if (bombs.has(id)) return;
+      bombs.set(id, { id, owner: null, power, placedAt, fuseMs: fuseMs >= 999999 ? Infinity : fuseMs, cell: { x, y }, move: null, mine: flag === 1, armed: flag === 1, exploded: false, ghost: flag === 2 });
+    }
+    function encodeGrid() {
+      let s = ""; for (let i = 0; i < arena.grid.length; i++) s += String(arena.grid[i]); return s;
+    }
+    let lastMetaSent = "", lastMetaAt = 0, lastWMetaSent = "", lastWMetaAt = 0;
+    function maybeSendMeta(now) {
+      const snap = JSON.stringify({ n: me.name, c: me.color, ld: loadoutSnapshot(), cs: curseSnapshot() });
+      if (snap !== lastMetaSent || now - lastMetaAt > 1000) { lastMetaSent = snap; lastMetaAt = now; netP.setMetadata(JSON.parse(snap)); }
+    }
+    function publishPose() {
+      if (!netP || disconnected) return;
+      netP.set({ x: Math.round(self.x * 100) / 100, y: Math.round(self.y * 100) / 100, a: self.alive ? 1 : 0, e: self.intents });
+    }
+    function publishWorld(now) {
+      if (!isReferee() || !arena || disconnected) return;
+      const bombArr = [];
+      for (const [id, b] of bombs) if (!b.exploded) bombArr.push([id, b.cell.x, b.cell.y, b.power, b.placedAt, b.fuseMs === Infinity ? 999999 : b.fuseMs, b.mine ? 1 : (b.ghost ? 2 : 0)]);
+      netW.set({ g: encodeGrid(), cl: [...claimed], b: bombArr, dn: [...deadCids], ri: ringIndex, ts: now });
+      const wmeta = JSON.stringify({ ref: clientId, seed: matchDoc && matchDoc.data.seed, n: matchDoc && matchDoc.data.n, w: arena.w, h: arena.h });
+      if (wmeta !== lastWMetaSent || now - lastWMetaAt > 1000) { lastWMetaSent = wmeta; lastWMetaAt = now; netW.setMetadata(JSON.parse(wmeta)); }
+    }
+    function refereeMaintenance(now) {
+      if (!isReferee() || !arena) return;
+      for (const [cid, p] of roster) {
+        if (!enrolled.has(cid) || !p.alive) continue;
+        const seen = liveSeenAt.get(cid) || 0;
+        if (performance.now() - seen > STALE_KILL) { deadCids.add(cid); p.alive = false; continue; }
+        const i = idxOf(clamp(Math.round(p.x), 0, arena.w - 1), clamp(Math.round(p.y), 0, arena.h - 1), arena.w);
+        const ft = activeFlames.get(i);
+        if (ft !== undefined && now - ft < FLAME_MS) {
+          p.flameSeenAt = p.flameSeenAt || now;
+          if (now - p.flameSeenAt > DEATH_CLAIM_MS) { deadCids.add(cid); p.alive = false; }
+        } else p.flameSeenAt = null;
+      }
+      maybePullRingForward(now);
+    }
+    function markInbound() { lastInboundAt = performance.now(); }
+
+    // ── Network + simulation tick — setInterval, not rAF, so a hidden tab
+    // keeps ticking bombs/ring/publishing and never gets closed by the idle
+    // timeout. Rendering + local movement stay on rAF for responsiveness.
+    function networkTick() {
+      const now = matchNow();
+      if (arena) {
+        stepRing(now);
+        stepCurse(now);
+        stepBombs(now);
+        stepPickups(now);
+        checkSelfDeath(now);
+        checkRoundEnd(now);
+      }
+      maybeSendMeta(now);
+      publishPose();
+      renderHud();
+    }
+    function worldTick() {
+      const now = matchNow();
+      refereeMaintenance(now);
+      publishWorld(now);
+    }
+    function checkDisconnectGuard() {
+      const stalled = roster.size > 0 && performance.now() - lastInboundAt > 3000;
+      disconnected = stalled;
+      document.getElementById("reconnecting").classList.toggle("show", stalled);
+    }
+
+    // ── Render loop (rAF) ────────────────────────────────────────────────
+    function stepRemotes(dt) {
+      const k = Math.min(1, 10 * dt);
+      for (const p of roster.values()) { p.rx += (p.x - p.rx) * k; p.ry += (p.y - p.ry) * k; }
+    }
+    let lastFrame = performance.now();
+    function frame(now) {
+      const dt = Math.min(0.05, (now - lastFrame) / 1000);
+      lastFrame = now;
+      integrateMovement(dt);
+      stepRemotes(dt);
+      draw(now);
+      requestAnimationFrame(frame);
+    }
+
+    // ── Rendering ────────────────────────────────────────────────────────
+    const canvas = document.getElementById("c");
+    const ctx = canvas.getContext("2d");
+    let cellPx = 24;
+    function resize() {
+      const stage = document.getElementById("stage");
+      const rect = stage.getBoundingClientRect();
+      const DPR = Math.min(window.devicePixelRatio || 1, 2);
+      const w = arena ? arena.w : 21, h = arena ? arena.h : 17;
+      const availW = Math.max(64, rect.width - 16), availH = Math.max(64, rect.height - 16);
+      cellPx = Math.max(8, Math.floor(Math.min(availW / w, availH / h)));
+      const cw = cellPx * w, ch = cellPx * h;
+      canvas.width = Math.floor(cw * DPR); canvas.height = Math.floor(ch * DPR);
+      canvas.style.width = cw + "px"; canvas.style.height = ch + "px";
+      ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    }
+    window.addEventListener("resize", resize);
+    const emoteBubbles = [];
+    function showEmoteBubble(cid, e) { emoteBubbles.push({ cid, e, until: performance.now() + 1500 }); }
+    function draw(nowP) {
+      if (!arena) return;
+      const w = arena.w, h = arena.h;
+      ctx.clearRect(0, 0, w * cellPx, h * cellPx);
+      const now = matchNow();
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+        const i = idxOf(x, y, w), t = arena.grid[i];
+        const px = x * cellPx, py = y * cellPx;
+        ctx.fillStyle = t === HARD ? "#3f3f46" : t === STEEL ? "#71717a" : t === SOFT ? "#8a5a34" : "#141417";
+        ctx.fillRect(px, py, cellPx - 1, cellPx - 1);
+        if (t === FLOOR) {
+          const drop = arena.drops.get(i);
+          if (drop && !claimed.has(i)) {
+            ctx.font = Math.floor(cellPx * 0.55) + "px sans-serif";
+            ctx.textAlign = "center"; ctx.textBaseline = "middle";
+            ctx.fillText(DROP_ICON[drop], px + cellPx / 2, py + cellPx / 2);
+          }
+        }
+        const ft = activeFlames.get(i);
+        if (ft !== undefined && now - ft < FLAME_MS) {
+          ctx.fillStyle = "rgba(245,158,11,0.55)";
+          ctx.fillRect(px, py, cellPx - 1, cellPx - 1);
+        }
+      }
+      for (const b of bombs.values()) {
+        if (b.exploded) continue;
+        const anim = b.move && now < b.move.at + b.move.dur;
+        const t = anim ? (now - b.move.at) / b.move.dur : 1;
+        const bx = anim ? lerp(b.move.from.x, b.move.to.x, t) : b.cell.x;
+        const by = anim ? lerp(b.move.from.y, b.move.to.y, t) : b.cell.y;
+        const px = bx * cellPx + cellPx / 2, py = by * cellPx + cellPx / 2;
+        const pulse = 0.8 + 0.2 * Math.sin(now / 90);
+        ctx.beginPath(); ctx.arc(px, py, cellPx * 0.32 * pulse, 0, Math.PI * 2);
+        ctx.fillStyle = b.mine ? "#6b21a8" : (b.ghost ? "#64748b" : "#18181b");
+        ctx.fill();
+        ctx.strokeStyle = b.mine ? "#e9d5ff" : "#f59e0b"; ctx.lineWidth = 2; ctx.stroke();
+      }
+      const players = watchMode ? [] : [{ cid: clientId, x: self.x, y: self.y, alive: self.alive, ghost: self.ghost, color: me.color, name: me.name + " (you)", curse: !!self.curse }];
+      for (const [cid, p] of roster) players.push({ cid, x: p.rx, y: p.ry, alive: p.alive, ghost: !p.alive, color: p.color, name: p.name, curse: !!p.curseType });
+      for (const p of players) {
+        const px = p.x * cellPx, py = p.y * cellPx;
+        ctx.globalAlpha = p.ghost ? 0.45 : 1;
+        ctx.beginPath(); ctx.arc(px, py, cellPx * PLAYER_R, 0, Math.PI * 2);
+        ctx.fillStyle = p.curse ? "#a855f7" : p.color;
+        ctx.fill();
+        ctx.lineWidth = 2; ctx.strokeStyle = "rgba(0,0,0,.55)"; ctx.stroke();
+        ctx.globalAlpha = 1;
+        ctx.font = "600 " + Math.max(9, Math.floor(cellPx * 0.3)) + "px 'Space Grotesk', sans-serif";
+        ctx.textAlign = "center"; ctx.fillStyle = "#e4e4e7";
+        ctx.fillText((p.name || "?").slice(0, 12), px, py - cellPx * 0.5);
+      }
+      for (let i = emoteBubbles.length - 1; i >= 0; i--) {
+        const eb = emoteBubbles[i];
+        if (nowP > eb.until) { emoteBubbles.splice(i, 1); continue; }
+        const owner = eb.cid === clientId ? self : roster.get(eb.cid);
+        if (!owner) continue;
+        const ox = (owner.rx ?? owner.x) * cellPx, oy = (owner.ry ?? owner.y) * cellPx;
+        ctx.font = Math.floor(cellPx * 0.8) + "px sans-serif";
+        ctx.textAlign = "center"; ctx.fillText(eb.e, ox, oy - cellPx * 0.9);
+      }
+    }
+
+    // ── HUD ──────────────────────────────────────────────────────────────
+    function renderHud() {
+      document.getElementById("aliveN").textContent = String(countAlive());
+      document.getElementById("totalN").textContent = String(Math.max(1, enrolled.size || 1));
+      document.getElementById("refPill").style.display = isReferee() ? "" : "none";
+      document.getElementById("roundN").textContent = matchDoc ? String(matchDoc.data.roundIndex + 1) : "–";
+      const until = ringStartAt - matchNow();
+      document.getElementById("ringN").textContent = until > 0 ? Math.ceil(until / 1000) + "s" : "closing";
+      const icBomb = document.getElementById("icBomb"), icFlame = document.getElementById("icFlame");
+      icBomb.classList.toggle("on", self.maxBombs > 1);
+      document.getElementById("icBombN").textContent = self.maxBombs > 1 ? String(self.maxBombs) : "";
+      icFlame.classList.toggle("on", self.flame > 1);
+      document.getElementById("icFlameN").textContent = self.flame > 1 ? String(self.flame) : "";
+      document.getElementById("icSpeed").classList.toggle("on", self.speedStacks > 0);
+      document.getElementById("icKick").classList.toggle("on", self.kick);
+      document.getElementById("icGlove").classList.toggle("on", self.glove);
+      const banner = document.getElementById("curseBanner");
+      if (self.curse) { banner.textContent = CURSE_LABEL[self.curse.type]; banner.classList.add("show"); }
+      else banner.classList.remove("show");
+    }
+    function showResults(aliveN) {
+      let winnerName = "Nobody";
+      if (aliveN === 1) {
+        if (self.alive) winnerName = me.name + " (you)";
+        else for (const p of roster.values()) if (p.alive) { winnerName = p.name; break; }
+      }
+      document.getElementById("resultsBig").textContent = aliveN === 1 ? "🏆 " + winnerName + " wins!" : "💥 Draw — everyone's out";
+      document.getElementById("resultsSub").textContent = "next round starting…";
+      document.getElementById("resultsOverlay").classList.add("show");
+      try { toast(aliveN === 1 ? winnerName + " wins the round!" : "Round ends in a draw"); } catch (_) {}
+    }
+    function hideResults() {
+      document.getElementById("resultsOverlay").classList.remove("show");
+      roundEndedAt = 0; pulledForward = false;
+    }
+    function updateSpectateNote(spectating) {
+      document.getElementById("spectateNote").classList.toggle("show", spectating);
+    }
+
+    // ── Mobile controls + emotes ─────────────────────────────────────────
+    document.querySelectorAll("#dpad button").forEach((btn) => {
+      const dir = btn.dataset.dir;
+      const add = (e) => { e.preventDefault(); keys.add(dir); };
+      const rm = (e) => { e.preventDefault(); keys.delete(dir); };
+      btn.addEventListener("pointerdown", add);
+      btn.addEventListener("pointerup", rm);
+      btn.addEventListener("pointercancel", rm);
+      btn.addEventListener("pointerleave", rm);
+    });
+    document.getElementById("bombBtn").addEventListener("pointerdown", (e) => { e.preventDefault(); bombAction(); });
+    let lastEmoteAt = 0;
+    document.querySelectorAll("#emoteBar button").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const now = performance.now();
+        if (now - lastEmoteAt < 500) return; // ≤2Hz client-side throttle
+        lastEmoteAt = now;
+        const e = btn.dataset.e;
+        try { netP.send({ t: "emote", e }); } catch (_) {}
+        showEmoteBubble(clientId, e);
+      });
+    });
+
+    // ── Boot ─────────────────────────────────────────────────────────────
+    async function boot() {
+      try { await worlds.ready; } catch (_) {}
+      try {
+        const info = await worlds.me();
+        if (info && info.handle) { me.handle = info.handle; me.name = info.name || info.handle; }
+        else throw new Error("anon");
+      } catch (_) {
+        me.handle = "anon-" + clientId.slice(0, 8);
+        me.name = "guest";
+      }
+      me.color = colorFor(me.handle || clientId);
+      resize();
+      requestAnimationFrame(frame);
+      setupActors();
+      syncClock();
+      setInterval(syncClock, 4000);
+      await acquireMatch();
+      setInterval(networkTick, TICK_MS);
+      setInterval(worldTick, WORLD_TICK_MS);
+      setInterval(checkDisconnectGuard, 500);
+    }
+    boot();
+  })();
+  </script>
+</body>
+</html>
+

@@ -70,6 +70,7 @@
     subs: new Map,
     outbox: [],
     connectionListeners: new Set,
+    pending: new Map,
     onConnection(fn) {
       this.connectionListeners.add(fn);
       return () => this.connectionListeners.delete(fn);
@@ -102,6 +103,12 @@
         } catch {
           return;
         }
+        const waiter = f.id && this.pending.get(f.id);
+        if (waiter) {
+          this.pending.delete(f.id);
+          waiter(f);
+          return;
+        }
         const sub = f.id && this.subs.get(f.id);
         if (!sub)
           return;
@@ -110,6 +117,8 @@
           sub.handler({ type: f.type, doc: f.doc });
         } else if (f.op === "msg") {
           sub.handler({ payload: f.payload, from: f.from, at: f.at });
+        } else if (f.op === "platform" && sub.onPlatform) {
+          sub.onPlatform(f.members || []);
         } else if (f.op === "presence" && sub.onPresence) {
           sub.onPresence(f.members);
         } else if (f.op === "actors_snapshot" && sub.onSnapshot) {
@@ -151,6 +160,50 @@
     },
     subscribe(frame, handler, extras = {}) {
       return this.sub(frame, handler, extras).off;
+    },
+    request(frame, timeoutMs = 5000) {
+      return new Promise((resolve, reject) => {
+        const id = `q${this.nextId++}`;
+        let settled = false;
+        const timer = setTimeout(() => {
+          settled = true;
+          this.pending.delete(id);
+          reject(new WorldsError("upstream_error", "socket request timed out", 504));
+        }, timeoutMs);
+        const finish = (fn) => {
+          if (!settled) {
+            settled = true;
+            clearTimeout(timer);
+            fn();
+          }
+        };
+        this.pending.set(id, (f) => finish(() => {
+          if (f.op === "error")
+            reject(new WorldsError(f.error?.code || "internal", f.error?.message || "realtime error", 500));
+          else
+            resolve(f);
+        }));
+        const send = () => {
+          if (settled)
+            return;
+          if (this.ws && this.ws.readyState === 1)
+            this.ws.send(JSON.stringify({ ...frame, id }));
+          else
+            finish(() => {
+              this.pending.delete(id);
+              reject(new WorldsError("upstream_error", "socket is not connected", 503));
+            });
+        };
+        this.open();
+        if (this.ws && this.ws.readyState === 1)
+          send();
+        else {
+          const off = this.onConnection(() => {
+            off();
+            send();
+          });
+        }
+      });
     },
     sub(frame, handler, extras = {}) {
       const id = `s${this.nextId++}`;
@@ -301,12 +354,28 @@
         subscribe: (handler) => sock.subscribe({ op: "sub", kind: "channel", channel: name }, handler),
         presence: (handler) => sock.subscribe({ op: "sub", kind: "channel", channel: name, presence: true }, () => {}, { onPresence: handler })
       };
+    },
+    platform(handler) {
+      return sock.subscribe({ op: "sub", kind: "platform" }, () => {}, { onPlatform: handler });
+    },
+    async ping() {
+      const t0 = performance.now();
+      const f = await sock.request({ op: "ping" });
+      const rtt = performance.now() - t0;
+      return { rtt, serverAt: f.at, skew: f.at - (Date.now() - rtt / 2) };
     }
   };
 
   // sdk/src/notify.ts
   var notify = {
     slack: (target, text) => call("POST", "/api/v1/notify/slack", { target, text })
+  };
+
+  // sdk/src/connect.ts
+  var connect = {
+    list: () => call("GET", "/api/v1/connect"),
+    tools: (name) => call("GET", `/api/v1/connect/${encodeURIComponent(name)}/tools`),
+    call: (name, tool, args = {}) => call("POST", `/api/v1/connect/${encodeURIComponent(name)}/call`, { tool, args }).then((r) => r.result)
   };
 
   // sdk/src/room.ts
@@ -1099,10 +1168,10 @@
           return;
         sock.send({ op: "ameta", id: "ameta", channel: name, cid, meta: patch });
       },
-      send(payload) {
+      send(payload, sendOpts) {
         if (stopped || opts.observer)
           return;
-        sock.send({ op: "aevent", id: "aevent", channel: name, cid, payload });
+        sock.send({ op: "aevent", id: "aevent", channel: name, cid, payload, ...sendOpts?.to ? { to: sendOpts.to } : {} });
       },
       others: () => [...states.values()],
       onChange(fn) {
@@ -1466,6 +1535,7 @@
     uploads,
     ws,
     notify,
+    connect,
     room,
     rooms,
     actors,

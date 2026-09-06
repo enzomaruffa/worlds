@@ -1,6 +1,8 @@
 // One multiplexed WebSocket for the whole page: db subscriptions and channels
 // share it. Reconnects with backoff, replays db cursors, and queues frames sent
 // while still connecting so nothing is dropped.
+import { WorldsError } from "./error";
+
 type Frame = Record<string, unknown> & { op: string; id?: string };
 
 // Who a peer is on the wire. Defined here because socket.ts is the bottom of the SDK's
@@ -20,6 +22,7 @@ interface Sub {
   onActorEvent?: (from: any, payload: any) => void; // actors: a peer's one-off event
   onActorLeave?: (ids: string[]) => void; // actors: members who left the zone
   onDoc?: (frame: any) => void; // doc: every doc_* frame, undecoded
+  onPlatform?: (members: any[]) => void; // platform: instance-wide roster
   onError?: (error: { code: string; message: string }) => void;
 }
 
@@ -30,6 +33,9 @@ export const sock = {
   subs: new Map<string, Sub>(),
   outbox: [] as Frame[],
   connectionListeners: new Set<(state: "open" | "closed") => void>(),
+  // One-shot replies keyed by frame id. Checked before `subs`, which only knows about
+  // long-lived subscriptions and drops anything it doesn't recognise.
+  pending: new Map<string, (frame: any) => void>(),
 
   // Connection state for callers that show it (an editor going read-only while offline).
   onConnection(fn: (state: "open" | "closed") => void): () => void {
@@ -58,6 +64,12 @@ export const sock = {
     this.ws.onmessage = (m) => {
       let f: any;
       try { f = JSON.parse(m.data); } catch { return; }
+      const waiter = f.id && this.pending.get(f.id);
+      if (waiter) {
+        this.pending.delete(f.id);
+        waiter(f);
+        return;
+      }
       const sub = f.id && this.subs.get(f.id);
       if (!sub) return;
       if (f.op === "event") {
@@ -65,6 +77,8 @@ export const sock = {
         sub.handler({ type: f.type, doc: f.doc });
       } else if (f.op === "msg") {
         sub.handler({ payload: f.payload, from: f.from, at: f.at });
+      } else if (f.op === "platform" && sub.onPlatform) {
+        sub.onPlatform(f.members || []);
       } else if (f.op === "presence" && sub.onPresence) {
         sub.onPresence(f.members);
       } else if (f.op === "actors_snapshot" && sub.onSnapshot) {
@@ -106,6 +120,38 @@ export const sock = {
 
   subscribe(frame: Frame, handler: (ev: any) => void, extras: Partial<Sub> = {}): () => void {
     return this.sub(frame, handler, extras).off;
+  },
+
+  // One frame out, one frame back. Not queued across a reconnect — a reply that landed
+  // afterwards would be timing a socket that no longer exists — but a caller on a page
+  // that has only just loaded waits for the first connect rather than failing, since the
+  // socket opens lazily and would otherwise still be CONNECTING.
+  request(frame: Frame, timeoutMs = 5000): Promise<any> {
+    return new Promise((resolve, reject) => {
+      const id = `q${this.nextId++}`;
+      let settled = false;
+      const timer = setTimeout(() => {
+        settled = true;
+        this.pending.delete(id);
+        reject(new WorldsError("upstream_error", "socket request timed out", 504));
+      }, timeoutMs);
+      const finish = (fn: () => void) => { if (!settled) { settled = true; clearTimeout(timer); fn(); } };
+      this.pending.set(id, (f) => finish(() => {
+        if (f.op === "error") reject(new WorldsError(f.error?.code || "internal", f.error?.message || "realtime error", 500));
+        else resolve(f);
+      }));
+
+      const send = () => {
+        if (settled) return;
+        if (this.ws && this.ws.readyState === 1) this.ws.send(JSON.stringify({ ...frame, id }));
+        else finish(() => { this.pending.delete(id); reject(new WorldsError("upstream_error", "socket is not connected", 503)); });
+      };
+      this.open();
+      if (this.ws && this.ws.readyState === 1) send();
+      // WebSocket connect is always async, so registering after open() cannot miss it.
+      // A "closed" first event falls through to send(), which rejects on the dead socket.
+      else { const off = this.onConnection(() => { off(); send(); }); }
+    });
   },
 
   // Like subscribe, but hands back the subscription id and its entry — for primitives

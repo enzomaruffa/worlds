@@ -23,9 +23,10 @@ worlds.site;                    // {name, url} — populated after `await worlds
 Every rejected promise is a `WorldsError` — `{ code, message, status, retryAfter? }`.
 `code` comes from a frozen registry, so you can branch on it reliably:
 
-`unauthorized` · `invalid_request` · `not_found` · `conflict` · `payload_too_large` ·
-`rate_limited` (carries `retryAfter` seconds) · `quota_exceeded` · `upstream_error`
-(AI provider) · `maintenance` · `internal`.
+`unauthorized` · `invalid_request` · `not_found` · `forbidden` · `conflict` ·
+`payload_too_large` · `rate_limited` (carries `retryAfter` seconds) · `quota_exceeded` ·
+`reserved_name` · `replay_expired` · `upstream_error` (AI provider) · `maintenance` ·
+`internal`.
 
 (`retry_after` still reads the same value — the wire envelope spells it that way.)
 
@@ -34,8 +35,8 @@ try { await c.create(doc); }
 catch (e) { if (e.code === "quota_exceeded") toast("easy there!"); else throw e; }
 ```
 
-The SDK redirects to sign-in on session expiry and retries idempotent GETs on transient
-errors — you never handle auth or flaky networks yourself.
+The SDK redirects to sign-in on session expiry, so you never handle auth yourself. It does
+not retry: a failed request rejects and retrying is your call.
 
 ## Database — `worlds.db`
 
@@ -154,6 +155,32 @@ const stop = ch.subscribe(msg => { /* {payload, from: {handle, name}, at} */ });
 ch.presence(list => { /* [{handle, name}] currently on this channel */ });
 ```
 
+**Who's on the instance.** Channels and actors are scoped to one site, so nothing else can
+see across worlds. `worlds.ws.platform()` can — read-only, so it never becomes a way into
+another site's traffic:
+
+```js
+worlds.ws.platform(members => {
+  // [{handle, name, site}] — everyone signed in, and the world they're in
+});
+```
+
+Fires on subscribe and again whenever anyone connects or disconnects. Two tabs on one site
+count once; the same person in two worlds appears twice. Departure is socket close, so
+someone who loses their connection lingers until the socket actually drops.
+
+**Latency.** `worlds.ws.ping()` measures the live socket and stays out of the publish
+budget, so a page can measure itself without spending what it is measuring:
+
+```js
+const { rtt, serverAt, skew } = await worlds.ws.ping();
+```
+
+`rtt` is the round trip in ms. `skew` is how far the server's clock is ahead of yours,
+derived by assuming the trip is symmetric — often it isn't, so use it to line up shared
+deadlines, not as a measurement. Rejects if the socket is disconnected rather than
+queueing, since a reply that lands after a reconnect would be timing a different socket.
+
 ## Rooms — `worlds.room` / `worlds.rooms`
 
 A **room** is one named shared space for everyone on the site. It rolls the two
@@ -184,7 +211,7 @@ await r.ready;                // resolves once loaded/created + identity is know
 r.toggleReady();              // or r.setReady(true/false)
 r.start();                    // host-only; broadcasts start to everyone
 r.returnToLobby();            // send everyone back to the waiting room
-r.isHost;                     // am I the host (smallest handle)?
+r.isHost;                     // am I the host (first to join, stable for the room's life)?
 r.members;                    // [{handle,name,ready,isMe,isHost}]
 
 r.state;                      // current shared doc (null if no `initial`)
@@ -201,9 +228,12 @@ allReady, full, started, loaded, state }`. `ready` is whether **you** are ready;
 `loaded` is `true` once presence has reported at least once (gate "opponent left"
 checks on it); `state` is the shared doc.
 
-`set`/`merge` return `false` on a write conflict — call `r.refetch()` and retry.
-Two clients writing the newest `_rev` is last-write-wins (fine for toys; add your
-own turn/seat gating for stricter games — see the connect4 example). For a
+`set`/`merge` return `false` only when the write itself failed (network, HTTP). They do
+**not** detect a conflict: the room writes with no precondition, so two clients writing at
+once is last-write-wins and the later one silently wins. Add your own turn/seat gating for
+stricter games (see the connect4 example), or write through
+`worlds.db` directly with `update(id, patch, {ifUpdatedAt})`, which does reject a stale
+write with `code === "conflict"`. For a
 db-driven start, pass `autoStart:false` and trigger your own start from `onChange`
 when `s.allReady`.
 
@@ -275,6 +305,7 @@ const net = worlds.actors("race", {
 net.set({ x, y, cell });                          // frame STATE (zone via zoneKey)
 net.setMetadata({ level: 6 });                    // merge METADATA (infrequent)
 net.send({ t: "horn" });                          // one-off EVENT to in-zone peers
+net.send({ key }, { to: peerId });                // …or to exactly one member
 net.onChange((id, state, peer) => draw(peer));    // peer = {id, handle, name, state, metadata}
 net.onEvent((id, payload, from) => honk(id));     // a peer's discrete event (from = {id,handle,name})
 net.onLeave((id) => remove(id));                  // peer left my zone or disconnected
@@ -286,7 +317,9 @@ net.destroy();                                    // unsubscribe + drop listener
 derive from state — make it **spatial** (a grid cell) and you sync only nearby peers
 no matter how many connect. `set` is fire-and-forget at frame rate (coalesced to the
 latest between flushes); `setMetadata` merges and rides the same flush; `send` is
-delivered immediately, never stored. All three payloads are ephemeral (≤16KB each) —
+delivered immediately, never stored. `send(payload, {to: id})` reaches one member
+instead of the zone — that's how you deal a hand or a key card without putting the
+secret in shared state where every player can read it. All three payloads are ephemeral (≤16KB each) —
 keep anything that must survive a reload in `worlds.db` / `worlds.room`. Pass
 `observer: true` to watch a zone read-only — you still get snapshots/updates/events
 but stay invisible to peers and your `set`/`send` are no-ops (replays, leaderboards,
@@ -354,3 +387,36 @@ await worlds.notify.slack("#my-channel", "the dashboard went red");
 ```
 
 Capped per user/day and always stamped with the site + sender. Notify, never impersonate.
+
+## Connectors — `worlds.connect`
+
+Call an external service — Linear, GitHub, anything speaking MCP — through the platform's
+own credential. The browser never sees a key.
+
+```js
+await worlds.connect.list();            // {items:[{name, tools}]} — what this site may reach
+await worlds.connect.tools("linear");   // the allowed tools and their input schemas
+
+const issue = await worlds.connect.call("linear", "create_issue", {
+  title: "Standups run long",
+  description: "From the sprint 42 retro",
+});
+```
+
+Which connectors a site may reach, which tools it may call, and which arguments are pinned
+are **operator configuration**, not site configuration: a site cannot grant itself access,
+and cannot override a pinned argument even by rewriting its own JavaScript. That is how the
+retro board can file an issue without being able to choose the team.
+
+Calls go out under the platform's service token, so the external system sees the bot, not
+you — requests are stamped with the site and the requester instead, and every call is
+written to an audit log keyed on your identity. A site with no grant sees an empty `list()`
+rather than an error, so a page can feature-detect.
+
+Nothing is retried internally: a repeated `create_issue` would file the issue twice, so a
+timeout is yours to decide about. Guard against double-writes by recording the result.
+
+Errors: `not_found` (no such connector, or this site isn't granted it — the same code for
+both, so existence can't be probed), `forbidden` (granted the connector, not that tool),
+`quota_exceeded`, `rate_limited`, `payload_too_large`, `upstream_error` (the service failed
+or rejected the call — carries the service's own message).

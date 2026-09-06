@@ -13,12 +13,14 @@ import * as docs from "./docs";
 import * as uploads from "./uploads";
 import * as ai from "./ai";
 import { notifySlack } from "./notify";
+import * as connect from "./connect";
 import { universe, universeEntry, creator } from "./universe";
 import { resolveProfile, updateProfile, overlayCreators } from "./profile";
 import { handleMcp } from "./mcp";
 import { handleAuth, sessionFrom, validRenderToken, snapshotSetCookie } from "./auth";
 import { seedWorlds } from "./seed";
 import { websocket, type SocketData } from "./ws";
+import { timestampKeysetBefore } from "./dialect";
 
 await store.init();
 // Registered before initDb so an install that boots ahead of postgres still gets its
@@ -158,6 +160,45 @@ async function api(req: Request, url: URL, site: string): Promise<Response> {
   if (p[0] === "deploy" && method === "POST") return handleDeploy(req);
   if (p[0] === "deploy-folder" && method === "POST") return handleDeployFolder(req);
 
+  // Every deploy on the instance, newest first. The per-site list above answers "what
+  // happened to this world"; this one answers "what is happening here", which is what an
+  // activity feed needs and cannot assemble from N per-site calls.
+  if (p[0] === "deploys" && p.length === 1 && method === "GET") {
+    requireDb();
+    const limit = dbapi.clampLimit(url.searchParams.get("limit"));
+    const cursor = url.searchParams.get("cursor");
+    let where = "";
+    const args: unknown[] = [];
+    if (cursor) {
+      const raw = Buffer.from(cursor, "base64").toString();
+      const at = raw.slice(0, raw.indexOf("|"));
+      const id = raw.slice(raw.indexOf("|") + 1);
+      if (!at || !id) throw new WorldsError("invalid_request", "bad cursor");
+      args.push(at, id);
+      where = `WHERE ${timestampKeysetBefore("at", "deploy_id", "$1", "$2")}`;
+    }
+    const rows = (await sql.unsafe(
+      `SELECT deploy_id, site, by_handle, by_name, files, bytes, at FROM deploys
+       ${where} ORDER BY at DESC, deploy_id DESC LIMIT ${limit + 1}`,
+      args as never[],
+    )) as Record<string, unknown>[];
+    const page = rows.slice(0, limit);
+    const last = page[page.length - 1];
+    return json({
+      items: page.map((r) => ({
+        deploy_id: r.deploy_id,
+        site: r.site,
+        by: { handle: r.by_handle, name: r.by_name },
+        at: r.at,
+        files: Number(r.files),
+        bytes: Number(r.bytes),
+      })),
+      next_cursor: rows.length > limit && last
+        ? Buffer.from(`${new Date(last.at as string).toISOString()}|${last.deploy_id}`).toString("base64")
+        : null,
+    });
+  }
+
   if (p[0] === "sites") {
     requireDb();
     if (p.length === 1 && method === "GET") {
@@ -273,6 +314,12 @@ async function api(req: Request, url: URL, site: string): Promise<Response> {
   }
 
   if (p[0] === "notify" && p[1] === "slack" && method === "POST") return notifySlack(req, site);
+
+  if (p[0] === "connect") {
+    if (p.length === 1 && method === "GET") return connect.list(req, site);
+    if (p.length === 3 && p[2] === "tools" && method === "GET") return connect.tools(req, site, p[1]!);
+    if (p.length === 3 && p[2] === "call" && method === "POST") return connect.call(req, site, p[1]!);
+  }
   if (p[0] === "universe" && method === "GET") return universe();
   if (p[0] === "creators" && p[1] && method === "GET") return creator(p[1]);
   if (p[0] === "beacon" && p[1] === "visit" && method === "POST") {

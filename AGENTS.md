@@ -31,6 +31,7 @@ The 30-second version:
 - `worlds.ai` — `complete` (incl. `{stream:true,onToken}`), `embed`, `image`, `models`
 - `worlds.uploads` — put/list/delete · `worlds.ws.channel(name)` — publish/subscribe/presence
 - `worlds.notify.slack(channel,text)`
+- **`worlds.connect`** — `list()/tools(name)/call(name,tool,args)`: reach an external service (Linear, GitHub, anything speaking MCP) through the platform's own credential. The browser never sees a key, and the grant — which tools, which pinned arguments — is operator config a site cannot grant itself.
 - **`worlds.room(name,opts)`** — ONE shared room: roster/host/ready/auto-start **+** optional authoritative state (`initial`); a waiting room is just a room with no `initial`
 - **`worlds.rooms(name,opts)`** — MANY concurrent rooms: a lobby browser with private join codes (`list/onList/create/join/joinByCode/leave`), each handing back a `worlds.room`
 - **`worlds.actors(name,{zoneKey,rate,metadata,observer})`** — per-member presence: live **state** (`set`, coalesced + rate-capped + snapshot-on-join), **metadata** (`setMetadata`), one-off **events** (`send`/`onEvent`), and read-only **observers** — all zone-interest-managed. Reach for this (not a raw pose channel) when many players move at once.
@@ -47,8 +48,9 @@ The 30-second version:
 
 ### What Worlds is NOT for
 
-External/public audiences, secrets (no permissions — everyone on your instance can read/overwrite
-any site), heavy/long compute, scheduled jobs, public webhooks. Point those at a real backend.
+External/public audiences, secrets (a site is owned by whoever deployed it first, but every
+signed-in person can read and write any site's `worlds.db` data), heavy/long compute,
+scheduled jobs, public webhooks. Point those at a real backend.
 
 ---
 

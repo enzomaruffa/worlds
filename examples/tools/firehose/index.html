@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Firehose · Worlds</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #09090b;
+    --surface: #0c0c0f;
+    --surface-2: #131318;
+    --border: #27272a;
+    --gold: #f59e0b;
+    --text: #e4e4e7;
+    --muted: #a1a1aa;
+    --good: #22c55e;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.5 "Space Grotesk", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: flex; flex-direction: column; min-height: 100vh;
+  }
+  ::selection { background: rgba(245, 158, 11, .35); }
+  a { color: inherit; }
+  .mono { font-family: "SFMono-Regular", ui-monospace, Menlo, Consolas, monospace; }
+
+  header.topbar {
+    display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .6rem 1rem;
+    padding: .85rem 1.2rem; border-bottom: 1px solid var(--border); background: var(--surface); flex-shrink: 0;
+  }
+  .topbar-left { display: flex; align-items: center; gap: .7rem; flex-wrap: wrap; }
+  .topbar-left h1 { font-size: 1.1rem; margin: 0; letter-spacing: .01em; }
+  .topbar-left h1 span { color: var(--gold); }
+  .live-dot {
+    width: .5rem; height: .5rem; border-radius: 50%; background: var(--good); flex-shrink: 0;
+    box-shadow: 0 0 8px rgba(34, 197, 94, .6); animation: pulse 2s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+
+  .totals { display: flex; align-items: center; gap: .9rem; font-size: .8rem; color: var(--muted); }
+  .totals b { color: var(--text); font-weight: 600; }
+  .totals .sep { color: var(--border); }
+
+  main { flex: 1; padding: 1.1rem 1.2rem 2rem; }
+  .tape-wrap { max-width: 900px; margin: 0 auto; }
+
+  .tape-head {
+    display: grid; grid-template-columns: 5.5rem 1fr 10rem 6rem 6rem;
+    gap: .5rem; padding: 0 .9rem .5rem; font-size: .68rem; text-transform: uppercase;
+    letter-spacing: .08em; color: var(--muted);
+  }
+  .tape-head span:nth-child(3), .tape-head span:nth-child(4), .tape-head span:nth-child(5) { text-align: right; }
+
+  .tape { display: flex; flex-direction: column; gap: .35rem; }
+  .row {
+    display: grid; grid-template-columns: 5.5rem 1fr 10rem 6rem 6rem; align-items: center; gap: .5rem;
+    padding: .65rem .9rem; border: 1px solid var(--border); border-radius: .55rem; background: var(--surface);
+    opacity: 1; transform: translateY(0); transition: opacity .3s ease, transform .3s ease, background-color 1s ease;
+    font-size: .82rem;
+  }
+  .row.entering { opacity: 0; transform: translateY(-8px); }
+  .col-time { color: var(--muted); font-size: .76rem; white-space: nowrap; }
+  .col-site {
+    font-weight: 600; text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .col-site:hover { color: var(--gold); text-decoration: underline; }
+  .col-by { display: flex; align-items: center; gap: .4rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; justify-content: flex-end; text-align: right; }
+  .by-dot { width: .55rem; height: .55rem; border-radius: 50%; flex-shrink: 0; }
+  .col-files, .col-bytes { text-align: right; color: var(--muted); white-space: nowrap; }
+
+  .load-more {
+    display: block; margin: .8rem auto 0; padding: .5rem 1.1rem; border-radius: .5rem; border: 1px solid var(--border);
+    background: var(--surface-2); color: var(--text); cursor: pointer; font-size: .8rem;
+  }
+  .load-more:hover { border-color: var(--gold); }
+  .load-more:disabled { opacity: .6; cursor: default; }
+
+  .empty {
+    max-width: 420px; margin: 3rem auto; text-align: center; color: var(--muted); font-size: .9rem;
+    display: flex; flex-direction: column; gap: .5rem; align-items: center;
+  }
+  .empty .empty-title { font-size: 1.05rem; color: var(--text); font-weight: 600; }
+
+  @media (max-width: 700px) {
+    .tape-head { display: none; }
+    .row { grid-template-columns: 1fr; row-gap: .3rem; }
+    .col-by, .col-files, .col-bytes { justify-content: flex-start; text-align: left; }
+  }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-left">
+    <span class="live-dot"></span>
+    <h1>Fire<span>hose</span></h1>
+  </div>
+  <div class="totals">
+    <span><b id="totalDeploys">…</b> deploys today</span>
+    <span class="sep">·</span>
+    <span><b id="totalBytes">…</b> today</span>
+  </div>
+</header>
+
+<main>
+  <div class="tape-wrap">
+    <div class="tape-head" id="tapeHead" hidden>
+      <span>When</span><span>Site</span><span>By</span><span>Files</span><span>Bytes</span>
+    </div>
+    <div class="tape" id="tape"></div>
+    <button class="load-more" id="loadMoreBtn" type="button" hidden>load more</button>
+    <div class="empty" id="empty" hidden>
+      <div class="empty-title">Nothing here yet</div>
+      <div>No deploys have landed on this instance so far.</div>
+    </div>
+  </div>
+</main>
+
+<script src="/worlds.js"></script>
+<script>
+(async function () {
+  "use strict";
+
+  // ---------- tiny DOM helpers ----------
+  const $ = (sel) => document.querySelector(sel);
+  function el(tag, attrs, ...children) {
+    attrs = attrs || {};
+    const e = document.createElement(tag);
+    if (attrs.class) e.className = attrs.class;
+    if (attrs.href != null) e.setAttribute("href", attrs.href);
+    if (attrs.target) e.target = attrs.target;
+    if (attrs.rel) e.rel = attrs.rel;
+    if (attrs.title != null) e.title = attrs.title;
+    if (attrs.text != null) e.textContent = attrs.text;
+    if (attrs.style) Object.assign(e.style, attrs.style);
+    for (const c of children) if (c != null) e.appendChild(typeof c === "string" ? document.createTextNode(c) : c);
+    return e;
+  }
+  function reportError(e, fallback) {
+    if (e instanceof worlds.WorldsError) worlds.toast(`${e.code}: ${e.message}`);
+    else worlds.toast(fallback || (e && e.message) || "something went wrong");
+    console.error(e);
+  }
+
+  function apiHeaders() {
+    const h = { "x-worlds-csrf": "1" };
+    const m = location.pathname.match(/^\/app\/([^/]+)/);
+    if (m) h["x-worlds-site"] = m[1];
+    return h;
+  }
+
+  async function apiGet(path) {
+    const res = await fetch(path, { headers: apiHeaders() });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const err = (data && data.error) || {};
+      throw new worlds.WorldsError(err.code || "internal", err.message || res.statusText, res.status, err.retry_after);
+    }
+    return data;
+  }
+
+  // ---------- formatting ----------
+  function fmtBytes(n) {
+    n = Number(n) || 0;
+    if (n < 1024) return `${n} B`;
+    const units = ["KB", "MB", "GB", "TB"];
+    let v = n, u = -1;
+    do { v /= 1024; u++; } while (v >= 1024 && u < units.length - 1);
+    return `${v.toFixed(v < 10 ? 1 : 0)} ${units[u]}`;
+  }
+
+  function fmtRelTime(iso) {
+    const s = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+    if (s < 5) return "just now";
+    if (s < 60) return `${s}s ago`;
+    const m = Math.round(s / 60);
+    if (m < 60) return `${m}m ago`;
+    const h = Math.round(m / 60);
+    if (h < 24) return `${h}h ago`;
+    return `${Math.round(h / 24)}d ago`;
+  }
+
+  function isToday(iso) {
+    const d = new Date(iso), now = new Date();
+    return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+  }
+
+  function flash(rowEl) {
+    rowEl.style.backgroundColor = "rgba(245, 158, 11, .3)";
+    requestAnimationFrame(() => requestAnimationFrame(() => { rowEl.style.backgroundColor = ""; }));
+  }
+
+  // ---------- site URL map (for linking rows) ----------
+  const siteUrls = new Map();
+  async function refreshSiteUrls() {
+    try {
+      const data = await apiGet("/api/v1/sites?limit=100");
+      for (const s of data.items || []) siteUrls.set(s.name, s.url);
+    } catch {
+      // best-effort — the relative fallback still links somewhere sensible
+    }
+  }
+  function siteHref(site) {
+    if (siteUrls.has(site)) return siteUrls.get(site);
+    if (location.pathname.match(/^\/app\/([^/]+)/)) return `../${site}/`;
+    const labels = location.hostname.split(".");
+    const base = labels.length > 1 ? labels.slice(1).join(".") : location.hostname;
+    return `${location.protocol}//${site}.${base}${location.port ? ":" + location.port : ""}`;
+  }
+
+  // ---------- elements ----------
+  const tapeEl = $("#tape");
+  const tapeHeadEl = $("#tapeHead");
+  const emptyEl = $("#empty");
+  const loadMoreBtnEl = $("#loadMoreBtn");
+  const totalDeploysEl = $("#totalDeploys");
+  const totalBytesEl = $("#totalBytes");
+
+  // ---------- state ----------
+  const state = { deploys: [], rows: new Map(), cursor: null };
+
+  function buildRow(d, opts) {
+    opts = opts || {};
+    const row = el("div", { class: "row" + (opts.enter ? " entering" : "") });
+    row.dataset.id = d.deploy_id;
+    row.dataset.at = d.at;
+    row.append(
+      el("span", { class: "col-time", text: fmtRelTime(d.at), title: new Date(d.at).toLocaleString() }),
+      el("a", { class: "col-site", href: siteHref(d.site), target: "_blank", rel: "noopener", text: d.site }),
+      el(
+        "span",
+        { class: "col-by" },
+        el("span", { class: "by-dot", style: { background: worlds.colorFor(d.by.handle) } }),
+        document.createTextNode((d.by.name || d.by.handle || "?")),
+      ),
+      el("span", { class: "col-files mono", text: `${d.files} file${d.files === 1 ? "" : "s"}` }),
+      el("span", { class: "col-bytes mono", text: fmtBytes(d.bytes) }),
+    );
+    if (opts.enter) requestAnimationFrame(() => requestAnimationFrame(() => row.classList.remove("entering")));
+    if (opts.flash) flash(row);
+    return row;
+  }
+
+  function updateTotals() {
+    let count = 0, bytes = 0;
+    for (const d of state.deploys) if (isToday(d.at)) { count++; bytes += Number(d.bytes) || 0; }
+    totalDeploysEl.textContent = count;
+    totalBytesEl.textContent = fmtBytes(bytes);
+  }
+
+  function setEmpty(isEmpty) {
+    emptyEl.hidden = !isEmpty;
+    tapeHeadEl.hidden = isEmpty;
+    tapeEl.hidden = isEmpty;
+    loadMoreBtnEl.hidden = isEmpty || !state.cursor;
+  }
+
+  async function fetchDeploys(params) {
+    const qs = new URLSearchParams();
+    qs.set("limit", String(params.limit || 50));
+    if (params.cursor) qs.set("cursor", params.cursor);
+    return apiGet(`/api/v1/deploys?${qs}`);
+  }
+
+  async function loadInitial() {
+    try {
+      const page = await fetchDeploys({ limit: 50 });
+      state.deploys = page.items || [];
+      state.cursor = page.next_cursor;
+      for (const d of state.deploys) state.rows.set(d.deploy_id, buildRow(d));
+      for (const row of state.rows.values()) tapeEl.appendChild(row);
+      setEmpty(state.deploys.length === 0);
+      updateTotals();
+    } catch (e) {
+      reportError(e, "failed to load the deploy feed");
+      setEmpty(true);
+    }
+  }
+
+  async function loadMore() {
+    if (!state.cursor) return;
+    loadMoreBtnEl.disabled = true;
+    loadMoreBtnEl.textContent = "loading…";
+    try {
+      const page = await fetchDeploys({ limit: 50, cursor: state.cursor });
+      for (const d of page.items || []) {
+        if (state.rows.has(d.deploy_id)) continue;
+        state.deploys.push(d);
+        const row = buildRow(d);
+        state.rows.set(d.deploy_id, row);
+        tapeEl.appendChild(row);
+      }
+      state.cursor = page.next_cursor;
+      updateTotals();
+    } catch (e) {
+      reportError(e, "failed to load more deploys");
+    } finally {
+      loadMoreBtnEl.disabled = false;
+      loadMoreBtnEl.textContent = "load more";
+      loadMoreBtnEl.hidden = !state.cursor;
+    }
+  }
+  loadMoreBtnEl.addEventListener("click", loadMore);
+
+  // Refetch the head of the feed and splice in anything we don't already have. The
+  // db-registry subscription below is only ever the trigger for this — it carries no
+  // deploy_id/files/bytes of its own, so the real detail always comes from here.
+  let refreshing = false;
+  async function refreshHead() {
+    if (refreshing) return;
+    refreshing = true;
+    try {
+      const page = await fetchDeploys({ limit: 20 });
+      const known = new Set(state.deploys.map((d) => d.deploy_id));
+      const fresh = (page.items || []).filter((d) => !known.has(d.deploy_id));
+      if (fresh.length) {
+        setEmpty(false);
+        state.deploys = [...fresh, ...state.deploys];
+        for (let i = fresh.length - 1; i >= 0; i--) {
+          const d = fresh[i];
+          const row = buildRow(d, { enter: true, flash: true });
+          state.rows.set(d.deploy_id, row);
+          tapeEl.insertBefore(row, tapeEl.firstChild);
+        }
+        updateTotals();
+      }
+      await refreshSiteUrls(); // a fresh deploy may be a brand-new site name
+    } catch (e) {
+      console.error(e); // background refresh — don't toast-spam on transient errors
+    } finally {
+      refreshing = false;
+    }
+  }
+
+  // ---------- boot ----------
+  await refreshSiteUrls();
+  await loadInitial();
+
+  setInterval(() => {
+    for (const row of state.rows.values()) {
+      const t = row.querySelector(".col-time");
+      if (t) t.textContent = fmtRelTime(row.dataset.at);
+    }
+  }, 30000);
+
+  // Live trigger: the platform's own site registry fires on every deploy — AND again
+  // when that deploy's screenshot lands moments later (same site, same doc). Debounce
+  // per site so the near-simultaneous pair collapses into one refetch; the deploy_id
+  // membership check above makes a late, far-apart repeat a harmless no-op either way.
+  const lastTriggerAt = new Map();
+  const DEBOUNCE_MS = 2000;
+  let unsubSites = null;
+  try {
+    unsubSites = worlds.db.site("home").collection("sites").subscribe((ev) => {
+      const doc = ev && ev.doc;
+      if (!doc) return;
+      const site = (doc.data && doc.data.name) || String(doc.id || "").replace(/^site_/, "");
+      if (!site) return;
+      const now = Date.now();
+      const last = lastTriggerAt.get(site) || 0;
+      lastTriggerAt.set(site, now);
+      if (now - last < DEBOUNCE_MS) return;
+      refreshHead();
+    });
+  } catch (e) {
+    reportError(e, "could not subscribe to the site registry");
+  }
+  window.addEventListener("beforeunload", () => { if (unsubSites) unsubSites(); });
+})();
+</script>
+</body>
+</html>
