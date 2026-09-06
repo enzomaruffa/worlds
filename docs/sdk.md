@@ -23,9 +23,10 @@ worlds.site;                    // {name, url} — populated after `await worlds
 Every rejected promise is a `WorldsError` — `{ code, message, status, retryAfter? }`.
 `code` comes from a frozen registry, so you can branch on it reliably:
 
-`unauthorized` · `invalid_request` · `not_found` · `conflict` · `payload_too_large` ·
-`rate_limited` (carries `retryAfter` seconds) · `quota_exceeded` · `upstream_error`
-(AI provider) · `maintenance` · `internal`.
+`unauthorized` · `invalid_request` · `not_found` · `forbidden` · `conflict` ·
+`payload_too_large` · `rate_limited` (carries `retryAfter` seconds) · `quota_exceeded` ·
+`reserved_name` · `replay_expired` · `upstream_error` (AI provider) · `maintenance` ·
+`internal`.
 
 (`retry_after` still reads the same value — the wire envelope spells it that way.)
 
@@ -34,8 +35,8 @@ try { await c.create(doc); }
 catch (e) { if (e.code === "quota_exceeded") toast("easy there!"); else throw e; }
 ```
 
-The SDK redirects to sign-in on session expiry and retries idempotent GETs on transient
-errors — you never handle auth or flaky networks yourself.
+The SDK redirects to sign-in on session expiry, so you never handle auth yourself. It does
+not retry: a failed request rejects and retrying is your call.
 
 ## Database — `worlds.db`
 
@@ -184,7 +185,7 @@ await r.ready;                // resolves once loaded/created + identity is know
 r.toggleReady();              // or r.setReady(true/false)
 r.start();                    // host-only; broadcasts start to everyone
 r.returnToLobby();            // send everyone back to the waiting room
-r.isHost;                     // am I the host (smallest handle)?
+r.isHost;                     // am I the host (first to join, stable for the room's life)?
 r.members;                    // [{handle,name,ready,isMe,isHost}]
 
 r.state;                      // current shared doc (null if no `initial`)
@@ -201,9 +202,12 @@ allReady, full, started, loaded, state }`. `ready` is whether **you** are ready;
 `loaded` is `true` once presence has reported at least once (gate "opponent left"
 checks on it); `state` is the shared doc.
 
-`set`/`merge` return `false` on a write conflict — call `r.refetch()` and retry.
-Two clients writing the newest `_rev` is last-write-wins (fine for toys; add your
-own turn/seat gating for stricter games — see the connect4 example). For a
+`set`/`merge` return `false` only when the write itself failed (network, HTTP). They do
+**not** detect a conflict: the room writes with no precondition, so two clients writing at
+once is last-write-wins and the later one silently wins. Add your own turn/seat gating for
+stricter games (see the connect4 example), or write through
+`worlds.db` directly with `update(id, patch, {ifUpdatedAt})`, which does reject a stale
+write with `code === "conflict"`. For a
 db-driven start, pass `autoStart:false` and trigger your own start from `onChange`
 when `s.allReady`.
 
