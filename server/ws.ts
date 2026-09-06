@@ -417,9 +417,14 @@ function handleSetMeta(ws: WS, frame: Record<string, unknown>): void {
 // `aevent` is a discrete one-off event (a horn, a hit, a ping) — fanned out to
 // in-zone peers immediately (no coalescing, no storage). The flexible-payload tier
 // on top of last-value state, so games stop pairing actors with a second channel.
+//
+// `to` narrows delivery to one member. Hidden-information games (a spymaster's key
+// card, a dealt hand) otherwise have to put the secret in shared state, where every
+// player can read it straight out of the document.
 function handleActorEvent(ws: WS, frame: Record<string, unknown>): void {
   const cid = typeof frame.cid === "string" ? frame.cid : null;
   if (!cid) return;
+  const to = typeof frame.to === "string" && frame.to ? frame.to : null;
   if (JSON.stringify(frame.payload ?? null).length > LIMITS.wsPayloadBytes) {
     sendErr(ws, undefined, "payload_too_large", "actor event over 16KB");
     return;
@@ -435,6 +440,7 @@ function handleActorEvent(ws: WS, frame: Record<string, unknown>): void {
   const from = { id: cid, handle: e.who.handle, name: e.who.name };
   for (const peer of room.members.values()) {
     if (peer.cid === cid || peer.zone !== e.zone) continue;
+    if (to && peer.cid !== to) continue;
     for (const subId of actorSubIds(peer.ws, key)) {
       peer.ws.send(JSON.stringify({ op: "actor_event", id: subId, from, payload: frame.payload }));
     }

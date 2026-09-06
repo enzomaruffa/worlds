@@ -1132,10 +1132,10 @@
           return;
         sock.send({ op: "ameta", id: "ameta", channel: name, cid, meta: patch });
       },
-      send(payload) {
+      send(payload, sendOpts) {
         if (stopped || opts.observer)
           return;
-        sock.send({ op: "aevent", id: "aevent", channel: name, cid, payload });
+        sock.send({ op: "aevent", id: "aevent", channel: name, cid, payload, ...sendOpts?.to ? { to: sendOpts.to } : {} });
       },
       others: () => [...states.values()],
       onChange(fn) {
