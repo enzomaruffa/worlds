@@ -94,6 +94,51 @@ await worlds.uploads.list();
 await worlds.uploads.delete("photo.jpg");
 ```
 
+## Documents — `worlds.doc`
+
+One **server-held collaborative document** per name: a CRDT document the server keeps the
+authoritative copy of, persists every accepted update before anyone sees it, and fans out
+to everyone subscribed. `worlds.doc` is the transport only — bring Yjs (that is what the
+server speaks) and wire it in:
+
+```js
+import * as Y from "https://cdn.jsdelivr.net/npm/yjs@13/+esm";
+const ydoc = new Y.Doc();
+const transport = worlds.doc("plan-main", {
+  onState:  (state)  => Y.applyUpdate(ydoc, state, "server"),       // initial load
+  onUpdate: (update) => Y.applyUpdate(ydoc, update, "server"),      // a committed update
+  onReset:  (state)  => { /* the epoch moved: rebuild ydoc from `state` */ },
+  onRejected: (state, { reason }) => { /* your update was refused: resync from `state` */ },
+});
+ydoc.on("update", (u, origin) => { if (origin !== "server") transport.send(u); });
+await transport.ready;
+```
+
+- **Commit before ack.** An update is validated on a scratch copy, written to the database,
+  and only then acknowledged and relayed. A crash can only lose what nobody was told was
+  accepted.
+- **Rejected, not rolled back.** An update that fails the site's declared schema (see the
+  `docs` rules in `.world.json`) never touches the live document; the sender gets
+  `onRejected` with the current state and nobody else notices.
+- **Epochs.** `transport.epoch` is the document's generation. It moves only on a
+  *rotation*: a client with the content model hands in a compact state
+  (`POST /api/v1/docs/<name>/rotate {epoch, state}`), which becomes epoch+1 with an empty
+  log. Every subscriber gets `onReset`. The server never decodes content, so it never
+  compacts on its own; past 4MB of state it sets `onStatus({rotateWanted: true})`.
+- A reconnecting subscription asks for the whole state again (not the tail), so a client can
+  diff and re-send edits it made while the socket was down — that is what `onState` firing
+  again on reconnect is for.
+- A `maintenance` error on the subscription (the room is re-homing after a pod died, or the
+  database blinked) is retried with backoff — `onStatus({reconnecting: true})` fires meanwhile —
+  and only surfaces through `onError` after eight failed attempts.
+- Cursors, selections and presence ride a normal channel: `worlds.ws.channel("doc:" + name)`.
+
+Services and agents use the same document over HTTP with a bearer identity:
+`GET /api/v1/docs` · `GET /api/v1/docs/<name>` → `{epoch, seq, state}` ·
+`GET /api/v1/docs/<name>/updates?epoch=&since=` · `POST /api/v1/docs/<name>/updates {epoch, update}`
+→ `{seq}` (409 `conflict` on a stale epoch, 400 `invalid_request` with `rule` on a schema
+violation) · `POST /api/v1/docs/<name>/rotate` · `DELETE /api/v1/docs/<name>` (site contributors and services; subscribers get an `error` frame and the name is free again — `worlds.docs.remove(name)` from a page). States and updates are base64.
+
 ## Realtime channels — `worlds.ws`
 
 A **stateless topic broadcast**: publish an event to a named channel, everyone

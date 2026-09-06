@@ -28,6 +28,9 @@ worlds.notify.slack: (target: string, text: string) => Promise<any>
 worlds.room: <T extends Record<string, any> = any>(name: string, opts?: RoomOptions<T>) => Room<T>
 worlds.rooms: <T extends Record<string, any> = any>(name: string, opts?: RoomsOptions<T>) => Hall<T>
 worlds.actors: <T = any>(name: string, opts?: ActorsOptions<T>) => Actors<T>
+worlds.doc: (name: string, handlers: DocHandlers) => DocTransport
+worlds.docs.list: () => Promise<any>
+worlds.docs.remove: (name: string) => Promise<any>
 worlds.idle: (key?: string, opts?: IdleOptions) => Idle
 // batteries: small building blocks every multiplayer/collab site needs
 worlds.id: () => string
@@ -492,6 +495,75 @@ export interface Actors<T = any> {
 export function actors<T = any>(name: string, opts: ActorsOptions<T> = {}): Actors<T>
 ```
 
+## worlds.doc / worlds.docs — server-held collaborative documents
+
+Source: `sdk/src/doc.ts`
+
+worlds.doc(name) — the transport for ONE server-held collaborative document. The
+server keeps the authoritative copy and persists every accepted update before anyone
+sees it; this side only moves bytes. Bring your own CRDT (Yjs is what the server
+speaks): feed `onState`/`onUpdate` into Y.applyUpdate, and hand `ydoc.on("update")`
+to `send`. Cursors and selections ride a normal channel (`worlds.ws.channel`).
+
+Epochs are the document's generation. Every update names the epoch it was made
+against; when the server has moved on (a rotation, or your copy is stale) you get
+`onReset` with a full state and must replace your local document with it.
+
+### `interface DocHandlers`
+
+```ts
+export interface DocHandlers {
+  onState(state: Uint8Array, info: { epoch: number; seq: number; bytes: number }): void; // initial load
+  onUpdate(update: Uint8Array, info: { seq: number }): void; // a committed update (yours included)
+  onReset?(state: Uint8Array, info: { epoch: number; seq: number; reason: string }): void; // replace the local doc
+  onRejected?(state: Uint8Array, info: { reason: string; rule?: string }): void; // your update was refused; resync from state
+  onAck?(seq: number): void;
+  onStatus?(info: { bytes: number; rotateWanted: boolean; reconnecting?: boolean }): void; // the doc is large; a compact state would be welcome
+  onError?(error: { code: string; message: string }): void;
+}
+```
+
+### `interface DocTransport`
+
+```ts
+export interface DocTransport {
+  readonly name: string;
+  readonly epoch: number;
+  readonly seq: number;
+  ready: Promise<void>; // resolves after the first state arrives
+  send(update: Uint8Array): void;
+  close(): void;
+}
+```
+
+### `toBase64()`
+
+```ts
+export function toBase64(bytes: Uint8Array): string
+```
+
+### `fromBase64()`
+
+```ts
+export function fromBase64(s: string): Uint8Array
+```
+
+### `docs`
+
+```ts
+docs.list: () => Promise<any>
+// Site contributors only; subscribers get an error frame and the name is free again.
+docs.remove: (name: string) => Promise<any>
+```
+
+Whole-document operations that need no live transport.
+
+### `doc()`
+
+```ts
+export function doc(name: string, handlers: DocHandlers): DocTransport
+```
+
 ## worlds.idle — offline progress
 
 Source: `sdk/src/idle.ts`
@@ -770,7 +842,12 @@ The SDK is a thin client over these endpoints (`spec/world-v1.yaml`, frozen and 
 | PUT | `/api/v1/db/{collection}/{id}` | replace |
 | DELETE | `/api/v1/db/{collection}/{id}` | delete (idempotent) |
 | POST | `/api/v1/db/{collection}/{id}/increment` | atomic counter |
-| GET | `/api/v1/socket` | multiplexed WebSocket (db subs + channels), subprotocol worlds.v1 |
+| GET | `/api/v1/socket` | multiplexed WebSocket (db subs + channels + actors + docs), subprotocol worlds.v1 |
+| GET | `/api/v1/docs` | list this site's collaborative documents |
+| GET | `/api/v1/docs/{name}` | document state: {epoch, seq, state (base64 Yjs update), bytes} |
+| GET | `/api/v1/docs/{name}/updates` | committed updates after ?since= within ?epoch= (replay_expired when past the snapshot) |
+| POST | `/api/v1/docs/{name}/updates` | append one update {epoch, update} -> {seq}; conflict on stale epoch, invalid_request on schema violation |
+| POST | `/api/v1/docs/{name}/rotate` | install a compact state {epoch, state} as the next epoch; every subscriber is reset |
 | POST | `/api/v1/ai/complete` | Gemini completion (model aliases only) |
 | POST | `/api/v1/ai/embed` | embedding |
 | POST | `/api/v1/ai/image` | image -> stored upload |

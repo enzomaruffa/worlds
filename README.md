@@ -63,7 +63,7 @@ and a long random `WORLDS_SESSION_SECRET`. See [deploy/README.md](deploy/README.
 
 ## Stack
 
-- **Bun + TypeScript** server, no runtime npm deps — `Bun.serve`, `Bun.sql` (Postgres),
+- **Bun + TypeScript** server, one runtime dep (`yjs`, for `worlds.doc`) — `Bun.serve`, `Bun.sql` (Postgres),
   `Bun.file`, `fetch`. Multiplexes by `Host`: `<site>.<base>` → that site's files, bare
   base → the homepage, `/api/v1/*` → the platform.
 - **Postgres** for `worlds.db` collections, the deploy log, profiles, and realtime events.

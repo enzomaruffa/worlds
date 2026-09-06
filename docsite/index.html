@@ -27,6 +27,7 @@
     <a href="#room">Room</a>
     <a href="#rooms">Rooms</a>
     <a href="#actors">Actors</a>
+    <a href="#doc">Documents</a>
     <a href="#idle">Idle progress</a>
     <a href="#utils">Utilities</a>
     <a href="#notify">Notify</a>
@@ -407,6 +408,40 @@ net.others();  net.destroy();</code></pre>
       </div>
     </div>
   </div>
+</section>
+
+<!-- ======================================================================= -->
+<section id="doc">
+  <h2>Collaborative documents <span class="k">worlds.doc</span></h2>
+  <p class="lede">One <b>server-held CRDT document</b> per name. The server keeps the authoritative Yjs copy, persists every accepted update before anyone sees it (commit before ack), checks each batch against the tree schema the site declares in <code>.world.json</code> under <code>docs</code>, and fans out to every subscriber. <code>worlds.doc</code> is the transport only: bring Yjs from a CDN and wire it in. <code>worlds.docs.list()</code> / <code>remove()</code> are the whole-document operations.</p>
+  <div class="demo">
+    <div class="demo-head"><span class="dot live"></span><span class="title">a shared notepad</span><span class="hint">type in one tab, watch the other — every keystroke is a committed Yjs update</span></div>
+    <div class="demo-body">
+<pre><code>import * as Y from "https://cdn.jsdelivr.net/npm/yjs@13/+esm";
+const ydoc = new Y.Doc();
+const t = worlds.doc("notepad", {
+  onState:  (state)  =&gt; Y.applyUpdate(ydoc, state, "server"),   <span class="c">// initial load</span>
+  onUpdate: (update) =&gt; Y.applyUpdate(ydoc, update, "server"),  <span class="c">// a committed update (yours included)</span>
+  onAck:    (seq)    =&gt; …,                                        <span class="c">// yours is on disk</span>
+  onReset:  ()       =&gt; { t.close(); open(); },                   <span class="c">// the epoch moved: rebuild from state</span>
+  onRejected: (state, { rule }) =&gt; …,                             <span class="c">// schema violation: resync from state</span>
+});
+ydoc.on("update", (u, origin) =&gt; { if (origin !== "server") t.send(u); });
+const text = ydoc.getText("body");
+text.observe(() =&gt; render(text.toString()));
+await t.ready;  t.epoch;  t.seq;
+
+await worlds.docs.list();   <span class="c">// this site's documents</span></code></pre>
+      <div class="panel">
+        <textarea id="docText" rows="6" placeholder="loading the shared notepad…" disabled></textarea>
+        <div class="status" id="docStatus">connecting…</div>
+        <div class="row"><button class="btn sm" id="docList">worlds.docs.list()</button></div>
+        <div class="out" id="docOut" style="display:none"></div>
+        <div class="log" id="docLog"></div>
+      </div>
+    </div>
+  </div>
+  <p class="lede">A rejected update never touches the live document, and a crash can only lose what nobody was told was accepted. Cursors and presence ride a normal channel (<code>worlds.ws.channel("doc:notepad")</code>). Services and agents use the same document over HTTP: <code>GET /api/v1/docs/&lt;name&gt;</code> → <code>{ epoch, seq, state }</code>, <code>POST …/updates</code>, <code>POST …/rotate</code> to install a compact state as the next epoch.</p>
 </section>
 
 <!-- ======================================================================= -->

@@ -69,6 +69,11 @@
     nextId: 1,
     subs: new Map,
     outbox: [],
+    connectionListeners: new Set,
+    onConnection(fn) {
+      this.connectionListeners.add(fn);
+      return () => this.connectionListeners.delete(fn);
+    },
     open() {
       if (this.ws && (this.ws.readyState === 0 || this.ws.readyState === 1))
         return;
@@ -78,6 +83,8 @@
       this.ws = new WebSocket(`${proto}//${location.host}/api/v1/socket${q}`, "worlds.v1");
       this.ws.onopen = () => {
         this.backoff = 1000;
+        for (const fn of this.connectionListeners)
+          fn("open");
         for (const [id, sub] of this.subs) {
           const frame = { ...sub.frame, id };
           if (sub.cursor)
@@ -113,16 +120,22 @@
           sub.onActorEvent(f.from, f.payload);
         } else if (f.op === "actors_leave" && sub.onActorLeave) {
           sub.onActorLeave(f.ids || []);
+        } else if (typeof f.op === "string" && f.op.startsWith("doc_") && sub.onDoc) {
+          sub.onDoc(f);
         } else if (f.op === "error") {
           if (f.error?.code === "replay_expired" && sub.onExpired) {
             sub.cursor = null;
             sub.onExpired();
+          } else if (sub.onError) {
+            sub.onError(f.error ?? { code: "internal", message: "unknown realtime error" });
           } else {
             console.warn("[worlds] realtime error", f.error?.code, f.error?.message);
           }
         }
       };
       this.ws.onclose = () => {
+        for (const fn of this.connectionListeners)
+          fn("closed");
         if (this.subs.size === 0 && this.outbox.length === 0)
           return;
         setTimeout(() => this.open(), this.backoff);
@@ -137,16 +150,21 @@
         this.outbox.push(frame);
     },
     subscribe(frame, handler, extras = {}) {
+      return this.sub(frame, handler, extras).off;
+    },
+    sub(frame, handler, extras = {}) {
       const id = `s${this.nextId++}`;
-      this.subs.set(id, { frame, handler, cursor: null, ...extras });
+      const entry = { frame, handler, cursor: null, ...extras };
+      this.subs.set(id, entry);
       this.open();
       if (this.ws && this.ws.readyState === 1)
         this.ws.send(JSON.stringify({ ...frame, id }));
-      return () => {
+      const off = () => {
         this.subs.delete(id);
         if (this.ws && this.ws.readyState === 1)
           this.ws.send(JSON.stringify({ op: "unsub", id }));
       };
+      return { id, entry, off };
     }
   };
 
@@ -1115,6 +1133,108 @@
     };
   }
 
+  // sdk/src/doc.ts
+  function toBase64(bytes) {
+    let s = "";
+    for (let i = 0;i < bytes.length; i += 32768) {
+      s += String.fromCharCode.apply(null, bytes.subarray(i, i + 32768));
+    }
+    return btoa(s);
+  }
+  function fromBase64(s) {
+    const bin = atob(s);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0;i < bin.length; i++)
+      out[i] = bin.charCodeAt(i);
+    return out;
+  }
+  var docs = {
+    list: () => call("GET", "/api/v1/docs"),
+    remove: (name) => call("DELETE", `/api/v1/docs/${encodeURIComponent(name)}`)
+  };
+  function doc(name, handlers) {
+    let epoch = 0;
+    let seq = 0;
+    let resolveReady = () => {};
+    const ready = new Promise((r) => resolveReady = r);
+    const frame = { op: "sub", kind: "doc", doc: name };
+    let resubAttempts = 0;
+    const offConnection = sock.onConnection((state) => {
+      if (state !== "closed")
+        return;
+      entry.cursor = null;
+      handlers.onStatus?.({ bytes: 0, rotateWanted: false, reconnecting: true });
+    });
+    const { id: id2, entry, off } = sock.sub(frame, () => {}, {
+      onDoc: (f) => {
+        if (f.op === "doc_state") {
+          epoch = f.epoch;
+          resubAttempts = 0;
+          seq = f.seq;
+          frame.epoch = epoch;
+          entry.cursor = String(seq);
+          handlers.onState(fromBase64(f.state), { epoch, seq, bytes: f.bytes ?? 0 });
+          resolveReady();
+        } else if (f.op === "doc_update") {
+          seq = f.seq;
+          entry.cursor = String(seq);
+          handlers.onUpdate(fromBase64(f.update), { seq });
+        } else if (f.op === "doc_ack") {
+          if (typeof f.epoch === "number") {
+            epoch = f.epoch;
+            frame.epoch = epoch;
+          }
+          seq = Math.max(seq, f.seq);
+          entry.cursor = String(seq);
+          if (!f.resumed)
+            handlers.onAck?.(f.seq);
+        } else if (f.op === "doc_reset") {
+          epoch = f.epoch;
+          seq = f.seq;
+          frame.epoch = epoch;
+          entry.cursor = String(seq);
+          handlers.onReset?.(fromBase64(f.state), { epoch, seq, reason: f.reason ?? "reset" });
+        } else if (f.op === "doc_rejected") {
+          epoch = f.epoch;
+          seq = f.seq;
+          frame.epoch = epoch;
+          entry.cursor = String(seq);
+          handlers.onRejected?.(fromBase64(f.state), { reason: f.reason ?? "rejected", rule: f.rule });
+        } else if (f.op === "doc_status") {
+          handlers.onStatus?.({ bytes: f.bytes ?? 0, rotateWanted: !!f.rotate_wanted });
+        }
+      },
+      onError: (error) => {
+        const transient = error.code === "maintenance" || error.code === "invalid_request" && /subscription/.test(error.message);
+        if (transient && resubAttempts < 8) {
+          const delay = Math.min(5000, 500 * 2 ** resubAttempts++);
+          entry.cursor = null;
+          setTimeout(() => sock.send({ ...frame, id: id2 }), delay);
+          handlers.onStatus?.({ bytes: 0, rotateWanted: false, reconnecting: true });
+          return;
+        }
+        handlers.onError?.(error);
+      }
+    });
+    return {
+      name,
+      get epoch() {
+        return epoch;
+      },
+      get seq() {
+        return seq;
+      },
+      ready,
+      send(update) {
+        sock.send({ op: "doc_update", id: id2, epoch, update: toBase64(update) });
+      },
+      close: () => {
+        offConnection();
+        off();
+      }
+    };
+  }
+
   // sdk/src/idle.ts
   var HOUR = 3600;
   var siteName = () => currentSite() ?? "site";
@@ -1349,6 +1469,8 @@
     room,
     rooms,
     actors,
+    doc,
+    docs,
     idle,
     id,
     colorFor,
