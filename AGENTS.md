@@ -143,6 +143,11 @@ WORLDS_DEV=1 WORLDS_SEED=0 bun server/index.ts   # :8420; identity stubbed as de
   - `docs/` are also in the image (served fresh) → `docker cp` the file in, no rebuild needed.
   - **Example sites live in the blobstore** (`/data/sites/<site>/`), NOT the image → after editing a
     site, `docker cp` its files into `worlds-kit-worlds-1:/data/sites/<site>/`. The `universe` is a site.
+  - **Shipping a server build does not put new example sites on an instance.** `examples/` is in
+    `.dockerignore` and only the `universe` is seeded on boot, so a new example exists in the repo and
+    nowhere else until someone deploys it. `scripts/deploy-examples.sh` pushes them all
+    (`WORLDS_URL=https://<host> scripts/deploy-examples.sh`, or name individual sites); run
+    `bun cli/worlds.ts login` first for a host behind Cloudflare Access.
 
 ### Golden rules
 
