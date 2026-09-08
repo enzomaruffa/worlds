@@ -1,1 +1,10 @@
-{"description":"Two-team word-guessing party game — spymasters give one-word clues, guessers find their agents before hitting the assassin.","category":"games"}
+{
+  "description": "Two-team word-guessing party game — spymasters give one-word clues, guessers find their agents before hitting the assassin.",
+  "category": "games",
+  "tags": [
+    "party",
+    "words",
+    "teams"
+  ],
+  "thumbnail": "ai"
+}
