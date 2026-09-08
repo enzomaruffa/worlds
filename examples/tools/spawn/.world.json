@@ -1,1 +1,9 @@
-{"description":"A Worlds site that builds Worlds sites — pick the primitives, describe the idea, deploy it live.","category":"tools"}
+{
+  "description": "A Worlds site that builds Worlds sites — pick the primitives, describe the idea, deploy it live.",
+  "category": "tools",
+  "tags": [
+    "ai",
+    "scaffold",
+    "deploy"
+  ]
+}

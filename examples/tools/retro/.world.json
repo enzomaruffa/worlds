@@ -1,1 +1,10 @@
-{"description":"Run a sprint retro — columns, sticky notes, dot voting, a timer — then file the top notes straight to Linear.","category":"work"}
+{
+  "description": "Run a sprint retro — columns, sticky notes, dot voting, a timer — then file the top notes straight to Linear.",
+  "category": "work",
+  "tags": [
+    "retro",
+    "linear",
+    "team",
+    "voting"
+  ]
+}

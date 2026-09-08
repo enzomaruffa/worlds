@@ -1,1 +1,9 @@
-{"description":"Every visitor's mouse cursor on one shared page, labelled with their name and a live color. Click to ripple, react with emoji.","category":"tools"}
+{
+  "description": "Every visitor's mouse cursor on one shared page, labelled with their name and a live color. Click to ripple, react with emoji.",
+  "category": "tools",
+  "tags": [
+    "multiplayer",
+    "realtime",
+    "demo"
+  ]
+}
