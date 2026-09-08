@@ -87,6 +87,48 @@ describe("hosting", () => {
     expect(await (await req("GET", "/", { site: S1 })).text()).toContain("v2");
   });
 
+  test("manifest: tags, a bundled cover, and an unknown category as a warning", async () => {
+    const site = `${S1}-m`;
+    const res = await deploy(site, {
+      "index.html": "<h1>m</h1>",
+      "cover.png": "not really a png, the server checks the name not the bytes",
+      ".world.json": JSON.stringify({ category: "datavis", tags: ["Linear", "retro", "linear"], thumbnail: "cover.png" }),
+    });
+    expect(res.status).toBe(200);
+    const out = await res.json();
+    expect(out.warnings).toHaveLength(1);
+    expect(out.warnings[0]).toContain('"datavis"');
+    expect(out.warnings[0]).toContain("misc");
+
+    const s = await (await req("GET", `/api/v1/sites/${site}`, { site: "home" })).json();
+    expect(s.category).toBe("misc");
+    expect(s.tags).toEqual(["linear", "retro"]); // lowercased, de-duplicated
+    expect(s.thumbnail).toBe("cover.png");
+    expect(s.screenshot_url).toEndWith("/cover.png"); // set at deploy time, no worker involved
+
+    // A tag is searchable as a whole slug.
+    const byTag = await (await req("GET", "/api/v1/sites?q=retro", { site: "home" })).json();
+    expect(byTag.items.map((x: { name: string }) => x.name)).toContain(site);
+  });
+
+  test("manifest: a bad tag or a missing cover refuses the deploy", async () => {
+    const badTag = await deploy(`${S1}-t`, { "index.html": "<h1>t</h1>", ".world.json": JSON.stringify({ tags: ["has space"] }) });
+    expect(badTag.status).toBe(400);
+    expect((await badTag.json()).error.code).toBe("invalid_request");
+    const noCover = await deploy(`${S1}-c`, { "index.html": "<h1>c</h1>", ".world.json": JSON.stringify({ thumbnail: "cover.png" }) });
+    expect(noCover.status).toBe(400);
+    expect((await noCover.json()).error.message).toContain("not in the bundle");
+    // Refused before the swap: neither site exists.
+    expect((await req("GET", `/api/v1/sites/${S1}-t`, { site: "home" })).status).toBe(404);
+  });
+
+  test("meta lists the categories every surface renders from", async () => {
+    const meta = await (await req("GET", "/api/v1/meta", { site: "home" })).json();
+    const ids = meta.categories.map((c: { id: string }) => c.id);
+    expect(ids).toEqual(["games", "work", "tools", "experiments", "misc"]);
+    for (const c of meta.categories) expect(c.color).toMatch(/^#[0-9a-f]{6}$/);
+  });
+
   test("etag revalidation returns 304", async () => {
     const first = await req("GET", "/", { site: S1 });
     const etag = first.headers.get("etag")!;

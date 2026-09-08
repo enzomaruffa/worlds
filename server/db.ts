@@ -82,6 +82,9 @@ async function migratePostgres(): Promise<void> {
   await sql`ALTER TABLE sites ADD COLUMN IF NOT EXISTS screenshot text`;
   // Per-site document schemas from `.world.json` (see policies.ts).
   await sql`ALTER TABLE sites ADD COLUMN IF NOT EXISTS policies jsonb NOT NULL DEFAULT '{}'`;
+  await sql`ALTER TABLE sites ADD COLUMN IF NOT EXISTS tags jsonb NOT NULL DEFAULT '[]'`;
+  // How the card picture is made: screenshot | ai | none | a path in the bundle.
+  await sql`ALTER TABLE sites ADD COLUMN IF NOT EXISTS thumbnail text NOT NULL DEFAULT 'screenshot'`;
   await sql`
     CREATE TABLE IF NOT EXISTS deploys (
       deploy_id  text PRIMARY KEY,
@@ -196,6 +199,8 @@ async function migrateSqlite(): Promise<void> {
       updated_at   TEXT NOT NULL DEFAULT (${NOW})
     )`);
   await addSqliteColumn("sites", "policies", "TEXT NOT NULL DEFAULT '{}'");
+  await addSqliteColumn("sites", "tags", "TEXT NOT NULL DEFAULT '[]'");
+  await addSqliteColumn("sites", "thumbnail", "TEXT NOT NULL DEFAULT 'screenshot'");
   await sql.unsafe(`
     CREATE TABLE IF NOT EXISTS deploys (
       deploy_id TEXT PRIMARY KEY,
