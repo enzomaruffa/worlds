@@ -1,8 +1,10 @@
 # Worlds server — Bun runtime. Serves static sites, the homepage, /worlds.js, and
-# the /api/v1 platform. No runtime npm deps; `tar` is used to unpack deploy bundles.
+# the /api/v1 platform. No runtime npm deps; `tar` is used to unpack deploy bundles,
+# `chromium` to screenshot a site after deploy for its card (server/postdeploy.ts —
+# without it every card falls back to a generated picture, or stays blank).
 FROM oven/bun:1-slim
 
-RUN apt-get update && apt-get install -y --no-install-recommends tar \
+RUN apt-get update && apt-get install -y --no-install-recommends tar chromium \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
