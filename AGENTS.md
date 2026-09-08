@@ -19,7 +19,7 @@ ready-to-edit starter is at `skills/world-site/template/`.
 The 30-second version:
 
 1. A folder with an **`index.html`** at its root. Add `<script src="/worlds.js"></script>`.
-2. Optional `.world.json`: `{"description":"…","category":"games|work|tools|experiments|misc"}`.
+2. Optional `.world.json`: `{"description":"…","category":"games|work|tools|experiments|misc","tags":["…"],"thumbnail":"screenshot|ai|none|cover.png"}`. Categories are a fixed set (each is a star on the universe map); tags are free-form slugs. See `docs/quickstart.md`.
 3. Deploy — `worlds deploy`, the MCP `deploy_site` tool (`<your-worlds-host>/mcp`), or drag-drop.
 4. Live at `https://<name>.<your-worlds-host>`. Re-deploy to overwrite. `worlds delete <name> --yes`, the ✕ on its
    homepage card, or the MCP `delete_site` tool removes a site you own — everything it stored goes with it.

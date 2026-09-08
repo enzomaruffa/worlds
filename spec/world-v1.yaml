@@ -46,7 +46,7 @@ paths:
   /api/v1/universe: { get: { summary: homepage payload } }
   /api/v1/creators/{handle}: { get: { summary: creator page data } }
   /api/v1/beacon/visit: { post: { summary: "sendBeacon page view, always 204" } }
-  /api/v1/meta: { get: { summary: api_version + build (build is NOT stable) } }
+  /api/v1/meta: { get: { summary: "api_version + build (build is NOT stable) + categories [{id,color}]" } }
 components:
   schemas:
     Error:

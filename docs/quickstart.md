@@ -27,9 +27,27 @@ Add superpowers with one script tag — no keys, no config:
 ```
 
 Optional `.world.json` at the folder root:
-`{"description": "what this is", "category": "games", "spa_fallback": true}`.
-Categories: `games`, `work`, `tools`, `experiments`, `misc` (default) — they decide which
-star system your world orbits on the universe map.
+
+```json
+{
+  "description": "what this is",
+  "category": "tools",
+  "tags": ["linear", "retro"],
+  "thumbnail": "cover.png",
+  "spa_fallback": true
+}
+```
+
+- **`category`** — one of `games`, `work`, `tools`, `experiments`, `misc` (default). It decides
+  which star system your world orbits on the universe map, so the set is fixed; anything
+  else is filed under `misc` and the deploy response says so in `warnings`.
+- **`tags`** — up to 8 lowercase slugs, yours to invent. Shown on the card and searchable
+  (`#retro` in the homepage search, `?q=retro` on the API). Tags never move a world on the map.
+- **`thumbnail`** — how the card picture is made. `screenshot` (default) captures the live site
+  after deploy; `ai` generates a poster from the name, description and tags; `none` leaves the
+  tile blank; or name an image in the bundle (`cover.png`, `art/hero.jpg`) and that is the
+  picture, live the moment the deploy lands. `screenshot` falls back to `ai` on an instance with
+  no browser, so you get a picture either way.
 
 ### Document schemas (`.world.json` → `docs`)
 

@@ -7,7 +7,7 @@ import { initDb, sql, requireDb, onDbReady } from "./db";
 import { handleDeploy, handleDeployFolder } from "./deploy";
 import { handleDeleteSite } from "./remove";
 import { serveSite, siteNotFound } from "./staticsite";
-import { getSiteOr404, listSites, publicSite, siteUrl, bumpVisit, getSite } from "./sites";
+import { getSiteOr404, listSites, publicSite, siteUrl, bumpVisit, getSite, CATEGORIES } from "./sites";
 import * as dbapi from "./dbapi";
 import * as docs from "./docs";
 import * as uploads from "./uploads";
@@ -334,7 +334,15 @@ async function api(req: Request, url: URL, site: string): Promise<Response> {
     if (target && target !== "home") await bumpVisit(target);
     return new Response(null, { status: 204 });
   }
-  if (p[0] === "meta" && method === "GET") return json({ api_version: 1, build: "dev" });
+  if (p[0] === "meta" && method === "GET") {
+    return json({
+      api_version: 1,
+      build: "dev",
+      // The one list every surface reads, so a category added in sites.ts reaches the
+      // homepage filter without that page carrying its own copy.
+      categories: Object.entries(CATEGORIES).map(([id, c]) => ({ id, color: c.color })),
+    });
+  }
 
   throw new WorldsError("not_found", `no such endpoint: ${method} ${pathname}`);
 }

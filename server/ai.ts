@@ -191,20 +191,28 @@ export async function embed(req: Request): Promise<Response> {
   return json({ vector, dim: vector.length, model: "embed-1" });
 }
 
-export async function image(req: Request, site: string): Promise<Response> {
-  requireCsrf(req);
-  const who = identityFrom(req);
-  takeQuota("ai_image", who.handle);
-  const { prompt } = (await req.json().catch(() => ({}))) as { prompt?: string };
-  if (!prompt) throw new WorldsError("invalid_request", "expected {prompt}");
+// One generated PNG. Shared by the SDK endpoint and the post-deploy thumbnail worker,
+// which has no request to hang quota or identity on — the caller decides both.
+export async function generateImage(prompt: string): Promise<Blob> {
   const out = await gemini(`models/gemini-3.1-flash-image:generateContent`, {
     contents: [{ role: "user", parts: [{ text: prompt }] }],
   });
   const candidates = out.candidates as { content?: { parts?: { inlineData?: { data?: string } }[] } }[] | undefined;
   const b64 = candidates?.[0]?.content?.parts?.find((p) => p.inlineData?.data)?.inlineData?.data;
   if (!b64) throw new WorldsError("upstream_error", "model returned no image");
+  return new Blob([Buffer.from(b64, "base64")], { type: "image/png" });
+}
+
+export const aiConfigured = (): boolean => !!config.geminiKey;
+
+export async function image(req: Request, site: string): Promise<Response> {
+  requireCsrf(req);
+  const who = identityFrom(req);
+  takeQuota("ai_image", who.handle);
+  const { prompt } = (await req.json().catch(() => ({}))) as { prompt?: string };
+  if (!prompt) throw new WorldsError("invalid_request", "expected {prompt}");
+  const blob = await generateImage(prompt);
   const name = `ai_img_${crypto.randomUUID().slice(0, 8)}.png`;
-  const blob = new Blob([Buffer.from(b64, "base64")], { type: "image/png" });
   await store.putUpload(site, name, blob);
   return json({ url: `/u/${site}/${encodeURIComponent(name)}`, name });
 }

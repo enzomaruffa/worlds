@@ -895,7 +895,7 @@ The SDK is a thin client over these endpoints (`spec/world-v1.yaml`, frozen and 
 | GET | `/api/v1/universe` | homepage payload |
 | GET | `/api/v1/creators/{handle}` | creator page data |
 | POST | `/api/v1/beacon/visit` | sendBeacon page view, always 204 |
-| GET | `/api/v1/meta` | api_version + build (build is NOT stable) |
+| GET | `/api/v1/meta` | api_version + build (build is NOT stable) + categories [{id,color}] |
 
 ## MCP tools
 

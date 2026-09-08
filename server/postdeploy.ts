@@ -3,17 +3,17 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { config } from "./config";
 import { dbReady } from "./db";
-import { embedText } from "./ai";
+import { aiConfigured, embedText, generateImage } from "./ai";
 import { store } from "./blobstore";
 import { getSite, setEmbedPos, setScreenshot, publishSiteDoc, siteUrl } from "./sites";
 import { mintRenderToken } from "./auth";
 
 // Runs after a deploy (fire-and-forget). Two best-effort jobs that refine the
-// universe: an embedding-derived position (so similar sites cluster) and a
-// screenshot thumbnail. Neither blocks the deploy, and both degrade silently.
-export async function postDeploy(site: string): Promise<void> {
+// universe: an embedding-derived position (so similar sites cluster) and the card
+// picture. Neither blocks the deploy, and both degrade silently.
+export async function postDeploy(site: string, opts: { thumbnail: string }): Promise<void> {
   if (!dbReady() || process.env.WORLDS_DISABLE_WORKERS) return;
-  await Promise.allSettled([computeEmbedPos(site), captureScreenshot(site)]);
+  await Promise.allSettled([computeEmbedPos(site), makeThumbnail(site, opts.thumbnail)]);
 }
 
 // --- embedding-derived layout -------------------------------------------------
@@ -106,10 +106,32 @@ function shotUrl(site: string): string {
   return u.toString();
 }
 
-async function captureScreenshot(site: string): Promise<void> {
-  const blob = await capture(shotUrl(site));
+// `screenshot` is the default and falls back to `ai` when there is no browser to
+// capture with: a generated picture beats the blank tile an instance without Chrome
+// would otherwise show forever. `ai` is the author's explicit choice. Anything else
+// (`none`, or a bundled file already recorded at deploy time) needs no worker.
+async function makeThumbnail(site: string, mode: string): Promise<void> {
+  let blob: Blob | null = null;
+  let file = "__screenshot.png";
+  if (mode === "screenshot") blob = await capture(shotUrl(site));
+  if (!blob && (mode === "screenshot" || mode === "ai") && aiConfigured()) {
+    blob = await generateCard(site).catch(() => null);
+    file = "__thumbnail.png";
+  }
   if (!blob) return;
-  await store.putUpload(site, "__screenshot.png", blob);
-  await setScreenshot(site, `/u/${site}/__screenshot.png`);
-  await publishSiteDoc(site, false); // re-emit so the thumbnail appears live
+  await store.putUpload(site, file, blob);
+  await setScreenshot(site, `/u/${site}/${file}`);
+  await publishSiteDoc(site, false); // re-emit so the picture appears live
+}
+
+// A card image from what the site says about itself. Dark and simple on purpose — it
+// sits in a 16:9 tile next to real screenshots, so it should read as a poster, not a UI.
+async function generateCard(site: string): Promise<Blob | null> {
+  const s = await getSite(site);
+  if (!s) return null;
+  const about = [s.description, s.tags?.length ? `tags: ${s.tags.join(", ")}` : ""].filter(Boolean).join(". ");
+  return generateImage(
+    `A 16:9 poster-style illustration for an internal web app called "${s.name}" (category: ${s.category}). ${about || "No description."} ` +
+    `Dark background, one or two bold colors, flat vector shapes, no text, no letters, no words, no logos, no people's faces.`,
+  );
 }

@@ -13,7 +13,7 @@ all behind the sign-in gate, so it's safe to keep simple.
 ## The 30-second path
 
 1. Make a folder with an **`index.html`** at its root. Add `<script src="/worlds.js"></script>`.
-2. (Optional) add `.world.json`: `{"description": "...", "category": "games|work|tools|experiments|misc"}`.
+2. (Optional) add `.world.json`: `{"description": "...", "category": "games|work|tools|experiments|misc", "tags": ["..."], "thumbnail": "screenshot|ai|none|cover.png"}`. Categories are fixed; tags are yours; `thumbnail` picks the card picture (a bundled image is the simplest).
 3. Deploy it — three equivalent ways:
    - **CLI**: `worlds deploy` (or `worlds deploy <name>`) from the folder.
    - **MCP**: connect `<your-worlds-host>/mcp` and call `deploy_site(name, files)`.

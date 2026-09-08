@@ -5,7 +5,7 @@ import { WorldsError, json } from "./errors";
 import { store } from "./blobstore";
 import { identityFrom, requireCsrf, type Identity } from "./identity";
 import { sql, dbReady } from "./db";
-import { upsertSite, siteUrl, publishSiteDoc, getSite } from "./sites";
+import { upsertSite, siteUrl, publishSiteDoc, getSite, parseManifestMeta, setScreenshot, THUMBNAIL_MODES } from "./sites";
 import { allowDeploy } from "./ratelimit";
 import { postDeploy } from "./postdeploy";
 import { parseManifestPolicies } from "./policies";
@@ -31,6 +31,9 @@ export interface DeployResult {
   files: number;
   bytes: number;
   created: boolean;
+  // Things that were accepted but not as written — an unknown category, say. A deploy
+  // is not refused over them, but the author has to hear about them somewhere.
+  warnings: string[];
 }
 
 function validateSiteName(site: string): void {
@@ -62,31 +65,36 @@ async function finalizeDeploy(site: string, root: string, who: Identity): Promis
     throw new WorldsError("invalid_request", "bundle must contain index.html at its root");
   }
 
-  let manifest: { description?: string; spa_fallback?: boolean; category?: string } = {};
+  let manifest: unknown = {};
   const manifestFile = Bun.file(join(root, ".world.json"));
   if (await manifestFile.exists()) {
     manifest = await manifestFile.json().catch(() => ({}));
   }
-  // Validated before the swap so a bad manifest leaves the previous deploy serving.
-  const policies = parseManifestPolicies(manifest);
 
   const files = await walk(root);
   const bytes = files.reduce((n, f) => n + f.size, 0);
+
+  // Validated before the swap so a bad manifest leaves the previous deploy serving.
+  const policies = parseManifestPolicies(manifest);
+  const { meta, warnings } = parseManifestMeta(manifest, new Set(files.map((f) => f.path)));
 
   await store.swapSite(site, root);
 
   const deployId = `dp_${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`;
   let created = false;
   if (dbReady()) {
-    created = (await upsertSite(site, who, { ...manifest, policies })).created;
+    created = (await upsertSite(site, who, { ...meta, policies })).created;
     await sql`
       INSERT INTO deploys (deploy_id, site, by_handle, by_name, files, bytes)
       VALUES (${deployId}, ${site}, ${who.handle}, ${who.name}, ${files.length}, ${bytes})`;
+    // A bundled cover is the picture, full stop — no worker, no capture, live at once.
+    const thumbnail = meta.thumbnail ?? "screenshot";
+    if (!THUMBNAIL_MODES.has(thumbnail)) await setScreenshot(site, `${siteUrl(site).replace(/\/$/, "")}/${thumbnail}`);
     await publishSiteDoc(site, created);
-    postDeploy(site).catch(() => {}); // embedding position + screenshot, async
+    postDeploy(site, { thumbnail }).catch(() => {}); // embedding position + card picture, async
   }
 
-  return { site, url: siteUrl(site), deploy_id: deployId, files: files.length, bytes, created };
+  return { site, url: siteUrl(site), deploy_id: deployId, files: files.length, bytes, created, warnings };
 }
 
 export async function handleDeploy(req: Request): Promise<Response> {
