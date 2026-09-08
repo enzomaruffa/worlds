@@ -2314,7 +2314,7 @@ function localMatch(query, catalog) {
   const terms = query.toLowerCase().split(/\W+/).filter((w) => w.length > 2);
   let best = null, bestScore = -1;
   for (const s of catalog) {
-    const hay = `${s.name} ${s.category} ${s.description}`.toLowerCase();
+    const hay = `${s.name} ${s.category} ${s.description} ${(s.tags || []).join(" ")}`.toLowerCase();
     let score = 0;
     for (const t of terms) if (hay.includes(t)) score += hay.includes(` ${t}`) || s.name.includes(t) ? 2 : 1;
     if (s.category && terms.some((t) => s.category.includes(t))) score += 2;
