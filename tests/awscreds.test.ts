@@ -121,12 +121,35 @@ describe("aws credentials", () => {
     s.stop();
   });
 
-  test("a non-2xx resolves to null and never leaks the body", async () => {
+  test("a non-2xx surfaces the endpoint's own message with the token redacted", async () => {
     for (const k of AWS_ENV) delete process.env[k];
-    const s = stub(() => new Response("token=SUPERSECRET", { status: 500 }));
+    const warned: string[] = [];
+    const real = console.warn;
+    console.warn = (m: unknown) => void warned.push(String(m));
+
+    // First the Pod Identity agent's shape — http.Error writes a bare sentence, not JSON —
+    // then an envelope. Both quote the token back, which is the case worth redacting.
+    const s = stub((n) =>
+      n === 1
+        ? new Response("Service account token cannot be parsed: my-token\n", { status: 400 })
+        : Response.json({ message: "no identity for my-token" }, { status: 500 }),
+    );
     process.env.AWS_CONTAINER_CREDENTIALS_FULL_URI = s.url;
-    expect(await awsCreds()).toBeNull();
-    s.stop();
+    process.env.AWS_CONTAINER_AUTHORIZATION_TOKEN = "my-token";
+    try {
+      expect(await awsCreds()).toBeNull();
+      resetAwsCreds();
+      expect(await awsCreds()).toBeNull();
+    } finally {
+      console.warn = real;
+      s.stop();
+    }
+
+    expect(warned[0]).toContain("400 — Service account token cannot be parsed: <token>");
+    expect(warned[1]).toContain("500 — no identity for <token>");
+    expect(warned.join(" ")).not.toContain("my-token");
+    // Which variables the pod has, by name — never a value.
+    expect(warned[0]).toContain("[set: AWS_CONTAINER_CREDENTIALS_FULL_URI, AWS_CONTAINER_AUTHORIZATION_TOKEN]");
   });
 
   test("an expiring credential is renewed ahead of its expiry", async () => {
