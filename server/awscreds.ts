@@ -51,15 +51,28 @@ async function authorization(): Promise<string | null> {
   return process.env.AWS_CONTAINER_AUTHORIZATION_TOKEN ?? null;
 }
 
+// An error body is an envelope like {"message":"..."} from the agent's own upstream. Only
+// that field is surfaced, with the token stripped back out of it: an arbitrary body could
+// echo the Authorization header straight back, and a status on its own leaves nothing to
+// debug a rejected association with.
+async function reason(res: Response, token: string | null): Promise<string> {
+  try {
+    const message = (JSON.parse((await res.text()).slice(0, 2_000)) as Record<string, unknown>).message;
+    if (typeof message !== "string" || !message) return "";
+    const safe = token ? message.replaceAll(token, "<token>") : message;
+    return ` — ${safe.slice(0, 300)}`;
+  } catch {
+    return "";
+  }
+}
+
 async function fetchContainerCreds(url: string): Promise<AwsCreds | null> {
   const token = await authorization();
   const res = await fetch(url, {
     headers: token ? { authorization: token } : {},
     signal: AbortSignal.timeout(TIMEOUT_MS),
   });
-  // The body can carry the token back in an error envelope, so it is logged by the
-  // caller as a status only — never interpolated into a thrown message.
-  if (!res.ok) throw new Error(`credential endpoint returned ${res.status}`);
+  if (!res.ok) throw new Error(`credential endpoint returned ${res.status}${await reason(res, token)}`);
   const body = (await res.json()) as Record<string, unknown>;
   const accessKeyId = typeof body.AccessKeyId === "string" ? body.AccessKeyId : "";
   const secretAccessKey = typeof body.SecretAccessKey === "string" ? body.SecretAccessKey : "";

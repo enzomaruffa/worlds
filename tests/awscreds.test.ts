@@ -121,12 +121,34 @@ describe("aws credentials", () => {
     s.stop();
   });
 
-  test("a non-2xx resolves to null and never leaks the body", async () => {
+  test("a non-2xx surfaces the agent's message, never the raw body and never the token", async () => {
     for (const k of AWS_ENV) delete process.env[k];
-    const s = stub(() => new Response("token=SUPERSECRET", { status: 500 }));
+    const warned: string[] = [];
+    const real = console.warn;
+    console.warn = (m: unknown) => void warned.push(String(m));
+
+    const s = stub((n) =>
+      n === 1
+        ? Response.json({ message: "no identity found for token my-token" }, { status: 400 })
+        : new Response("token=SUPERSECRET", { status: 500 }),
+    );
     process.env.AWS_CONTAINER_CREDENTIALS_FULL_URI = s.url;
-    expect(await awsCreds()).toBeNull();
-    s.stop();
+    process.env.AWS_CONTAINER_AUTHORIZATION_TOKEN = "my-token";
+    try {
+      expect(await awsCreds()).toBeNull();
+      resetAwsCreds();
+      expect(await awsCreds()).toBeNull();
+    } finally {
+      console.warn = real;
+      s.stop();
+    }
+
+    expect(warned[0]).toContain("400");
+    expect(warned[0]).toContain("no identity found for token <token>");
+    expect(warned[0]).not.toContain("my-token");
+    // A body that is not a JSON envelope is never surfaced at all.
+    expect(warned[1]).toContain("500");
+    expect(warned[1]).not.toContain("SUPERSECRET");
   });
 
   test("an expiring credential is renewed ahead of its expiry", async () => {
