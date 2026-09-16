@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { awsCreds, resetAwsCreds } from "../server/awscreds";
+import { awsCreds, credentialsUrl, resetAwsCreds } from "../server/awscreds";
 
 // A stub credential endpoint per test. The real one is a link-local address only a pod
 // can reach, and the whole point of the module is that it speaks to something remote.
@@ -141,11 +141,16 @@ describe("aws credentials", () => {
     s.stop();
   });
 
-  test("the relative URI form resolves against the ECS host", async () => {
+  // Composition only: 169.254.170.2 is a link-local address that hangs rather than
+  // refuses on most hosts, so reaching for it would race the test timeout.
+  test("the relative URI form resolves against the ECS host", () => {
     for (const k of AWS_ENV) delete process.env[k];
+    expect(credentialsUrl()).toBeNull();
+
     process.env.AWS_CONTAINER_CREDENTIALS_RELATIVE_URI = "/v2/credentials/abc";
-    // 169.254.170.2 is unreachable here, so this exercises the failure path — what
-    // matters is that a relative URI is attempted at all rather than read as "none".
-    expect(await awsCreds()).toBeNull();
+    expect(credentialsUrl()).toBe("http://169.254.170.2/v2/credentials/abc");
+
+    process.env.AWS_CONTAINER_CREDENTIALS_FULL_URI = "http://169.254.170.23/v1/credentials";
+    expect(credentialsUrl()).toBe("http://169.254.170.23/v1/credentials");
   });
 });

@@ -36,7 +36,7 @@ function staticCreds(): AwsCreds | null {
   return { accessKeyId, secretAccessKey, sessionToken: process.env.AWS_SESSION_TOKEN };
 }
 
-function credentialsUrl(): string | null {
+export function credentialsUrl(): string | null {
   const full = process.env.AWS_CONTAINER_CREDENTIALS_FULL_URI;
   if (full) return full;
   const relative = process.env.AWS_CONTAINER_CREDENTIALS_RELATIVE_URI;
