@@ -51,19 +51,38 @@ async function authorization(): Promise<string | null> {
   return process.env.AWS_CONTAINER_AUTHORIZATION_TOKEN ?? null;
 }
 
-// An error body is an envelope like {"message":"..."} from the agent's own upstream. Only
-// that field is surfaced, with the token stripped back out of it: an arbitrary body could
-// echo the Authorization header straight back, and a status on its own leaves nothing to
-// debug a rejected association with.
+// The EKS Pod Identity agent answers a rejected request with http.Error, so the body is a
+// bare sentence naming which check failed; other providers send {"message":"..."}. Take
+// either, with the token replaced in whatever comes back, because a body could quote the
+// Authorization header straight back at us. A status on its own names nothing to act on.
 async function reason(res: Response, token: string | null): Promise<string> {
   try {
-    const message = (JSON.parse((await res.text()).slice(0, 2_000)) as Record<string, unknown>).message;
-    if (typeof message !== "string" || !message) return "";
+    const body = (await res.text()).trim().slice(0, 2_000);
+    if (!body) return "";
+    let message = body;
+    try {
+      const field = (JSON.parse(body) as Record<string, unknown>).message;
+      if (typeof field === "string" && field) message = field;
+    } catch {
+      /* not an envelope; the body is the message */
+    }
     const safe = token ? message.replaceAll(token, "<token>") : message;
-    return ` — ${safe.slice(0, 300)}`;
+    return ` — ${safe.split("\n")[0]!.slice(0, 300)}`;
   } catch {
     return "";
   }
+}
+
+// Names only, never values. Which of these a pod actually has is the first thing to check
+// when the endpoint refuses, and nothing else in the process reports it.
+function configured(): string {
+  const set = [
+    "AWS_CONTAINER_CREDENTIALS_FULL_URI",
+    "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+    "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE",
+    "AWS_CONTAINER_AUTHORIZATION_TOKEN",
+  ].filter((name) => process.env[name]);
+  return set.length ? set.join(", ") : "none";
 }
 
 async function fetchContainerCreds(url: string): Promise<AwsCreds | null> {
@@ -105,7 +124,7 @@ export function awsCreds(): Promise<AwsCreds | null> {
 
   return (inFlight ??= fetchContainerCreds(url)
     .catch((e) => {
-      console.warn(`aws: could not resolve container credentials (${(e as Error).message})`);
+      console.warn(`aws: could not resolve container credentials (${(e as Error).message}) [set: ${configured()}]`);
       // Serve the expired pair rather than nothing: it may still be inside the
       // provider's own grace window, and the alternative is a guaranteed failure.
       return cached?.creds ?? null;

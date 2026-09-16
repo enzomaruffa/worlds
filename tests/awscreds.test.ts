@@ -121,16 +121,18 @@ describe("aws credentials", () => {
     s.stop();
   });
 
-  test("a non-2xx surfaces the agent's message, never the raw body and never the token", async () => {
+  test("a non-2xx surfaces the endpoint's own message with the token redacted", async () => {
     for (const k of AWS_ENV) delete process.env[k];
     const warned: string[] = [];
     const real = console.warn;
     console.warn = (m: unknown) => void warned.push(String(m));
 
+    // First the Pod Identity agent's shape — http.Error writes a bare sentence, not JSON —
+    // then an envelope. Both quote the token back, which is the case worth redacting.
     const s = stub((n) =>
       n === 1
-        ? Response.json({ message: "no identity found for token my-token" }, { status: 400 })
-        : new Response("token=SUPERSECRET", { status: 500 }),
+        ? new Response("Service account token cannot be parsed: my-token\n", { status: 400 })
+        : Response.json({ message: "no identity for my-token" }, { status: 500 }),
     );
     process.env.AWS_CONTAINER_CREDENTIALS_FULL_URI = s.url;
     process.env.AWS_CONTAINER_AUTHORIZATION_TOKEN = "my-token";
@@ -143,12 +145,11 @@ describe("aws credentials", () => {
       s.stop();
     }
 
-    expect(warned[0]).toContain("400");
-    expect(warned[0]).toContain("no identity found for token <token>");
-    expect(warned[0]).not.toContain("my-token");
-    // A body that is not a JSON envelope is never surfaced at all.
-    expect(warned[1]).toContain("500");
-    expect(warned[1]).not.toContain("SUPERSECRET");
+    expect(warned[0]).toContain("400 — Service account token cannot be parsed: <token>");
+    expect(warned[1]).toContain("500 — no identity for <token>");
+    expect(warned.join(" ")).not.toContain("my-token");
+    // Which variables the pod has, by name — never a value.
+    expect(warned[0]).toContain("[set: AWS_CONTAINER_CREDENTIALS_FULL_URI, AWS_CONTAINER_AUTHORIZATION_TOKEN]");
   });
 
   test("an expiring credential is renewed ahead of its expiry", async () => {
