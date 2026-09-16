@@ -3,6 +3,7 @@ import { join, normalize } from "node:path";
 import { tmpdir } from "node:os";
 import { config } from "./config";
 import { WorldsError } from "./errors";
+import { awsCreds } from "./awscreds";
 
 // A served blob: a body Response accepts, plus the metadata for ETag/caching.
 export interface Stored {
@@ -144,15 +145,26 @@ export class LocalBlobStore implements BlobStore {
 // Remote backend on any S3-compatible store (AWS S3, R2, MinIO…) via Bun's native
 // S3 client. Untested without a live bucket; the local path is the default.
 export class S3BlobStore implements BlobStore {
-  private client: Bun.S3Client;
-  constructor(opts: { bucket: string; region?: string; endpoint?: string; accessKeyId?: string; secretAccessKey?: string }) {
-    this.client = new Bun.S3Client({
-      bucket: opts.bucket,
-      ...(opts.region ? { region: opts.region } : {}),
-      ...(opts.endpoint ? { endpoint: opts.endpoint } : {}),
-      ...(opts.accessKeyId ? { accessKeyId: opts.accessKeyId } : {}),
-      ...(opts.secretAccessKey ? { secretAccessKey: opts.secretAccessKey } : {}),
+  private cached: { client: Bun.S3Client; fingerprint: string } | null = null;
+  constructor(private opts: { bucket: string; region?: string; endpoint?: string }) {}
+
+  // Container-delivered credentials expire, so the client is rebuilt whenever the pair
+  // behind it changes; one built at boot starts failing a few hours in. Keyed on the
+  // credential so the steady state is still a single reused object.
+  private async client(): Promise<Bun.S3Client> {
+    const creds = await awsCreds();
+    const fingerprint = creds ? `${creds.accessKeyId}:${creds.sessionToken ?? ""}` : "";
+    if (this.cached?.fingerprint === fingerprint) return this.cached.client;
+    const client = new Bun.S3Client({
+      bucket: this.opts.bucket,
+      ...(this.opts.region ? { region: this.opts.region } : {}),
+      ...(this.opts.endpoint ? { endpoint: this.opts.endpoint } : {}),
+      ...(creds?.accessKeyId ? { accessKeyId: creds.accessKeyId } : {}),
+      ...(creds?.secretAccessKey ? { secretAccessKey: creds.secretAccessKey } : {}),
+      ...(creds?.sessionToken ? { sessionToken: creds.sessionToken } : {}),
     });
+    this.cached = { client, fingerprint };
+    return client;
   }
 
   async init() {}
@@ -178,7 +190,7 @@ export class S3BlobStore implements BlobStore {
     const all: NonNullable<Bun.S3ListObjectsResponse["contents"]> = [];
     let token: string | undefined;
     do {
-      const res = await this.client.list({ prefix, ...(token ? { continuationToken: token } : {}) });
+      const res = await (await this.client()).list({ prefix, ...(token ? { continuationToken: token } : {}) });
       if (res?.contents) all.push(...res.contents);
       token = res?.isTruncated ? res.nextContinuationToken : undefined;
     } while (token);
@@ -187,7 +199,7 @@ export class S3BlobStore implements BlobStore {
 
   private async deletePrefix(prefix: string): Promise<void> {
     for (const obj of await this.listAll(prefix)) {
-      if (obj.key) await this.client.file(obj.key).delete().catch(() => {});
+      if (obj.key) await (await this.client()).file(obj.key).delete().catch(() => {});
     }
   }
 
@@ -195,13 +207,13 @@ export class S3BlobStore implements BlobStore {
     const prefix = `sites/${safeRel(site)}/`;
     await this.deletePrefix(prefix);
     for (const { abs, rel } of await this.walk(stagedDir)) {
-      await this.client.file(prefix + rel.split("/").map(encodeURIComponent).join("/").replace(/%2F/g, "/")).write(Bun.file(abs));
+      await (await this.client()).file(prefix + rel.split("/").map(encodeURIComponent).join("/").replace(/%2F/g, "/")).write(Bun.file(abs));
     }
   }
 
   private async read(key: string): Promise<Stored | null> {
     try {
-      const f = this.client.file(key);
+      const f = (await this.client()).file(key);
       const s = await f.stat();
       return { body: f, size: s.size, mtime: new Date(s.lastModified ?? Date.now()).getTime() };
     } catch {
@@ -214,7 +226,7 @@ export class S3BlobStore implements BlobStore {
   }
 
   async putUpload(site: string, name: string, data: Blob): Promise<{ size: number }> {
-    await this.client.file(`uploads/${safeRel(site, name)}`).write(data);
+    await (await this.client()).file(`uploads/${safeRel(site, name)}`).write(data);
     return { size: data.size };
   }
 
@@ -237,7 +249,7 @@ export class S3BlobStore implements BlobStore {
 
   async deleteUpload(site: string, name: string): Promise<boolean> {
     try {
-      await this.client.file(`uploads/${safeRel(site, name)}`).delete();
+      await (await this.client()).file(`uploads/${safeRel(site, name)}`).delete();
       return true;
     } catch {
       return false;
